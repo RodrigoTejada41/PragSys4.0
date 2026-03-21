@@ -1,0 +1,16 @@
+services:
+  syspragas:
+    build: .
+    container_name: syspragas
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:////data/syspragas.db
+      JWT_SECRET: <SECRET>
+      DEFAULT_ADMIN_USERNAME: admin
+      DEFAULT_ADMIN_PASSWORD: syspragas123
+    volumes:
+      - syspragas_data:/data
+
+volumes:
+  syspragas_data:

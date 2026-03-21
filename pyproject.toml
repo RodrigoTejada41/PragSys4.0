@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "syspragas"
+version = "3.1.0"
+description = "MVP do sistema SysPragas com FastAPI, JWT e controle operacional"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi==0.115.12",
+    "jinja2==3.1.6",
+    "python-multipart==0.0.20",
+    "uvicorn==0.34.0",
+    "sqlalchemy==2.0.39",
+    "pydantic==2.10.6",
+    "pydantic-settings==2.7.1",
+    "PyJWT==2.10.1",
+    "reportlab==4.3.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

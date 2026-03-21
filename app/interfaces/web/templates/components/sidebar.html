@@ -1,0 +1,30 @@
+<aside class="main-sidebar sidebar-dark-success elevation-4">
+    <a href="#" class="brand-link">
+        <i class="fas fa-bug brand-icon"></i>
+        <span class="brand-text font-weight-light">SysPragas</span>
+    </a>
+
+    <div class="sidebar">
+        <div class="user-panel mt-3 pb-3 mb-3 d-flex align-items-center">
+            <div class="image d-flex align-items-center justify-content-center">
+                <span class="user-avatar"><i class="fas fa-user-shield"></i></span>
+            </div>
+            <div class="info">
+                <span id="current-user-name">Administrador</span>
+            </div>
+        </div>
+
+        <nav class="mt-2">
+            <ul class="nav nav-pills nav-sidebar flex-column" id="nav-list" data-widget="treeview" role="menu" data-accordion="false">
+                {% for item in nav_items %}
+                <li class="nav-item {{ item.classes }}">
+                    <a href="#" class="nav-link nav-item {% if loop.first %}active{% endif %}" data-view="{{ item.view }}">
+                        <i class="nav-icon {{ item.icon }}"></i>
+                        <p>{{ item.label }}</p>
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
+        </nav>
+    </div>
+</aside>

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% from "components/crud_view.html" import crud_view %}
+
+{% block content %}
+    {% include "partials/dashboard_view.html" %}
+
+    {{ crud_view("clientes", "Novo cliente", "Cadastre razao social, documento e endereco operacional.", "customer-form", "Base de clientes", "Consulta rapida para equipe tecnica, administrativa e financeira.", "customers-table") }}
+
+    {{ crud_view("produtos", "Novo produto", "Controle principio ativo, estoque atual e rastreabilidade de uso.", "product-form", "Estoque tecnico", "Itens disponiveis para aplicacao nas ordens de servico.", "products-table") }}
+
+    {{ crud_view("pragas", "Nova praga", "Mantenha o catalogo tecnico usado nas execucoes e documentos.", "pest-form", "Catalogo de pragas", "Base de referencia operacional para a equipe de campo.", "pests-table") }}
+
+    {{ crud_view("tecnicos", "Novo tecnico", "Cadastre equipe responsavel por execucao, registro e contato.", "technician-form", "Equipe cadastrada", "Controle profissionais ativos e inativos vinculados as OS.", "technicians-table") }}
+
+    {{ crud_view("ordens", "Nova ordem de servico", "Gere a OS, desconte o estoque e registre o financeiro automaticamente.", "work-order-form", "Ordens registradas", "Historico operacional com acesso rapido ao PDF e aos certificados.", "work-orders-table", "orders-layout") }}
+
+    <section class="view" id="view-financeiro">
+        <div class="row widget-grid finance-only">
+            <div class="col-lg-3 col-sm-6">
+                <div class="info-box">
+                    <span class="info-box-icon bg-success"><i class="fas fa-arrow-down"></i></span>
+                    <div class="info-box-content">
+                        <span class="info-box-text">Total a receber</span>
+                        <span class="info-box-number" id="finance-total-receber">R$ 0,00</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-3 col-sm-6">
+                <div class="info-box">
+                    <span class="info-box-icon bg-danger"><i class="fas fa-arrow-up"></i></span>
+                    <div class="info-box-content">
+                        <span class="info-box-text">Total a pagar</span>
+                        <span class="info-box-number" id="finance-total-pagar">R$ 0,00</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-3 col-sm-6">
+                <div class="info-box">
+                    <span class="info-box-icon bg-info"><i class="fas fa-wallet"></i></span>
+                    <div class="info-box-content">
+                        <span class="info-box-text">Saldo atual</span>
+                        <span class="info-box-number" id="finance-saldo-atual">R$ 0,00</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-3 col-sm-6">
+                <div class="info-box">
+                    <span class="info-box-icon bg-warning"><i class="fas fa-exclamation-triangle"></i></span>
+                    <div class="info-box-content">
+                        <span class="info-box-text">Inadimplencia</span>
+                        <span class="info-box-number" id="finance-inadimplencia">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="split-panel">
+            <section class="card panel form-panel">
+                <div class="card-body">
+                    <div class="section-heading">
+                        <h3>Novo lancamento</h3>
+                        <p>Cadastre contas a receber, contas a pagar e despesas parceladas.</p>
+                    </div>
+                    <form id="finance-form" class="data-form"></form>
+                </div>
+            </section>
+            <section class="card panel">
+                <div class="card-body">
+                    <div class="section-heading">
+                        <h3>Contas a receber e a pagar</h3>
+                        <p>Controle saldo em aberto, baixa parcial, vencimento e origem do titulo.</p>
+                    </div>
+                    <div id="finance-table"></div>
+                </div>
+            </section>
+        </div>
+
+        <section class="card panel finance-only">
+            <div class="card-body">
+                <div class="section-heading">
+                    <h3>Fluxo de caixa</h3>
+                    <p>Ledger imutavel de entradas e saidas geradas a partir das baixas financeiras.</p>
+                </div>
+                <div id="cash-ledger-table"></div>
+            </div>
+        </section>
+    </section>
+
+    {{ crud_view("usuarios", "Novo usuario", "Gestao exclusiva do perfil MASTER com controle de acesso.", "user-form", "Usuarios do sistema", "Controle de perfis, status e acesso administrativo.", "users-table") }}
+
+    {{ crud_view("licencas", "Nova licenca", "Crie, renove e acompanhe vigencia das licencas do sistema.", "license-form", "Licencas registradas", "Somente o perfil MASTER pode criar, renovar e encerrar licencas.", "licenses-table") }}
+{% endblock %}
