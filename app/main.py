@@ -31,7 +31,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="3.1.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="3.2.0", lifespan=lifespan)
 init_db()
 
 
