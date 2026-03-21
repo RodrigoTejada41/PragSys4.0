@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     toxicology_center_phone: str = "0800 nao configurado"
     technical_responsible_name: str = "Responsavel tecnico nao configurado"
     technical_responsible_registry: str = "Registro profissional nao configurado"
+    company_timezone: str = "America/Sao_Paulo"
+    google_calendar_enabled: bool = False
+    google_calendar_id: Optional[str] = None
+    google_calendar_access_token: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -7,7 +7,19 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
 from app.infrastructure.db import init_db
-from app.interfaces.api.routes import auth, customers, finance, licenses, pests, products, technicians, users, work_orders
+from app.interfaces.api.routes import (
+    appointments,
+    auth,
+    customers,
+    finance,
+    licenses,
+    pests,
+    products,
+    provider_companies,
+    technicians,
+    users,
+    work_orders,
+)
 from app.interfaces.web.routes import STATIC_DIR, router as web_router
 
 settings = get_settings()
@@ -45,7 +57,9 @@ app.include_router(pests.router, prefix=settings.api_v1_prefix)
 app.include_router(technicians.router, prefix=settings.api_v1_prefix)
 app.include_router(finance.router, prefix=settings.api_v1_prefix)
 app.include_router(work_orders.router, prefix=settings.api_v1_prefix)
+app.include_router(appointments.router, prefix=settings.api_v1_prefix)
 app.include_router(users.router, prefix=settings.api_v1_prefix)
 app.include_router(licenses.router, prefix=settings.api_v1_prefix)
+app.include_router(provider_companies.router, prefix=settings.api_v1_prefix)
 app.include_router(web_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

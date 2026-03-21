@@ -1,4 +1,5 @@
 import csv
+import json
 from calendar import monthrange
 from datetime import date, datetime
 from decimal import Decimal
@@ -6,6 +7,8 @@ from io import BytesIO
 from io import StringIO
 from pathlib import Path
 from typing import Iterable, List, Optional
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 
 from reportlab.lib import colors
@@ -17,6 +20,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import get_settings
 from app.application.schemas import (
+    AddressLookupRead,
+    CustomerCnpjLookupRead,
     FinancePaymentRequest,
     CustomerCreate,
     CustomerUpdate,
@@ -26,6 +31,8 @@ from app.application.schemas import (
     LicenseUpdate,
     PestCreate,
     PestUpdate,
+    ProviderCompanyCreate,
+    ProviderCompanyUpdate,
     ProductCreate,
     ProductCsvImportResult,
     ProductXmlImportResult,
@@ -46,15 +53,24 @@ from app.infrastructure.models import (
     FinanceEntry,
     License,
     Pest,
+    ProviderCompany,
     Product,
     Technician,
     User,
     WorkOrder,
+    WorkOrderPhoto,
     WorkOrderPest,
     WorkOrderProduct,
 )
 
 MONEY_QUANTIZER = Decimal("0.01")
+MAX_WORK_ORDER_PHOTO_BYTES = 5 * 1024 * 1024
+MAX_WORK_ORDER_PHOTO_ITEMS = 8
+ALLOWED_WORK_ORDER_PHOTO_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+}
 
 
 def _money(value: Decimal) -> Decimal:
@@ -65,6 +81,88 @@ def _money(value: Decimal) -> Decimal:
 
 def _enum_value(value):
     return value.value if hasattr(value, "value") else value
+
+
+def _digits_only(value: Optional[str]) -> str:
+    return "".join(char for char in str(value or "") if char.isdigit())
+
+
+def _normalize_cnpj(value: Optional[str]) -> str:
+    return _digits_only(value)
+
+
+def _normalize_cep(value: Optional[str]) -> Optional[str]:
+    digits = _digits_only(value)
+    return digits or None
+
+
+def _normalize_company_payload(payload: ProviderCompanyCreate) -> dict:
+    data = payload.model_dump()
+    data["cnpj"] = _normalize_cnpj(data.get("cnpj"))
+    data["cep"] = _normalize_cep(data.get("cep"))
+    data["estado"] = data.get("estado").upper() if data.get("estado") else None
+    return data
+
+
+def _normalize_customer_payload(payload) -> dict:
+    data = payload.model_dump()
+    data["cpf_cnpj"] = _normalize_cnpj(data.get("cpf_cnpj"))
+    data["cep"] = _normalize_cep(data.get("cep"))
+    data["estado"] = data.get("estado", "").upper()
+    return data
+
+
+def _fetch_json(url: str) -> dict:
+    request = Request(url, headers={"User-Agent": "SysPragas/3.1"})
+    try:
+        with urlopen(request, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        if exc.code == 404:
+            raise BusinessRuleViolation("Consulta nao encontrou dados para o identificador informado.") from exc
+        raise BusinessRuleViolation("Falha ao consultar o servico externo no momento.") from exc
+    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise BusinessRuleViolation("Falha ao consultar o servico externo no momento.") from exc
+
+
+def _get_provider_company_or_fail(db: Session, provider_company_id: int) -> ProviderCompany:
+    provider_company = db.query(ProviderCompany).filter(ProviderCompany.id == provider_company_id).first()
+    if not provider_company:
+        raise BusinessRuleViolation("Empresa prestadora nao encontrada.")
+    return provider_company
+
+
+def _serialize_user(user: User) -> User:
+    if user.empresa_prestadora:
+        user.empresa_prestadora_nome = user.empresa_prestadora.nome_fantasia or user.empresa_prestadora.razao_social
+    else:
+        user.empresa_prestadora_nome = None
+    return user
+
+
+def _serialize_license(license_entry: License) -> License:
+    if license_entry.empresa_prestadora:
+        license_entry.empresa_prestadora_nome = (
+            license_entry.empresa_prestadora.nome_fantasia or license_entry.empresa_prestadora.razao_social
+        )
+    else:
+        license_entry.empresa_prestadora_nome = None
+    return license_entry
+
+
+def _serialize_provider_company(provider_company: ProviderCompany) -> ProviderCompany:
+    provider_company.usuarios_vinculados_ids = [user.id for user in provider_company.usuarios]
+    provider_company.usuarios_vinculados_nomes = [user.nome for user in provider_company.usuarios]
+    return provider_company
+
+
+def _get_current_license_for_company(db: Session, provider_company_id: Optional[int]) -> Optional[License]:
+    query = db.query(License)
+    if provider_company_id is None:
+        query = query.filter(License.empresa_prestadora_id.is_(None))
+    else:
+        query = query.filter(License.empresa_prestadora_id == provider_company_id)
+    return query.order_by(License.end_date.desc(), License.id.desc()).first()
 
 
 def _add_months(base_date: date, months_to_add: int) -> date:
@@ -185,7 +283,7 @@ def get_user_by_id(db: Session, user_id: int) -> User:
     user = db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()
     if not user:
         raise BusinessRuleViolation("Usuario nao encontrado ou inativo.")
-    return user
+    return _serialize_user(user)
 
 
 def _get_user_record_or_fail(db: Session, user_id: int) -> User:
@@ -196,7 +294,8 @@ def _get_user_record_or_fail(db: Session, user_id: int) -> User:
 
 
 def get_current_license(db: Session) -> Optional[License]:
-    return db.query(License).order_by(License.end_date.desc(), License.id.desc()).first()
+    license_entry = db.query(License).order_by(License.end_date.desc(), License.id.desc()).first()
+    return _serialize_license(license_entry) if license_entry else None
 
 
 def license_is_valid(license_entry: Optional[License]) -> bool:
@@ -212,7 +311,11 @@ def license_is_valid(license_entry: Optional[License]) -> bool:
 def ensure_license_allows_access(db: Session, user: User) -> None:
     if user.role == "master":
         return
-    license_entry = get_current_license(db)
+    license_entry = _get_current_license_for_company(db, user.empresa_prestadora_id)
+    if license_entry is None and user.empresa_prestadora_id is not None:
+        raise BusinessRuleViolation("A empresa prestadora vinculada ao usuario nao possui licenca ativa cadastrada.")
+    if license_entry is None:
+        license_entry = get_current_license(db)
     if not license_is_valid(license_entry):
         raise BusinessRuleViolation("Licenca do sistema inativa, suspensa ou expirada.")
 
@@ -424,11 +527,145 @@ def _get_finance_entry_or_fail(db: Session, finance_entry_id: int) -> FinanceEnt
     return entry
 
 
+def _clean_required_text(value: Optional[str], message: str) -> str:
+    cleaned = " ".join(str(value or "").split()).strip()
+    if not cleaned:
+        raise BusinessRuleViolation(message)
+    return cleaned
+
+
+def _clean_optional_text(value: Optional[str]) -> Optional[str]:
+    cleaned = " ".join(str(value or "").split()).strip()
+    return cleaned or None
+
+
+def list_provider_companies(db: Session) -> List[ProviderCompany]:
+    companies = db.query(ProviderCompany).options(joinedload(ProviderCompany.usuarios)).order_by(ProviderCompany.razao_social.asc()).all()
+    return [_serialize_provider_company(item) for item in companies]
+
+
+def get_provider_company(db: Session, provider_company_id: int) -> ProviderCompany:
+    company = (
+        db.query(ProviderCompany)
+        .options(joinedload(ProviderCompany.usuarios), joinedload(ProviderCompany.licencas))
+        .filter(ProviderCompany.id == provider_company_id)
+        .first()
+    )
+    if not company:
+        raise BusinessRuleViolation("Empresa prestadora nao encontrada.")
+    return _serialize_provider_company(company)
+
+
+def _sync_provider_company_users(db: Session, provider_company: ProviderCompany, user_ids: List[int]) -> None:
+    selected_user_ids = set(int(user_id) for user_id in user_ids)
+    current_users = db.query(User).filter(User.empresa_prestadora_id == provider_company.id).all()
+    for user in current_users:
+        if user.id not in selected_user_ids:
+            user.empresa_prestadora_id = None
+
+    if not selected_user_ids:
+        return
+
+    selected_users = db.query(User).filter(User.id.in_(selected_user_ids)).all()
+    found_ids = {user.id for user in selected_users}
+    missing_ids = selected_user_ids - found_ids
+    if missing_ids:
+        raise BusinessRuleViolation("Um ou mais usuarios selecionados nao foram encontrados para vinculo.")
+
+    for user in selected_users:
+        user.empresa_prestadora_id = provider_company.id
+
+
+def create_provider_company(db: Session, payload: ProviderCompanyCreate) -> ProviderCompany:
+    data = _normalize_company_payload(payload)
+    if len(data["cnpj"]) != 14:
+        raise BusinessRuleViolation("Informe um CNPJ valido para a empresa prestadora.")
+    duplicate = db.query(ProviderCompany).filter(ProviderCompany.cnpj == data["cnpj"]).first()
+    if duplicate:
+        raise BusinessRuleViolation("Ja existe empresa prestadora cadastrada com este CNPJ.")
+    user_ids = data.pop("usuarios_vinculados_ids", [])
+    provider_company = ProviderCompany(**data)
+    db.add(provider_company)
+    db.flush()
+    _sync_provider_company_users(db, provider_company, user_ids)
+    return _serialize_provider_company(provider_company)
+
+
+def update_provider_company(db: Session, provider_company_id: int, payload: ProviderCompanyUpdate) -> ProviderCompany:
+    provider_company = _get_provider_company_or_fail(db, provider_company_id)
+    data = _normalize_company_payload(payload)
+    duplicate = (
+        db.query(ProviderCompany)
+        .filter(ProviderCompany.cnpj == data["cnpj"], ProviderCompany.id != provider_company_id)
+        .first()
+    )
+    if duplicate:
+        raise BusinessRuleViolation("Ja existe empresa prestadora cadastrada com este CNPJ.")
+
+    user_ids = data.pop("usuarios_vinculados_ids", [])
+    for field, value in data.items():
+        setattr(provider_company, field, value)
+    _sync_provider_company_users(db, provider_company, user_ids)
+    db.commit()
+    db.refresh(provider_company)
+    return _serialize_provider_company(provider_company)
+
+
+def delete_provider_company(db: Session, provider_company_id: int) -> None:
+    provider_company = _get_provider_company_or_fail(db, provider_company_id)
+    if provider_company.usuarios:
+        raise BusinessRuleViolation("Nao e possivel excluir empresa prestadora com usuarios vinculados.")
+    if provider_company.licencas:
+        raise BusinessRuleViolation("Nao e possivel excluir empresa prestadora com licencas vinculadas.")
+    db.delete(provider_company)
+    db.commit()
+
+
+def lookup_company_by_cnpj(cnpj: str) -> CustomerCnpjLookupRead:
+    normalized_cnpj = _normalize_cnpj(cnpj)
+    if len(normalized_cnpj) != 14:
+        raise BusinessRuleViolation("Informe um CNPJ valido para consulta.")
+    payload = _fetch_json(f"https://brasilapi.com.br/api/cnpj/v1/{normalized_cnpj}")
+    if payload.get("message"):
+        raise BusinessRuleViolation(payload["message"])
+    return CustomerCnpjLookupRead(
+        razao_social=payload.get("razao_social") or payload.get("nome_fantasia") or "",
+        nome_fantasia=payload.get("nome_fantasia"),
+        cnpj=normalized_cnpj,
+        telefone=payload.get("ddd_telefone_1") or payload.get("ddd_telefone_2"),
+        email=payload.get("email"),
+        cep=_normalize_cep(payload.get("cep")),
+        endereco=payload.get("logradouro"),
+        numero=payload.get("numero"),
+        complemento=payload.get("complemento"),
+        bairro=payload.get("bairro"),
+        cidade=payload.get("municipio"),
+        estado=payload.get("uf"),
+    )
+
+
+def lookup_address_by_cep(cep: str) -> AddressLookupRead:
+    normalized_cep = _normalize_cep(cep)
+    if not normalized_cep or len(normalized_cep) != 8:
+        raise BusinessRuleViolation("Informe um CEP valido para consulta.")
+    payload = _fetch_json(f"https://viacep.com.br/ws/{normalized_cep}/json/")
+    if payload.get("erro"):
+        raise BusinessRuleViolation("CEP nao encontrado para consulta.")
+    return AddressLookupRead(
+        cep=normalized_cep,
+        endereco=payload.get("logradouro") or "",
+        bairro=payload.get("bairro"),
+        cidade=payload.get("localidade") or "",
+        estado=payload.get("uf") or "",
+    )
+
+
 def create_customer(db: Session, payload: CustomerCreate) -> Customer:
-    duplicate = db.query(Customer).filter(Customer.cpf_cnpj == payload.cpf_cnpj).first()
+    data = _normalize_customer_payload(payload)
+    duplicate = db.query(Customer).filter(Customer.cpf_cnpj == data["cpf_cnpj"]).first()
     if duplicate:
         raise BusinessRuleViolation("Ja existe cliente com este CPF/CNPJ.")
-    customer = Customer(**payload.model_dump())
+    customer = Customer(**data)
     db.add(customer)
     db.commit()
     db.refresh(customer)
@@ -436,7 +673,7 @@ def create_customer(db: Session, payload: CustomerCreate) -> Customer:
 
 
 def list_users(db: Session) -> List[User]:
-    return db.query(User).order_by(User.created_at.desc(), User.nome.asc()).all()
+    return [_serialize_user(item) for item in db.query(User).order_by(User.created_at.desc(), User.nome.asc()).all()]
 
 
 def create_user(db: Session, payload: UserCreate) -> User:
@@ -444,11 +681,34 @@ def create_user(db: Session, payload: UserCreate) -> User:
     if existing:
         raise BusinessRuleViolation("Ja existe usuario com este login.")
 
-    active_users_count = db.query(User).filter(User.is_active.is_(True)).count()
-    license_entry = get_current_license(db)
+    provider_company_id = payload.empresa_prestadora_id
+    if payload.nova_empresa_prestadora:
+        provider_company = create_provider_company(db, payload.nova_empresa_prestadora)
+        provider_company_id = provider_company.id
+        if payload.licenca_inicial:
+            license_payload = payload.licenca_inicial.model_dump(exclude={"empresa_prestadora_id"})
+            create_license(
+                db,
+                LicenseCreate(
+                    **license_payload,
+                    empresa_prestadora_id=provider_company_id,
+                ),
+            )
+
+    if payload.role != "master" and not provider_company_id:
+        raise BusinessRuleViolation("Usuarios nao master devem estar vinculados a uma empresa prestadora.")
+
+    if provider_company_id:
+        _get_provider_company_or_fail(db, provider_company_id)
+
+    active_users_count = db.query(User).filter(
+        User.is_active.is_(True),
+        User.empresa_prestadora_id == provider_company_id,
+    ).count()
+    license_entry = _get_current_license_for_company(db, provider_company_id) if payload.role != "master" else None
     max_users = license_entry.max_users if license_entry else 0
     if payload.is_active and payload.role != "master" and active_users_count >= max_users:
-        raise BusinessRuleViolation("A licenca atual nao permite criar mais usuarios ativos.")
+        raise BusinessRuleViolation("A licenca da empresa prestadora nao permite criar mais usuarios ativos.")
 
     user = User(
         nome=payload.nome,
@@ -456,11 +716,12 @@ def create_user(db: Session, payload: UserCreate) -> User:
         password_hash=get_password_hash(payload.password),
         role=payload.role.value,
         is_active=payload.is_active,
+        empresa_prestadora_id=provider_company_id,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
-    return user
+    return _serialize_user(user)
 
 
 def update_user(db: Session, user_id: int, payload: UserUpdate) -> User:
@@ -469,21 +730,32 @@ def update_user(db: Session, user_id: int, payload: UserUpdate) -> User:
     if duplicate:
         raise BusinessRuleViolation("Ja existe usuario com este login.")
 
-    active_users_count = db.query(User).filter(User.is_active.is_(True), User.id != user_id).count()
-    license_entry = get_current_license(db)
+    provider_company_id = payload.empresa_prestadora_id
+    if payload.role != "master" and not provider_company_id:
+        raise BusinessRuleViolation("Usuarios nao master devem estar vinculados a uma empresa prestadora.")
+    if provider_company_id:
+        _get_provider_company_or_fail(db, provider_company_id)
+
+    active_users_count = db.query(User).filter(
+        User.is_active.is_(True),
+        User.id != user_id,
+        User.empresa_prestadora_id == provider_company_id,
+    ).count()
+    license_entry = _get_current_license_for_company(db, provider_company_id) if payload.role != "master" else None
     max_users = license_entry.max_users if license_entry else 0
     if payload.is_active and payload.role != "master" and active_users_count >= max_users:
-        raise BusinessRuleViolation("A licenca atual nao permite manter mais usuarios ativos.")
+        raise BusinessRuleViolation("A licenca da empresa prestadora nao permite manter mais usuarios ativos.")
 
     user.nome = payload.nome
     user.username = payload.username
     user.role = payload.role.value
     user.is_active = payload.is_active
+    user.empresa_prestadora_id = provider_company_id
     if payload.password:
         user.password_hash = get_password_hash(payload.password)
     db.commit()
     db.refresh(user)
-    return user
+    return _serialize_user(user)
 
 
 def delete_user(db: Session, user_id: int) -> None:
@@ -497,17 +769,19 @@ def delete_user(db: Session, user_id: int) -> None:
 
 
 def list_licenses(db: Session) -> List[License]:
-    return db.query(License).order_by(License.end_date.desc(), License.id.desc()).all()
+    return [_serialize_license(item) for item in db.query(License).order_by(License.end_date.desc(), License.id.desc()).all()]
 
 
 def create_license(db: Session, payload: LicenseCreate) -> License:
     if payload.end_date < payload.start_date:
         raise BusinessRuleViolation("A data final da licenca deve ser posterior ou igual a data inicial.")
+    if payload.empresa_prestadora_id:
+        _get_provider_company_or_fail(db, payload.empresa_prestadora_id)
     license_entry = License(**payload.model_dump())
     db.add(license_entry)
     db.commit()
     db.refresh(license_entry)
-    return license_entry
+    return _serialize_license(license_entry)
 
 
 def update_license(db: Session, license_id: int, payload: LicenseUpdate) -> License:
@@ -516,11 +790,13 @@ def update_license(db: Session, license_id: int, payload: LicenseUpdate) -> Lice
         raise BusinessRuleViolation("Licenca nao encontrada.")
     if payload.end_date < payload.start_date:
         raise BusinessRuleViolation("A data final da licenca deve ser posterior ou igual a data inicial.")
+    if payload.empresa_prestadora_id:
+        _get_provider_company_or_fail(db, payload.empresa_prestadora_id)
     for field, value in payload.model_dump().items():
         setattr(license_entry, field, value.value if hasattr(value, "value") else value)
     db.commit()
     db.refresh(license_entry)
-    return license_entry
+    return _serialize_license(license_entry)
 
 
 def delete_license(db: Session, license_id: int) -> None:
@@ -537,14 +813,15 @@ def list_customers(db: Session) -> List[Customer]:
 
 def update_customer(db: Session, customer_id: int, payload: CustomerUpdate) -> Customer:
     customer = _get_customer_or_fail(db, customer_id)
+    data = _normalize_customer_payload(payload)
     duplicate = (
         db.query(Customer)
-        .filter(Customer.cpf_cnpj == payload.cpf_cnpj, Customer.id != customer_id)
+        .filter(Customer.cpf_cnpj == data["cpf_cnpj"], Customer.id != customer_id)
         .first()
     )
     if duplicate:
         raise BusinessRuleViolation("Ja existe cliente com este CPF/CNPJ.")
-    for field, value in payload.model_dump().items():
+    for field, value in data.items():
         setattr(customer, field, value)
     db.commit()
     db.refresh(customer)
@@ -1003,6 +1280,7 @@ def _work_order_query(db: Session):
         joinedload(WorkOrder.tecnico),
         joinedload(WorkOrder.produtos).joinedload(WorkOrderProduct.produto),
         joinedload(WorkOrder.pragas).joinedload(WorkOrderPest.praga),
+        joinedload(WorkOrder.fotos),
         joinedload(WorkOrder.financeiros),
     )
 
@@ -1014,11 +1292,21 @@ def _get_work_order_or_fail(db: Session, work_order_id: int) -> WorkOrder:
     return work_order
 
 
-def _validate_work_order_payload(db: Session, payload: WorkOrderCreate, current_work_order_id: Optional[int] = None) -> Customer:
+def _validate_work_order_payload(
+    db: Session,
+    payload: WorkOrderCreate,
+    current_work_order_id: Optional[int] = None,
+) -> tuple[Customer, dict]:
+    normalized_number = _clean_required_text(payload.numero, "Informe o numero da ordem de servico.")
+    normalized_location = _clean_required_text(payload.local_execucao, "Informe o local de execucao da ordem de servico.")
+    normalized_notes = _clean_optional_text(payload.observacoes)
+
     if payload.garantia_ate < payload.data_execucao:
         raise BusinessRuleViolation("A garantia deve possuir data limite igual ou posterior a execucao.")
+    if payload.hora_fim and payload.hora_fim <= payload.hora_inicio:
+        raise BusinessRuleViolation("A hora final deve ser posterior a hora inicial.")
 
-    duplicate_query = db.query(WorkOrder).filter(WorkOrder.numero == payload.numero)
+    duplicate_query = db.query(WorkOrder).filter(WorkOrder.numero == normalized_number)
     if current_work_order_id is not None:
         duplicate_query = duplicate_query.filter(WorkOrder.id != current_work_order_id)
     if duplicate_query.first():
@@ -1030,10 +1318,25 @@ def _validate_work_order_payload(db: Session, payload: WorkOrderCreate, current_
     if not payload.produtos:
         raise BusinessRuleViolation("A OS deve possuir ao menos um produto utilizado.")
 
+    seen_product_ids = set()
+    for item in payload.produtos:
+        if item.produto_id in seen_product_ids:
+            raise BusinessRuleViolation("Nao adicione o mesmo produto mais de uma vez na OS.")
+        seen_product_ids.add(item.produto_id)
+        _clean_required_text(item.diluicao, "Informe a diluicao de todos os produtos da ordem.")
+
+    seen_pest_ids = set()
     for pest_id in payload.pragas_ids:
+        if pest_id in seen_pest_ids:
+            raise BusinessRuleViolation("A mesma praga nao pode ser selecionada mais de uma vez.")
+        seen_pest_ids.add(pest_id)
         _get_pest_or_fail(db, pest_id)
 
-    return customer
+    return customer, {
+        "numero": normalized_number,
+        "local_execucao": normalized_location,
+        "observacoes": normalized_notes,
+    }
 
 
 def _restore_stock(work_order: WorkOrder) -> None:
@@ -1105,18 +1408,21 @@ def _sync_work_order_finance(
             db.delete(entry)
 
 
-def create_work_order(db: Session, payload: WorkOrderCreate) -> WorkOrder:
-    customer = _validate_work_order_payload(db, payload)
+def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Optional[int] = None) -> WorkOrder:
+    from app.application.scheduling_services import _sync_google_for_appointment, get_appointment, sync_work_order_appointment
+    from app.domain.enums import AppointmentStatus
+
+    customer, normalized = _validate_work_order_payload(db, payload)
 
     work_order = WorkOrder(
-        numero=payload.numero,
+        numero=normalized["numero"],
         cliente_id=payload.cliente_id,
         tecnico_id=payload.tecnico_id,
         data_execucao=payload.data_execucao,
         hora_inicio=payload.hora_inicio,
         hora_fim=payload.hora_fim,
-        local_execucao=payload.local_execucao,
-        observacoes=payload.observacoes,
+        local_execucao=normalized["local_execucao"],
+        observacoes=normalized["observacoes"],
         garantia_ate=payload.garantia_ate,
         status=payload.status.value,
         valor_servico=payload.valor_servico,
@@ -1127,8 +1433,29 @@ def create_work_order(db: Session, payload: WorkOrderCreate) -> WorkOrder:
     _apply_work_order_products(db, work_order, payload.produtos)
     _sync_work_order_pests(db, work_order, payload.pragas_ids)
     _sync_work_order_finance(db, work_order, customer, payload.gerar_financeiro, payload.valor_servico)
+    appointment = sync_work_order_appointment(
+        db,
+        work_order,
+        current_user_id=current_user_id,
+        generate_appointment=payload.gerar_agendamento,
+        service_type=payload.tipo_servico_agendamento,
+        duration_minutes=payload.duracao_prevista_minutos,
+        internal_notes=payload.observacoes_internas_agendamento,
+        technical_instructions=payload.instrucoes_tecnicas_agendamento,
+        follow_up_notes=payload.retorno_revisita_agendamento,
+        sync_google=payload.sincronizar_google_agenda,
+    )
 
     db.commit()
+    if appointment and appointment.sincronizar_google:
+        appointment = get_appointment(db, appointment.id)
+        _sync_google_for_appointment(
+            db,
+            appointment,
+            remove_event=appointment.status in {AppointmentStatus.CANCELADO.value, AppointmentStatus.NAO_REALIZADO.value},
+            user_id=current_user_id,
+        )
+        db.commit()
     return get_work_order(db, work_order.id)
 
 
@@ -1140,23 +1467,31 @@ def get_work_order(db: Session, work_order_id: int) -> WorkOrder:
     return _get_work_order_or_fail(db, work_order_id)
 
 
-def update_work_order(db: Session, work_order_id: int, payload: WorkOrderUpdate) -> WorkOrder:
+def update_work_order(
+    db: Session,
+    work_order_id: int,
+    payload: WorkOrderUpdate,
+    current_user_id: Optional[int] = None,
+) -> WorkOrder:
+    from app.application.scheduling_services import _sync_google_for_appointment, get_appointment, sync_work_order_appointment
+    from app.domain.enums import AppointmentStatus
+
     work_order = _get_work_order_or_fail(db, work_order_id)
-    customer = _validate_work_order_payload(db, payload, current_work_order_id=work_order_id)
+    customer, normalized = _validate_work_order_payload(db, payload, current_work_order_id=work_order_id)
 
     _restore_stock(work_order)
     for item in list(work_order.produtos):
         db.delete(item)
     db.flush()
 
-    work_order.numero = payload.numero
+    work_order.numero = normalized["numero"]
     work_order.cliente_id = payload.cliente_id
     work_order.tecnico_id = payload.tecnico_id
     work_order.data_execucao = payload.data_execucao
     work_order.hora_inicio = payload.hora_inicio
     work_order.hora_fim = payload.hora_fim
-    work_order.local_execucao = payload.local_execucao
-    work_order.observacoes = payload.observacoes
+    work_order.local_execucao = normalized["local_execucao"]
+    work_order.observacoes = normalized["observacoes"]
     work_order.garantia_ate = payload.garantia_ate
     work_order.status = payload.status.value
     work_order.valor_servico = payload.valor_servico
@@ -1164,8 +1499,29 @@ def update_work_order(db: Session, work_order_id: int, payload: WorkOrderUpdate)
     _apply_work_order_products(db, work_order, payload.produtos)
     _sync_work_order_pests(db, work_order, payload.pragas_ids)
     _sync_work_order_finance(db, work_order, customer, payload.gerar_financeiro, payload.valor_servico)
+    appointment = sync_work_order_appointment(
+        db,
+        work_order,
+        current_user_id=current_user_id,
+        generate_appointment=payload.gerar_agendamento,
+        service_type=payload.tipo_servico_agendamento,
+        duration_minutes=payload.duracao_prevista_minutos,
+        internal_notes=payload.observacoes_internas_agendamento,
+        technical_instructions=payload.instrucoes_tecnicas_agendamento,
+        follow_up_notes=payload.retorno_revisita_agendamento,
+        sync_google=payload.sincronizar_google_agenda,
+    )
 
     db.commit()
+    if appointment and appointment.sincronizar_google:
+        appointment = get_appointment(db, appointment.id)
+        _sync_google_for_appointment(
+            db,
+            appointment,
+            remove_event=appointment.status in {AppointmentStatus.CANCELADO.value, AppointmentStatus.NAO_REALIZADO.value},
+            user_id=current_user_id,
+        )
+        db.commit()
     return get_work_order(db, work_order.id)
 
 
@@ -1180,16 +1536,46 @@ def delete_work_order(db: Session, work_order_id: int) -> None:
     db.commit()
 
 
-def mark_work_order_as_completed(db: Session, work_order_id: int) -> WorkOrder:
+def mark_work_order_as_completed(db: Session, work_order_id: int, current_user_id: Optional[int] = None) -> WorkOrder:
+    from app.application.schemas import AppointmentStatusUpdate
+    from app.application.scheduling_services import update_appointment_status
+    from app.domain.enums import AppointmentSource, AppointmentStatus
+    from app.infrastructure.models import Appointment
+
     work_order = _get_work_order_or_fail(db, work_order_id)
     if work_order.status == "cancelada":
         raise BusinessRuleViolation("Nao e possivel efetuar uma OS cancelada.")
     work_order.status = "concluida"
     db.commit()
+    appointment = (
+        db.query(Appointment)
+        .filter(
+            Appointment.os_id == work_order_id,
+            Appointment.origem == AppointmentSource.ORDEM_SERVICO.value,
+            Appointment.agendamento_pai_id.is_(None),
+        )
+        .order_by(Appointment.id.desc())
+        .first()
+    )
+    if appointment and appointment.status != AppointmentStatus.CONCLUIDO.value:
+        update_appointment_status(
+            db,
+            appointment.id,
+            AppointmentStatusUpdate(
+                status=AppointmentStatus.CONCLUIDO,
+                detalhes=f"OS {work_order.numero} concluida a partir do modulo de ordens de servico.",
+            ),
+            current_user_id=current_user_id,
+        )
     return get_work_order(db, work_order.id)
 
 
-def settle_work_order(db: Session, work_order_id: int) -> WorkOrder:
+def settle_work_order(db: Session, work_order_id: int, current_user_id: Optional[int] = None) -> WorkOrder:
+    from app.application.schemas import AppointmentStatusUpdate
+    from app.application.scheduling_services import update_appointment_status
+    from app.domain.enums import AppointmentSource, AppointmentStatus
+    from app.infrastructure.models import Appointment
+
     work_order = _get_work_order_or_fail(db, work_order_id)
     if work_order.status == "cancelada":
         raise BusinessRuleViolation("Nao e possivel dar baixa em uma OS cancelada.")
@@ -1198,7 +1584,82 @@ def settle_work_order(db: Session, work_order_id: int) -> WorkOrder:
         if _money(entry.saldo_aberto) > Decimal("0.00"):
             _apply_finance_payment(db, entry)
     db.commit()
+    appointment = (
+        db.query(Appointment)
+        .filter(
+            Appointment.os_id == work_order_id,
+            Appointment.origem == AppointmentSource.ORDEM_SERVICO.value,
+            Appointment.agendamento_pai_id.is_(None),
+        )
+        .order_by(Appointment.id.desc())
+        .first()
+    )
+    if appointment and appointment.status != AppointmentStatus.CONCLUIDO.value:
+        update_appointment_status(
+            db,
+            appointment.id,
+            AppointmentStatusUpdate(
+                status=AppointmentStatus.CONCLUIDO,
+                detalhes=f"OS {work_order.numero} baixada e finalizada pelo financeiro.",
+            ),
+            current_user_id=current_user_id,
+        )
     return get_work_order(db, work_order.id)
+
+
+def _get_work_order_photo_or_fail(db: Session, photo_id: int) -> WorkOrderPhoto:
+    photo = db.query(WorkOrderPhoto).filter(WorkOrderPhoto.id == photo_id).first()
+    if not photo:
+        raise BusinessRuleViolation("Foto da ordem de servico nao encontrada.")
+    return photo
+
+
+def add_work_order_photos(db: Session, work_order_id: int, files: Iterable[tuple[str, str, bytes]]) -> WorkOrder:
+    work_order = _get_work_order_or_fail(db, work_order_id)
+    prepared_files = list(files)
+    if not prepared_files:
+        raise BusinessRuleViolation("Selecione pelo menos uma foto para anexar na ordem de servico.")
+
+    if len(work_order.fotos) + len(prepared_files) > MAX_WORK_ORDER_PHOTO_ITEMS:
+        raise BusinessRuleViolation(f"A ordem permite no maximo {MAX_WORK_ORDER_PHOTO_ITEMS} fotos.")
+
+    for filename, content_type, image_bytes in prepared_files:
+        normalized_type = (content_type or "").lower()
+        if normalized_type not in ALLOWED_WORK_ORDER_PHOTO_TYPES:
+            raise BusinessRuleViolation("Envie fotos JPG, PNG ou WEBP.")
+        if not image_bytes:
+            raise BusinessRuleViolation("Uma das fotos enviadas esta vazia.")
+        if len(image_bytes) > MAX_WORK_ORDER_PHOTO_BYTES:
+            raise BusinessRuleViolation("Cada foto deve possuir no maximo 5 MB.")
+
+        db.add(
+            WorkOrderPhoto(
+                os_id=work_order.id,
+                filename=filename or "foto-os",
+                content_type=normalized_type,
+                image_data=image_bytes,
+            )
+        )
+
+    db.commit()
+    db.expire_all()
+    return get_work_order(db, work_order.id)
+
+
+def delete_work_order_photo(db: Session, work_order_id: int, photo_id: int) -> WorkOrder:
+    work_order = _get_work_order_or_fail(db, work_order_id)
+    photo = _get_work_order_photo_or_fail(db, photo_id)
+    if photo.os_id != work_order.id:
+        raise BusinessRuleViolation("A foto informada nao pertence a esta ordem de servico.")
+    db.delete(photo)
+    db.commit()
+    db.expire_all()
+    return get_work_order(db, work_order.id)
+
+
+def get_work_order_photo_content(db: Session, photo_id: int) -> tuple[str, str, bytes]:
+    photo = _get_work_order_photo_or_fail(db, photo_id)
+    return photo.filename, photo.content_type, photo.image_data
 
 
 def _draw_document_frame(pdf: canvas.Canvas, title: str, subtitle: str) -> float:

@@ -1,10 +1,20 @@
-from datetime import date, time
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.enums import CashFlowType, FinanceStatus, FinanceType, LicenseStatus, UserRole, WorkOrderStatus
+from app.domain.enums import (
+    AppointmentSource,
+    AppointmentStatus,
+    CashFlowType,
+    FinanceStatus,
+    FinanceType,
+    GoogleSyncStatus,
+    LicenseStatus,
+    UserRole,
+    WorkOrderStatus,
+)
 
 
 class TokenResponse(BaseModel):
@@ -25,6 +35,37 @@ class UserRead(BaseModel):
     username: str
     role: UserRole
     is_active: bool
+    empresa_prestadora_id: Optional[int] = None
+    empresa_prestadora_nome: Optional[str] = None
+
+
+class ProviderCompanyBase(BaseModel):
+    razao_social: str
+    nome_fantasia: Optional[str] = None
+    cnpj: str
+    email: Optional[str] = None
+    telefone: Optional[str] = None
+    cep: Optional[str] = None
+    endereco: Optional[str] = None
+    bairro: Optional[str] = None
+    cidade: Optional[str] = None
+    estado: Optional[str] = Field(default=None, min_length=2, max_length=2)
+
+
+class ProviderCompanyCreate(ProviderCompanyBase):
+    usuarios_vinculados_ids: List[int] = Field(default_factory=list)
+
+
+class ProviderCompanyUpdate(ProviderCompanyBase):
+    usuarios_vinculados_ids: List[int] = Field(default_factory=list)
+
+
+class ProviderCompanyRead(ProviderCompanyBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    usuarios_vinculados_ids: List[int] = Field(default_factory=list)
+    usuarios_vinculados_nomes: List[str] = Field(default_factory=list)
 
 
 class UserCreate(BaseModel):
@@ -33,6 +74,9 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=6)
     role: UserRole
     is_active: bool = True
+    empresa_prestadora_id: Optional[int] = None
+    nova_empresa_prestadora: Optional[ProviderCompanyCreate] = None
+    licenca_inicial: Optional["LicenseCreate"] = None
 
 
 class UserUpdate(BaseModel):
@@ -41,6 +85,7 @@ class UserUpdate(BaseModel):
     role: UserRole
     is_active: bool = True
     password: Optional[str] = Field(default=None, min_length=6)
+    empresa_prestadora_id: Optional[int] = None
 
 
 class LicenseBase(BaseModel):
@@ -50,6 +95,7 @@ class LicenseBase(BaseModel):
     max_users: int = Field(ge=1)
     status: LicenseStatus = LicenseStatus.ATIVA
     notes: Optional[str] = None
+    empresa_prestadora_id: Optional[int] = None
 
 
 class LicenseCreate(LicenseBase):
@@ -64,12 +110,17 @@ class LicenseRead(LicenseBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    empresa_prestadora_nome: Optional[str] = None
 
 
 class CustomerBase(BaseModel):
     razao_social: str
     cpf_cnpj: str
+    cep: Optional[str] = None
     endereco: str
+    numero: Optional[str] = None
+    complemento: Optional[str] = None
+    bairro: Optional[str] = None
     cidade: str
     estado: str = Field(min_length=2, max_length=2)
     telefone: str
@@ -88,6 +139,29 @@ class CustomerRead(CustomerBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+
+
+class CustomerCnpjLookupRead(BaseModel):
+    razao_social: str
+    nome_fantasia: Optional[str] = None
+    cnpj: str
+    telefone: Optional[str] = None
+    email: Optional[str] = None
+    cep: Optional[str] = None
+    endereco: Optional[str] = None
+    numero: Optional[str] = None
+    complemento: Optional[str] = None
+    bairro: Optional[str] = None
+    cidade: Optional[str] = None
+    estado: Optional[str] = None
+
+
+class AddressLookupRead(BaseModel):
+    cep: str
+    endereco: str
+    bairro: Optional[str] = None
+    cidade: str
+    estado: str
 
 
 class ProductBase(BaseModel):
@@ -283,6 +357,16 @@ class WorkOrderPestRead(BaseModel):
     praga: PestRead
 
 
+class WorkOrderPhotoRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    filename: str
+    content_type: str
+    created_at: datetime
+    url: str
+
+
 class WorkOrderCreate(BaseModel):
     numero: str
     cliente_id: int
@@ -298,6 +382,13 @@ class WorkOrderCreate(BaseModel):
     produtos: List[WorkOrderProductCreate] = Field(default_factory=list)
     pragas_ids: List[int] = Field(default_factory=list)
     gerar_financeiro: bool = True
+    gerar_agendamento: bool = True
+    tipo_servico_agendamento: Optional[str] = None
+    duracao_prevista_minutos: int = Field(default=60, ge=15, le=480)
+    observacoes_internas_agendamento: Optional[str] = None
+    instrucoes_tecnicas_agendamento: Optional[str] = None
+    retorno_revisita_agendamento: Optional[str] = None
+    sincronizar_google_agenda: bool = False
 
 
 class WorkOrderUpdate(WorkOrderCreate):
@@ -323,3 +414,99 @@ class WorkOrderRead(BaseModel):
     tecnico: TechnicianRead
     produtos: List[WorkOrderProductRead]
     pragas: List[WorkOrderPestRead]
+    fotos: List[WorkOrderPhotoRead] = Field(default_factory=list)
+
+
+class AppointmentHistoryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    usuario_id: Optional[int] = None
+    usuario_nome: Optional[str] = None
+    acao: str
+    status_anterior: Optional[AppointmentStatus] = None
+    status_novo: Optional[AppointmentStatus] = None
+    detalhes: Optional[str] = None
+    created_at: datetime
+
+
+class AppointmentBase(BaseModel):
+    cliente_id: int
+    os_id: Optional[int] = None
+    tecnico_id: Optional[int] = None
+    tipo_servico: str
+    data_agendamento: date
+    hora_agendamento: time
+    duracao_prevista_minutos: int = Field(default=60, ge=15, le=480)
+    observacoes: Optional[str] = None
+    observacoes_internas: Optional[str] = None
+    instrucoes_tecnicas: Optional[str] = None
+    retorno_revisita: Optional[str] = None
+    status: AppointmentStatus = AppointmentStatus.PENDENTE
+    sincronizar_google: bool = False
+    agendamento_pai_id: Optional[int] = None
+
+
+class AppointmentCreate(AppointmentBase):
+    origem: AppointmentSource = AppointmentSource.MANUAL
+
+
+class AppointmentUpdate(AppointmentBase):
+    pass
+
+
+class AppointmentStatusUpdate(BaseModel):
+    status: AppointmentStatus
+    detalhes: Optional[str] = None
+
+
+class AppointmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    cliente_id: int
+    cliente_nome: str
+    telefone: str
+    endereco_completo: str
+    os_id: Optional[int] = None
+    os_numero: Optional[str] = None
+    tecnico_id: Optional[int] = None
+    tecnico_nome: Optional[str] = None
+    usuario_responsavel_id: Optional[int] = None
+    usuario_responsavel_nome: Optional[str] = None
+    usuario_ultima_atualizacao_id: Optional[int] = None
+    usuario_ultima_atualizacao_nome: Optional[str] = None
+    tipo_servico: str
+    data_agendamento: date
+    hora_agendamento: time
+    duracao_prevista_minutos: int
+    observacoes: Optional[str] = None
+    observacoes_internas: Optional[str] = None
+    instrucoes_tecnicas: Optional[str] = None
+    retorno_revisita: Optional[str] = None
+    status: AppointmentStatus
+    origem: AppointmentSource
+    sincronizar_google: bool
+    google_calendar_event_id: Optional[str] = None
+    google_calendar_id: Optional[str] = None
+    google_sync_status: GoogleSyncStatus
+    google_sync_message: Optional[str] = None
+    agendamento_pai_id: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+    historico: List[AppointmentHistoryRead] = Field(default_factory=list)
+
+
+class AppointmentDashboardRead(BaseModel):
+    total: int
+    pendente: int
+    confirmado: int
+    em_deslocamento: int
+    em_atendimento: int
+    concluido: int
+    reagendado: int
+    cancelado: int
+    nao_realizado: int
+
+
+UserCreate.model_rebuild()

@@ -67,7 +67,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    from app.infrastructure.models import License, User
+    from app.infrastructure.models import License, ProviderCompany, User
 
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
@@ -96,6 +96,19 @@ def init_db() -> None:
 
         existing_license = session.query(License).order_by(License.id.desc()).first()
         if not existing_license:
+            default_company = session.query(ProviderCompany).filter(ProviderCompany.cnpj == "00000000000000").first()
+            if not default_company:
+                default_company = ProviderCompany(
+                    razao_social="Prestadora padrao SysPragas",
+                    nome_fantasia="SysPragas",
+                    cnpj="00000000000000",
+                    email="contato@syspragas.local",
+                    telefone="0000000000",
+                    cidade="Sao Paulo",
+                    estado="SP",
+                )
+                session.add(default_company)
+                session.flush()
             license_entry = License(
                 descricao="Licenca inicial SysPragas",
                 start_date=date.today(),
@@ -103,6 +116,7 @@ def init_db() -> None:
                 max_users=10,
                 status="ativa",
                 notes="Licenca inicial criada automaticamente pelo sistema.",
+                empresa_prestadora_id=default_company.id,
             )
             session.add(license_entry)
 
@@ -125,6 +139,53 @@ def _apply_lightweight_migrations(engine) -> None:
                 connection.execute(
                     text("UPDATE users SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
                 )
+            if "empresa_prestadora_id" not in user_columns:
+                connection.execute(
+                    text("ALTER TABLE users ADD COLUMN empresa_prestadora_id INTEGER")
+                )
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    if "empresas_prestadoras" in tables:
+        company_columns = {column["name"] for column in inspector.get_columns("empresas_prestadoras")}
+        statements = []
+        if "created_at" not in company_columns:
+            statements.append("ALTER TABLE empresas_prestadoras ADD COLUMN created_at DATETIME")
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+            if "created_at" not in company_columns:
+                connection.execute(text("UPDATE empresas_prestadoras SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL"))
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    if "licenses" in tables:
+        license_columns = {column["name"] for column in inspector.get_columns("licenses")}
+        with engine.begin() as connection:
+            if "empresa_prestadora_id" not in license_columns:
+                connection.execute(
+                    text("ALTER TABLE licenses ADD COLUMN empresa_prestadora_id INTEGER")
+                )
+
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    if "clientes" in tables:
+        customer_columns = {column["name"] for column in inspector.get_columns("clientes")}
+        statements = []
+        if "cep" not in customer_columns:
+            statements.append("ALTER TABLE clientes ADD COLUMN cep VARCHAR(9)")
+        if "numero" not in customer_columns:
+            statements.append("ALTER TABLE clientes ADD COLUMN numero VARCHAR(20)")
+        if "complemento" not in customer_columns:
+            statements.append("ALTER TABLE clientes ADD COLUMN complemento VARCHAR(120)")
+        if "bairro" not in customer_columns:
+            statements.append("ALTER TABLE clientes ADD COLUMN bairro VARCHAR(120)")
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
 
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())

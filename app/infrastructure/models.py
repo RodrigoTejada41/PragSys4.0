@@ -4,10 +4,30 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, Text, Time
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, LargeBinary, Numeric, String, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.db import Base
+
+
+class ProviderCompany(Base):
+    __tablename__ = "empresas_prestadoras"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    razao_social: Mapped[str] = mapped_column(String(150), nullable=False)
+    nome_fantasia: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    cnpj: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    email: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    telefone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    cep: Mapped[Optional[str]] = mapped_column(String(9), nullable=True)
+    endereco: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    bairro: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    cidade: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    estado: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    usuarios: Mapped[List["User"]] = relationship(back_populates="empresa_prestadora")
+    licencas: Mapped[List["License"]] = relationship(back_populates="empresa_prestadora")
 
 
 class User(Base):
@@ -20,6 +40,21 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(30), nullable=False, default="operador")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+    )
+
+    empresa_prestadora: Mapped[Optional["ProviderCompany"]] = relationship(back_populates="usuarios")
+    agendamentos_criados: Mapped[List["Appointment"]] = relationship(
+        back_populates="usuario_responsavel",
+        foreign_keys="Appointment.usuario_responsavel_id",
+    )
+    agendamentos_atualizados: Mapped[List["Appointment"]] = relationship(
+        back_populates="usuario_ultima_atualizacao",
+        foreign_keys="Appointment.usuario_ultima_atualizacao_id",
+    )
+    historico_agendamentos: Mapped[List["AppointmentHistory"]] = relationship(back_populates="usuario")
 
 
 class License(Base):
@@ -33,6 +68,12 @@ class License(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="ativa")
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+    )
+
+    empresa_prestadora: Mapped[Optional["ProviderCompany"]] = relationship(back_populates="licencas")
 
 
 class Customer(Base):
@@ -41,7 +82,11 @@ class Customer(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     razao_social: Mapped[str] = mapped_column(String(150), nullable=False)
     cpf_cnpj: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    cep: Mapped[Optional[str]] = mapped_column(String(9), nullable=True)
     endereco: Mapped[str] = mapped_column(String(255), nullable=False)
+    numero: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    complemento: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    bairro: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     cidade: Mapped[str] = mapped_column(String(120), nullable=False)
     estado: Mapped[str] = mapped_column(String(2), nullable=False)
     telefone: Mapped[str] = mapped_column(String(30), nullable=False)
@@ -49,6 +94,7 @@ class Customer(Base):
 
     ordens_servico: Mapped[List["WorkOrder"]] = relationship(back_populates="cliente")
     financeiros: Mapped[List["FinanceEntry"]] = relationship(back_populates="cliente")
+    agendamentos: Mapped[List["Appointment"]] = relationship(back_populates="cliente")
 
 
 class Product(Base):
@@ -88,6 +134,7 @@ class Technician(Base):
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     ordens_servico: Mapped[List["WorkOrder"]] = relationship(back_populates="tecnico")
+    agendamentos: Mapped[List["Appointment"]] = relationship(back_populates="tecnico")
 
 
 class WorkOrder(Base):
@@ -117,7 +164,95 @@ class WorkOrder(Base):
         back_populates="ordem_servico",
         cascade="all, delete-orphan",
     )
+    fotos: Mapped[List["WorkOrderPhoto"]] = relationship(
+        back_populates="ordem_servico",
+        cascade="all, delete-orphan",
+    )
     financeiros: Mapped[List["FinanceEntry"]] = relationship(back_populates="ordem_servico")
+    agendamentos: Mapped[List["Appointment"]] = relationship(back_populates="ordem_servico")
+
+
+class Appointment(Base):
+    __tablename__ = "agendamentos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cliente_id: Mapped[int] = mapped_column(ForeignKey("clientes.id"), nullable=False, index=True)
+    os_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ordens_servico.id"), nullable=True, index=True)
+    tecnico_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tecnicos.id"), nullable=True, index=True)
+    usuario_responsavel_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    usuario_ultima_atualizacao_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    agendamento_pai_id: Mapped[Optional[int]] = mapped_column(ForeignKey("agendamentos.id"), nullable=True, index=True)
+    tipo_servico: Mapped[str] = mapped_column(String(120), nullable=False)
+    telefone: Mapped[str] = mapped_column(String(30), nullable=False)
+    endereco_completo: Mapped[str] = mapped_column(String(255), nullable=False)
+    data_agendamento: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    hora_agendamento: Mapped[time] = mapped_column(Time, nullable=False)
+    duracao_prevista_minutos: Mapped[int] = mapped_column(nullable=False, default=60)
+    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    observacoes_internas: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    instrucoes_tecnicas: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    retorno_revisita: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="pendente", index=True)
+    origem: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
+    sincronizar_google: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    google_calendar_event_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    google_calendar_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    google_sync_status: Mapped[str] = mapped_column(String(30), nullable=False, default="desconectado")
+    google_sync_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    cliente: Mapped["Customer"] = relationship(back_populates="agendamentos")
+    ordem_servico: Mapped[Optional["WorkOrder"]] = relationship(back_populates="agendamentos")
+    tecnico: Mapped[Optional["Technician"]] = relationship(back_populates="agendamentos")
+    usuario_responsavel: Mapped[Optional["User"]] = relationship(
+        back_populates="agendamentos_criados",
+        foreign_keys=[usuario_responsavel_id],
+    )
+    usuario_ultima_atualizacao: Mapped[Optional["User"]] = relationship(
+        back_populates="agendamentos_atualizados",
+        foreign_keys=[usuario_ultima_atualizacao_id],
+    )
+    agendamento_pai: Mapped[Optional["Appointment"]] = relationship(remote_side=[id], back_populates="revisitas")
+    revisitas: Mapped[List["Appointment"]] = relationship(back_populates="agendamento_pai")
+    historico: Mapped[List["AppointmentHistory"]] = relationship(
+        back_populates="agendamento",
+        cascade="all, delete-orphan",
+        order_by="AppointmentHistory.created_at.desc()",
+    )
+
+
+class AppointmentHistory(Base):
+    __tablename__ = "agendamento_historico"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    agendamento_id: Mapped[int] = mapped_column(ForeignKey("agendamentos.id"), nullable=False, index=True)
+    usuario_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    acao: Mapped[str] = mapped_column(String(60), nullable=False)
+    status_anterior: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    status_novo: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    detalhes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    agendamento: Mapped["Appointment"] = relationship(back_populates="historico")
+    usuario: Mapped[Optional["User"]] = relationship(back_populates="historico_agendamentos")
+
+
+class WorkOrderPhoto(Base):
+    __tablename__ = "os_fotos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    os_id: Mapped[int] = mapped_column(ForeignKey("ordens_servico.id"), nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    image_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    ordem_servico: Mapped["WorkOrder"] = relationship(back_populates="fotos")
+
+    @property
+    def url(self) -> str:
+        return f"/api/v1/os/fotos/{self.id}"
 
 
 class WorkOrderProduct(Base):

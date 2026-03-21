@@ -3,11 +3,13 @@ from typing import List
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
-from app.application.schemas import CustomerCreate, CustomerRead, CustomerUpdate
+from app.application.schemas import AddressLookupRead, CustomerCnpjLookupRead, CustomerCreate, CustomerRead, CustomerUpdate
 from app.application.services import (
     create_customer,
     delete_customer,
     list_customers,
+    lookup_address_by_cep,
+    lookup_company_by_cnpj,
     update_customer,
 )
 from app.infrastructure.db import get_db
@@ -23,6 +25,24 @@ router = APIRouter(prefix="/clientes", tags=["clientes"])
 )
 def get_customers(db: Session = Depends(get_db)) -> List[CustomerRead]:
     return list_customers(db)
+
+
+@router.get(
+    "/consultar-cnpj/{cnpj}",
+    response_model=CustomerCnpjLookupRead,
+    dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
+)
+def get_customer_data_by_cnpj(cnpj: str) -> CustomerCnpjLookupRead:
+    return lookup_company_by_cnpj(cnpj)
+
+
+@router.get(
+    "/consultar-cep/{cep}",
+    response_model=AddressLookupRead,
+    dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
+)
+def get_customer_address_by_cep(cep: str) -> AddressLookupRead:
+    return lookup_address_by_cep(cep)
 
 
 @router.post(

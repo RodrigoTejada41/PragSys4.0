@@ -7,3 +7,9 @@ __pycache__/
 tmp/
 output/
 *.log
+build/
+dist/
+*.spec
+*.egg-info/
+.venv_backup_*/
+.venv_py39_backup/

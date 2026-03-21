@@ -6,11 +6,29 @@ const state = {
     pests: [],
     technicians: [],
     workOrders: [],
+    appointments: [],
+    appointmentDashboard: null,
     finance: [],
     cashLedger: [],
     financeDashboard: null,
     users: [],
     licenses: [],
+    providerCompanies: [],
+    providerCompanyTab: "dados",
+    workOrderScreen: "new",
+    appointmentCalendarView: "month",
+    workOrderWorkflow: {
+        lastSavedOrderId: null,
+        certificateReady: false,
+    },
+    workOrderPicker: {
+        productSearch: "",
+        pestSearch: "",
+        productTab: "catalogo",
+        stagedProductIds: [],
+        stagedPestIds: [],
+        selectedPestIds: [],
+    },
     editing: {
         customer: null,
         product: null,
@@ -18,6 +36,8 @@ const state = {
         technician: null,
         finance: null,
         workOrder: null,
+        appointment: null,
+        providerCompany: null,
         user: null,
         license: null,
     },
@@ -26,6 +46,15 @@ const state = {
         dashboardStatus: "todos",
         dashboardStock: "alerta",
         dashboardFinance: "pendente",
+        workOrderNumber: "",
+        workOrderCustomer: "",
+        workOrderDate: "",
+        workOrderStatus: "todos",
+        appointmentSearch: "",
+        appointmentStatus: "todos",
+        appointmentTechnician: "",
+        appointmentCustomer: "",
+        appointmentDate: "",
     },
 };
 
@@ -36,7 +65,9 @@ const viewTitles = {
     pragas: "Pragas",
     tecnicos: "Tecnicos",
     ordens: "Ordens de servico",
+    agenda: "Agenda",
     financeiro: "Financeiro",
+    empresas: "Cadastrar empresas",
     usuarios: "Usuarios",
     licencas: "Licencas",
 };
@@ -67,6 +98,7 @@ const dataTableLanguage = {
 document.addEventListener("DOMContentLoaded", () => {
     buildForms();
     bindNavigation();
+    bindWorkOrderModuleNavigation();
     bindAuth();
     bindDashboardFilters();
 
@@ -84,6 +116,39 @@ function bindNavigation() {
             switchView(button.dataset.view);
         });
     });
+}
+
+function bindWorkOrderModuleNavigation() {
+    const buttons = Array.from(document.querySelectorAll("[data-work-order-screen-trigger]"));
+    if (!buttons.length) {
+        return;
+    }
+
+    buttons.forEach((button, index) => {
+        button.addEventListener("click", () => setWorkOrderWorkspaceView(button.dataset.workOrderScreenTrigger));
+        button.addEventListener("keydown", (event) => {
+            const currentIndex = buttons.indexOf(button);
+            if (event.key === "ArrowRight") {
+                event.preventDefault();
+                buttons[(currentIndex + 1) % buttons.length].focus();
+            } else if (event.key === "ArrowLeft") {
+                event.preventDefault();
+                buttons[(currentIndex - 1 + buttons.length) % buttons.length].focus();
+            } else if (event.key === "Home") {
+                event.preventDefault();
+                buttons[0].focus();
+            } else if (event.key === "End") {
+                event.preventDefault();
+                buttons[buttons.length - 1].focus();
+            } else if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setWorkOrderWorkspaceView(button.dataset.workOrderScreenTrigger);
+            }
+        });
+        button.setAttribute("tabindex", index === 0 ? "0" : "-1");
+    });
+
+    setWorkOrderWorkspaceView(state.workOrderScreen || "new");
 }
 
 function bindAuth() {
@@ -168,6 +233,8 @@ async function loadAllData() {
         apiFetch("/api/v1/pragas"),
         apiFetch("/api/v1/tecnicos"),
         apiFetch("/api/v1/os"),
+        apiFetch("/api/v1/agendamentos"),
+        apiFetch("/api/v1/agendamentos/dashboard"),
     ];
     const canAccessFinance = state.user?.role === "master" || state.user?.role === "admin";
     if (canAccessFinance) {
@@ -176,30 +243,35 @@ async function loadAllData() {
         basePromises.push(apiFetch("/api/v1/financeiro/dashboard"));
     }
     const results = await Promise.all(basePromises);
-    const [customers, products, pests, technicians, workOrders] = results;
-    const finance = canAccessFinance ? results[5] : [];
-    const cashLedger = canAccessFinance ? results[6] : [];
-    const financeDashboard = canAccessFinance ? results[7] : null;
+    const [customers, products, pests, technicians, workOrders, appointments, appointmentDashboard] = results;
+    const finance = canAccessFinance ? results[7] : [];
+    const cashLedger = canAccessFinance ? results[8] : [];
+    const financeDashboard = canAccessFinance ? results[9] : null;
 
     state.customers = customers;
     state.products = products;
     state.pests = pests;
     state.technicians = technicians;
     state.workOrders = workOrders;
+    state.appointments = appointments;
+    state.appointmentDashboard = appointmentDashboard;
     state.finance = finance;
     state.cashLedger = cashLedger;
     state.financeDashboard = financeDashboard;
 
     if (state.user?.role === "master") {
-        const [users, licenses] = await Promise.all([
+        const [users, licenses, providerCompanies] = await Promise.all([
             apiFetch("/api/v1/usuarios"),
             apiFetch("/api/v1/licencas"),
+            apiFetch("/api/v1/empresas-prestadoras"),
         ]);
         state.users = users;
         state.licenses = licenses;
+        state.providerCompanies = providerCompanies;
     } else {
         state.users = [];
         state.licenses = [];
+        state.providerCompanies = [];
     }
 
     hydrateDynamicControls();
@@ -249,6 +321,21 @@ function switchView(view) {
     document.getElementById("view-title").textContent = viewTitles[view] || viewTitles.dashboard;
 }
 
+function setWorkOrderWorkspaceView(view) {
+    state.workOrderScreen = view === "registered" ? "registered" : "new";
+    document.querySelectorAll("[data-work-order-screen-trigger]").forEach((button) => {
+        const isActive = button.dataset.workOrderScreenTrigger === state.workOrderScreen;
+        button.classList.toggle("tab-active", isActive);
+        button.setAttribute("aria-selected", isActive ? "true" : "false");
+        button.setAttribute("tabindex", isActive ? "0" : "-1");
+    });
+    document.querySelectorAll("[data-work-order-screen-panel]").forEach((panel) => {
+        const isActive = panel.dataset.workOrderScreenPanel === state.workOrderScreen;
+        panel.classList.toggle("is-active", isActive);
+        panel.hidden = !isActive;
+    });
+}
+
 function renderAll() {
     renderDashboard();
     renderCustomers();
@@ -256,9 +343,17 @@ function renderAll() {
     renderPests();
     renderTechnicians();
     renderWorkOrders();
+    renderAppointments();
     renderFinance();
+    renderProviderCompanies();
     renderUsers();
     renderLicenses();
+    renderWorkOrderFormHeader();
+    renderAppointmentFormHeader();
+    renderWorkOrderSaveFeedback();
+    setWorkOrderWorkspaceView(state.workOrderScreen || "new");
+    switchProviderCompanyTab(state.providerCompanyTab || "dados");
+    renderProviderCompanyLicenseWorkspace();
 }
 
 function toggleMasterSections() {
@@ -288,7 +383,17 @@ function buildForms() {
         <div class="form-grid">
             <label><span>Razao social</span><input name="razao_social" required></label>
             <label><span>CPF/CNPJ</span><input name="cpf_cnpj" required></label>
+            <div class="inline-actions compact-actions full-width">
+                <button type="button" class="btn btn-default ghost-button" id="customer-cnpj-lookup">Buscar por CNPJ</button>
+            </div>
+            <label><span>CEP</span><input name="cep" maxlength="9" placeholder="00000-000"></label>
+            <label><span>Numero</span><input name="numero" placeholder="Numero"></label>
+            <div class="inline-actions compact-actions full-width">
+                <button type="button" class="btn btn-default ghost-button" id="customer-cep-lookup">Buscar por CEP</button>
+            </div>
             <label class="full-width"><span>Endereco</span><input name="endereco" required></label>
+            <label><span>Complemento</span><input name="complemento"></label>
+            <label><span>Bairro</span><input name="bairro"></label>
             <label><span>Cidade</span><input name="cidade" required></label>
             <label><span>Estado</span><input name="estado" maxlength="2" required></label>
             <label><span>Telefone</span><input name="telefone" required></label>
@@ -419,17 +524,165 @@ function buildForms() {
         </div>
         <div class="section-heading">
             <h3>Produtos aplicados</h3>
-            <p class="hint">Cada item reduz o estoque automaticamente.</p>
+            <p class="hint">Pesquise no catalogo, selecione varios itens e adicione em lote na OS.</p>
         </div>
-        <div id="products-list"></div>
-        <div class="inline-actions">
-            <button type="button" id="add-product-row">Adicionar produto</button>
+        <div class="tabbed-panel">
+            <div class="tabs" role="tablist" aria-label="Produtos da ordem de servico">
+                <button
+                    type="button"
+                    class="tab tab-active"
+                    role="tab"
+                    aria-selected="true"
+                    aria-controls="products-tab-catalogo"
+                    id="products-tab-trigger-catalogo"
+                    data-products-tab-trigger="catalogo"
+                >
+                    Catalogo
+                </button>
+                <button
+                    type="button"
+                    class="tab"
+                    role="tab"
+                    aria-selected="false"
+                    aria-controls="products-tab-ordem"
+                    id="products-tab-trigger-ordem"
+                    data-products-tab-trigger="ordem"
+                >
+                    Na ordem
+                </button>
+            </div>
+            <section
+                class="tab-content tab-content-active os-products-card"
+                role="tabpanel"
+                id="products-tab-catalogo"
+                aria-labelledby="products-tab-trigger-catalogo"
+                data-products-tab-panel="catalogo"
+            >
+                <div class="os-products-card-header section-heading compact">
+                    <h4>Catalogo de produtos</h4>
+                    <p>Busque no catalogo, marque varios itens e envie todos de uma vez para a lista da OS.</p>
+                </div>
+                <div class="os-products-card-content">
+                    <label class="selection-search-field os-products-field">
+                        <span>Buscar produto</span>
+                        <input id="product-picker-search" type="search" placeholder="Nome, principio ativo ou registro">
+                    </label>
+                    <div class="selection-panel-toolbar">
+                        <div class="selection-panel-summary">
+                            <strong id="product-picker-selection-count">0 selecionados</strong>
+                            <span id="product-picker-selection-hint">Marque os produtos desejados no catalogo.</span>
+                        </div>
+                        <div class="selection-panel-batch os-products-batch-grid">
+                            <label class="os-products-field">
+                                <span>Qtd. padrao</span>
+                                <input id="product-picker-default-quantity" type="number" min="0.01" step="0.01" value="1">
+                            </label>
+                            <label class="os-products-field">
+                                <span>Diluicao padrao</span>
+                                <input id="product-picker-default-dilution" type="text" placeholder="Ex.: 1:20">
+                            </label>
+                        </div>
+                    </div>
+                    <div id="product-picker-options" class="selection-option-list os-products-option-list"></div>
+                </div>
+                <div class="os-products-actions">
+                    <button type="button" class="btn btn-default ghost-button" id="product-picker-select-visible">Selecionar visiveis</button>
+                    <button type="button" class="btn btn-success" id="product-picker-add-selected">Adicionar selecionados</button>
+                    <button type="button" class="btn btn-default ghost-button" id="product-picker-clear-selection">Limpar selecao</button>
+                </div>
+            </section>
+            <section
+                class="tab-content os-products-card"
+                role="tabpanel"
+                id="products-tab-ordem"
+                aria-labelledby="products-tab-trigger-ordem"
+                data-products-tab-panel="ordem"
+                hidden
+            >
+                <div class="os-products-card-header section-heading compact">
+                    <h4>Produtos na ordem</h4>
+                    <p>Defina quantidade e diluicao dos itens escolhidos para esta execucao.</p>
+                </div>
+                <div class="os-products-card-content">
+                    <div class="selection-panel-summary selection-panel-summary-inline">
+                        <strong id="product-picker-added-count">0 produtos na OS</strong>
+                        <span>Revise quantidade e diluicao antes de salvar a ordem de servico.</span>
+                    </div>
+                    <div id="products-list" class="product-row-list"></div>
+                    <div id="products-empty-state" class="empty-state">Nenhum produto adicionado na ordem ainda.</div>
+                </div>
+                <div class="os-products-actions">
+                    <button type="button" class="btn btn-default ghost-button" id="add-product-row">Adicionar linha manual</button>
+                </div>
+            </section>
         </div>
         <div class="section-heading">
             <h3>Pragas relacionadas</h3>
-            <p class="hint">Selecione as pragas vinculadas a esta execucao.</p>
+            <p class="hint">Pesquise, marque varias pragas e mova para a selecao da OS.</p>
         </div>
-        <div id="pests-selector" class="selector-grid"></div>
+        <div class="selection-board">
+            <section class="selection-panel">
+                <div class="section-heading compact">
+                    <h4>Catalogo de pragas</h4>
+                    <p>Use a busca para localizar mais rapido a praga atendida na ordem.</p>
+                </div>
+                <label class="selection-search-field">
+                    <span>Buscar praga</span>
+                    <input id="pest-picker-search" type="search" placeholder="Nome comum, cientifico ou descricao">
+                </label>
+                <div id="pest-picker-options" class="selection-option-list"></div>
+                <div class="inline-actions">
+                    <button type="button" id="pest-picker-add-selected">Adicionar selecionadas</button>
+                    <button type="button" class="btn btn-default ghost-button" id="pest-picker-clear-selection">Limpar selecao</button>
+                </div>
+            </section>
+            <section class="selection-panel">
+                <div class="section-heading compact">
+                    <h4>Pragas na ordem</h4>
+                    <p>As pragas escolhidas entram na OS e nos documentos emitidos.</p>
+                </div>
+                <div id="selected-pests-list" class="selected-chip-list"></div>
+            </section>
+        </div>
+        <div class="section-heading">
+            <h3>Fotos da ordem</h3>
+            <p id="work-order-photo-hint" class="hint">Salve a ordem e entre em modo de edicao para anexar fotos do atendimento.</p>
+        </div>
+        <div class="work-order-photos-panel">
+            <div class="work-order-photos-toolbar">
+                <label class="selection-search-field">
+                    <span>Selecionar fotos</span>
+                    <input id="work-order-photo-input" type="file" accept="image/png,image/jpeg,image/webp" multiple>
+                </label>
+                <div class="inline-actions action-strip">
+                    <button type="button" class="btn btn-success" id="work-order-photo-upload">Enviar fotos</button>
+                </div>
+            </div>
+            <div id="work-order-photo-list" class="work-order-photo-list"></div>
+        </div>
+        <div class="section-heading">
+            <h3>Agendamento vinculado</h3>
+            <p class="hint">Use a OS para criar ou atualizar automaticamente o compromisso na agenda operacional.</p>
+        </div>
+        <div class="form-grid appointment-link-grid">
+            <label><span>Gerar agendamento</span>
+                <select name="gerar_agendamento">
+                    <option value="true">Sim</option>
+                    <option value="false">Nao</option>
+                </select>
+            </label>
+            <label><span>Tipo de servico na agenda</span><input name="tipo_servico_agendamento" placeholder="Ex.: Controle de pragas"></label>
+            <label><span>Duracao prevista (min)</span><input name="duracao_prevista_minutos" type="number" min="15" max="480" value="60"></label>
+            <label><span>Sincronizar Google Agenda</span>
+                <select name="sincronizar_google_agenda">
+                    <option value="false">Nao</option>
+                    <option value="true">Sim</option>
+                </select>
+            </label>
+            <label class="full-width"><span>Observacoes internas do agendamento</span><textarea name="observacoes_internas_agendamento"></textarea></label>
+            <label class="full-width"><span>Instrucoes tecnicas</span><textarea name="instrucoes_tecnicas_agendamento"></textarea></label>
+            <label class="full-width"><span>Retorno ou revisita</span><textarea name="retorno_revisita_agendamento"></textarea></label>
+        </div>
         <label><span>Gerar financeiro automatico</span>
             <select name="gerar_financeiro">
                 <option value="true">Sim</option>
@@ -437,6 +690,117 @@ function buildForms() {
             </select>
         </label>
         ${formActionHtml("workOrder", "Salvar ordem de servico", "Cancelar edicao")}
+        <div id="work-order-save-feedback" class="work-order-save-feedback hidden"></div>
+    `;
+
+    document.getElementById("appointment-form").innerHTML = `
+        <div class="form-grid">
+            <label><span>Cliente</span><select name="cliente_id" required><option value="">Selecione um cliente</option></select></label>
+            <label><span>Ordem de servico vinculada</span><select name="os_id"><option value="">Sem vinculacao</option></select></label>
+            <label><span>Tecnico responsavel</span><select name="tecnico_id"><option value="">Sem tecnico definido</option></select></label>
+            <label><span>Tipo de servico</span><input name="tipo_servico" required placeholder="Ex.: Dedetizacao preventiva"></label>
+            <label><span>Data do agendamento</span><input name="data_agendamento" type="date" required></label>
+            <label><span>Hora do agendamento</span><input name="hora_agendamento" type="time" required></label>
+            <label><span>Duracao prevista (min)</span><input name="duracao_prevista_minutos" type="number" min="15" max="480" value="60" required></label>
+            <label><span>Status</span>
+                <select name="status">
+                    <option value="pendente">Pendente</option>
+                    <option value="confirmado">Confirmado</option>
+                    <option value="em_deslocamento">Em deslocamento</option>
+                    <option value="em_atendimento">Em atendimento</option>
+                    <option value="concluido">Concluido</option>
+                    <option value="reagendado">Reagendado</option>
+                    <option value="cancelado">Cancelado</option>
+                    <option value="nao_realizado">Nao realizado</option>
+                </select>
+            </label>
+            <label><span>Origem</span>
+                <select name="origem">
+                    <option value="manual">Manual</option>
+                    <option value="ordem_servico">Ordem de servico</option>
+                </select>
+            </label>
+            <label><span>Sincronizar Google Agenda</span>
+                <select name="sincronizar_google">
+                    <option value="false">Nao</option>
+                    <option value="true">Sim</option>
+                </select>
+            </label>
+            <label class="full-width"><span>Observacoes externas</span><textarea name="observacoes" placeholder="Orientacoes visiveis para a operacao"></textarea></label>
+            <label class="full-width"><span>Observacoes internas</span><textarea name="observacoes_internas"></textarea></label>
+            <label class="full-width"><span>Instrucoes tecnicas</span><textarea name="instrucoes_tecnicas"></textarea></label>
+            <label class="full-width"><span>Retorno ou revisita</span><textarea name="retorno_revisita"></textarea></label>
+        </div>
+        <div id="appointment-customer-summary" class="appointment-customer-summary"></div>
+        <div class="inline-actions action-strip appointment-form-shortcuts">
+            <button type="button" class="btn btn-default ghost-button" id="appointment-open-linked-work-order">Abrir OS vinculada</button>
+            <button type="button" class="btn btn-default ghost-button" id="appointment-duplicate-follow-up">Criar revisita</button>
+        </div>
+        ${formActionHtml("appointment", "Salvar agendamento", "Cancelar edicao")}
+    `;
+
+    document.getElementById("provider-company-form").innerHTML = `
+        <div class="tab-strip company-tab-strip">
+            <button type="button" class="tab-pill is-active" data-company-tab="dados">Dados da empresa</button>
+            <button type="button" class="tab-pill" data-company-tab="usuarios">Usuarios vinculados</button>
+            <button type="button" class="tab-pill" data-company-tab="licencas">Licencas</button>
+        </div>
+        <section class="company-tab-panel is-active" data-company-tab-panel="dados">
+            <div class="form-grid">
+                <label><span>Razao social</span><input name="razao_social" required></label>
+                <label><span>Nome fantasia</span><input name="nome_fantasia"></label>
+                <label><span>CNPJ</span><input name="cnpj" required></label>
+                <div class="inline-actions compact-actions full-width">
+                    <button type="button" class="btn btn-default ghost-button" id="provider-company-cnpj-lookup">Buscar por CNPJ</button>
+                </div>
+                <label><span>E-mail</span><input name="email"></label>
+                <label><span>Telefone</span><input name="telefone"></label>
+                <label><span>CEP</span><input name="cep"></label>
+                <label class="full-width"><span>Endereco</span><input name="endereco"></label>
+                <label><span>Bairro</span><input name="bairro"></label>
+                <label><span>Cidade</span><input name="cidade"></label>
+                <label><span>Estado</span><input name="estado" maxlength="2"></label>
+            </div>
+        </section>
+        <section class="company-tab-panel" data-company-tab-panel="usuarios">
+            <div class="section-heading compact">
+                <h4>Usuarios vinculados</h4>
+                <p>Selecione os usuarios que pertencem a esta empresa prestadora.</p>
+            </div>
+            <label class="full-width"><span>Usuarios do sistema</span>
+                <select name="usuarios_vinculados_ids" id="provider-company-users-select" multiple size="8"></select>
+            </label>
+        </section>
+        <section class="company-tab-panel" data-company-tab-panel="licencas">
+            <div class="section-heading compact">
+                <h4>Licencas da empresa</h4>
+                <p>Cadastre e acompanhe as licencas da prestadora sem sair desta tela.</p>
+            </div>
+            <div id="provider-company-license-state" class="empty-state"></div>
+            <div id="provider-company-licenses-list"></div>
+            <div class="section-heading compact">
+                <h4>Nova licenca</h4>
+                <p>Salve a empresa primeiro para liberar o cadastro de licencas vinculadas.</p>
+            </div>
+            <div class="form-grid company-license-grid">
+                <label class="full-width"><span>Descricao</span><input id="provider-license-descricao"></label>
+                <label><span>Inicio</span><input id="provider-license-start-date" type="date"></label>
+                <label><span>Fim</span><input id="provider-license-end-date" type="date"></label>
+                <label><span>Maximo de usuarios</span><input id="provider-license-max-users" type="number" min="1" value="10"></label>
+                <label><span>Status</span>
+                    <select id="provider-license-status">
+                        <option value="ativa">Ativa</option>
+                        <option value="suspensa">Suspensa</option>
+                        <option value="expirada">Expirada</option>
+                    </select>
+                </label>
+                <label class="full-width"><span>Observacoes</span><textarea id="provider-license-notes"></textarea></label>
+            </div>
+            <div class="inline-actions">
+                <button type="button" id="provider-license-save-button">Salvar licenca da empresa</button>
+            </div>
+        </section>
+        ${formActionHtml("providerCompany", "Salvar empresa", "Cancelar edicao")}
     `;
 
     document.getElementById("user-form").innerHTML = `
@@ -457,6 +821,7 @@ function buildForms() {
                     <option value="false">Inativo</option>
                 </select>
             </label>
+            <label class="full-width"><span>Empresa prestadora</span><select name="empresa_prestadora_id"><option value="">Selecione uma empresa</option></select></label>
         </div>
         ${formActionHtml("user", "Salvar usuario", "Cancelar edicao")}
     `;
@@ -467,6 +832,7 @@ function buildForms() {
             <label><span>Inicio</span><input name="start_date" type="date" required></label>
             <label><span>Fim</span><input name="end_date" type="date" required></label>
             <label><span>Maximo de usuarios</span><input name="max_users" type="number" min="1" value="10" required></label>
+            <label class="full-width"><span>Empresa prestadora</span><select name="empresa_prestadora_id"><option value="">Licenca global / legado</option></select></label>
             <label><span>Status</span>
                 <select name="status">
                     <option value="ativa">Ativa</option>
@@ -482,8 +848,12 @@ function buildForms() {
     bindCrudForms();
     bindProductXmlImport();
     bindProductCsvImport();
-    document.getElementById("add-product-row").addEventListener("click", () => addProductRow());
-    addProductRow();
+    bindCustomerAutoLookup();
+    bindProviderCompanyWorkspace();
+    bindWorkOrderSelectors();
+    bindAppointmentWorkspace();
+    clearWorkOrderForm();
+    clearAppointmentForm();
 }
 
 function bindProductXmlImport() {
@@ -570,9 +940,251 @@ function bindProductCsvImport() {
     });
 }
 
+function bindCustomerAutoLookup() {
+    const customerForm = document.getElementById("customer-form");
+    const cnpjButton = document.getElementById("customer-cnpj-lookup");
+    const cepButton = document.getElementById("customer-cep-lookup");
+    const cnpjField = customerForm?.querySelector('[name="cpf_cnpj"]');
+    const cepField = customerForm?.querySelector('[name="cep"]');
+    if (!customerForm || !cnpjButton || !cepButton || !cnpjField || !cepField) {
+        return;
+    }
+
+    cnpjButton.addEventListener("click", () => lookupCustomerByCnpj());
+    cepButton.addEventListener("click", () => lookupCustomerByCep());
+    cnpjField.addEventListener("blur", () => {
+        if (digitsOnly(cnpjField.value).length === 14) {
+            lookupCustomerByCnpj();
+        }
+    });
+    cepField.addEventListener("blur", () => {
+        if (digitsOnly(cepField.value).length === 8) {
+            lookupCustomerByCep();
+        }
+    });
+}
+
+function bindProviderCompanyWorkspace() {
+    document.querySelectorAll("[data-company-tab]").forEach((button) => {
+        button.addEventListener("click", () => switchProviderCompanyTab(button.dataset.companyTab));
+    });
+
+    const cnpjButton = document.getElementById("provider-company-cnpj-lookup");
+    const cnpjField = document.querySelector('#provider-company-form [name="cnpj"]');
+    if (cnpjButton) {
+        cnpjButton.addEventListener("click", lookupProviderCompanyByCnpj);
+    }
+    if (cnpjField) {
+        cnpjField.addEventListener("blur", () => {
+            if (digitsOnly(cnpjField.value).length === 14) {
+                lookupProviderCompanyByCnpj();
+            }
+        });
+    }
+
+    const saveLicenseButton = document.getElementById("provider-license-save-button");
+    if (saveLicenseButton) {
+        saveLicenseButton.addEventListener("click", saveProviderCompanyLicense);
+    }
+}
+
+function switchProviderCompanyTab(tab) {
+    state.providerCompanyTab = tab || "dados";
+    document.querySelectorAll("[data-company-tab]").forEach((button) => {
+        button.classList.toggle("is-active", button.dataset.companyTab === state.providerCompanyTab);
+    });
+    document.querySelectorAll("[data-company-tab-panel]").forEach((panel) => {
+        panel.classList.toggle("is-active", panel.dataset.companyTabPanel === state.providerCompanyTab);
+    });
+}
+
+async function lookupProviderCompanyByCnpj() {
+    const form = document.getElementById("provider-company-form");
+    const cnpj = form.querySelector('[name="cnpj"]').value;
+    if (digitsOnly(cnpj).length !== 14) {
+        toast("Informe um CNPJ valido para consulta da empresa.");
+        return;
+    }
+    try {
+        setSyncStatus("Consultando CNPJ...");
+        const result = await apiFetch(`/api/v1/empresas-prestadoras/consultar-cnpj/${digitsOnly(cnpj)}`);
+        fillForm(form, {
+            razao_social: result.razao_social || "",
+            nome_fantasia: result.nome_fantasia || "",
+            email: result.email || "",
+            telefone: result.telefone || "",
+            cep: formatCep(result.cep || ""),
+            endereco: result.endereco || "",
+            bairro: result.bairro || "",
+            cidade: result.cidade || "",
+            estado: result.estado || "",
+        });
+        setSyncStatus("Sincronizado");
+        toast("Dados da empresa preenchidos pelo CNPJ.");
+    } catch (error) {
+        setSyncStatus("Falha na consulta");
+        toast(error.message);
+    }
+}
+
+function getCurrentProviderCompany() {
+    return state.providerCompanies.find((item) => item.id === state.editing.providerCompany) || null;
+}
+
+function getCurrentProviderCompanyLicenses() {
+    const company = getCurrentProviderCompany();
+    if (!company) {
+        return [];
+    }
+    return state.licenses.filter((item) => item.empresa_prestadora_id === company.id);
+}
+
+function renderProviderCompanyLicenseWorkspace() {
+    const stateNode = document.getElementById("provider-company-license-state");
+    const listNode = document.getElementById("provider-company-licenses-list");
+    const saveButton = document.getElementById("provider-license-save-button");
+    if (!stateNode || !listNode || !saveButton) {
+        return;
+    }
+    const company = getCurrentProviderCompany();
+    if (!company) {
+        stateNode.textContent = "Salve ou edite uma empresa para visualizar e cadastrar licencas vinculadas.";
+        listNode.innerHTML = "";
+        saveButton.disabled = true;
+        clearProviderCompanyLicenseForm();
+        return;
+    }
+
+    const licenses = getCurrentProviderCompanyLicenses();
+    stateNode.textContent = `Licencas vinculadas a ${company.nome_fantasia || company.razao_social}.`;
+    listNode.innerHTML = licenses.length
+        ? `<div class="alert-list">${licenses
+            .map(
+                (item) => `
+                    <div class="alert-item">
+                        <div>
+                            <strong>${escapeHtml(item.descricao)}</strong>
+                            <span class="origin-note">${formatDate(item.start_date)} ate ${formatDate(item.end_date)} | max ${escapeHtml(String(item.max_users))} usuario(s)</span>
+                        </div>
+                        <span>${badge(item.status, item.status === "ativa" ? "" : item.status === "suspensa" ? "warn" : "danger")}</span>
+                    </div>
+                `,
+            )
+            .join("")}</div>`
+        : `<div class="empty-state">Nenhuma licenca cadastrada para esta empresa.</div>`;
+    saveButton.disabled = false;
+}
+
+async function saveProviderCompanyLicense() {
+    const company = getCurrentProviderCompany();
+    if (!company) {
+        toast("Salve a empresa primeiro para cadastrar a licenca.");
+        return;
+    }
+    const payload = {
+        descricao: document.getElementById("provider-license-descricao").value.trim(),
+        start_date: document.getElementById("provider-license-start-date").value,
+        end_date: document.getElementById("provider-license-end-date").value,
+        max_users: Number(document.getElementById("provider-license-max-users").value || 0),
+        status: document.getElementById("provider-license-status").value,
+        notes: document.getElementById("provider-license-notes").value.trim() || null,
+        empresa_prestadora_id: company.id,
+    };
+    if (!payload.descricao || !payload.start_date || !payload.end_date) {
+        toast("Preencha descricao, inicio e fim da licenca da empresa.");
+        return;
+    }
+    try {
+        await apiFetch("/api/v1/licencas", { method: "POST", body: JSON.stringify(payload) });
+        clearProviderCompanyLicenseForm();
+        await afterMutation("Licenca da empresa salva com sucesso.");
+        renderProviderCompanyLicenseWorkspace();
+    } catch (error) {
+        toast(error.message);
+    }
+}
+
+function clearProviderCompanyLicenseForm() {
+    const descricao = document.getElementById("provider-license-descricao");
+    const startDate = document.getElementById("provider-license-start-date");
+    const endDate = document.getElementById("provider-license-end-date");
+    const maxUsers = document.getElementById("provider-license-max-users");
+    const status = document.getElementById("provider-license-status");
+    const notes = document.getElementById("provider-license-notes");
+    if (!descricao || !startDate || !endDate || !maxUsers || !status || !notes) {
+        return;
+    }
+    descricao.value = "";
+    startDate.value = "";
+    endDate.value = "";
+    maxUsers.value = "10";
+    status.value = "ativa";
+    notes.value = "";
+}
+
+async function lookupCustomerByCnpj() {
+    const form = document.getElementById("customer-form");
+    const cnpj = form.querySelector('[name="cpf_cnpj"]').value;
+    if (digitsOnly(cnpj).length !== 14) {
+        toast("Informe um CNPJ valido para consulta.");
+        return;
+    }
+    try {
+        setSyncStatus("Consultando CNPJ...");
+        const result = await apiFetch(`/api/v1/clientes/consultar-cnpj/${digitsOnly(cnpj)}`);
+        fillForm(form, {
+            razao_social: result.razao_social || "",
+            contato: result.nome_fantasia || result.razao_social || "",
+            telefone: result.telefone || "",
+            cep: formatCep(result.cep || ""),
+            endereco: result.endereco || "",
+            numero: result.numero || "",
+            complemento: result.complemento || "",
+            bairro: result.bairro || "",
+            cidade: result.cidade || "",
+            estado: result.estado || "",
+        });
+        setSyncStatus("Sincronizado");
+        toast("Dados do CNPJ preenchidos automaticamente.");
+    } catch (error) {
+        setSyncStatus("Falha na consulta");
+        toast(error.message);
+    }
+}
+
+async function lookupCustomerByCep() {
+    const form = document.getElementById("customer-form");
+    const cep = form.querySelector('[name="cep"]').value;
+    if (digitsOnly(cep).length !== 8) {
+        toast("Informe um CEP valido para consulta.");
+        return;
+    }
+    try {
+        setSyncStatus("Consultando CEP...");
+        const result = await apiFetch(`/api/v1/clientes/consultar-cep/${digitsOnly(cep)}`);
+        fillForm(form, {
+            cep: formatCep(result.cep || ""),
+            endereco: result.endereco || "",
+            bairro: result.bairro || "",
+            cidade: result.cidade || "",
+            estado: result.estado || "",
+        });
+        setSyncStatus("Sincronizado");
+        toast("Endereco preenchido automaticamente pelo CEP.");
+    } catch (error) {
+        setSyncStatus("Falha na consulta");
+        toast(error.message);
+    }
+}
+
 function bindCrudForms() {
     bindForm("customer-form", "customer", async (form) => {
-        await submitCrud("customer", "/api/v1/clientes", objectFromForm(form));
+        const payload = objectFromForm(form);
+        payload.cep = digitsOnly(payload.cep || "") || null;
+        payload.numero = payload.numero || null;
+        payload.complemento = payload.complemento || null;
+        payload.bairro = payload.bairro || null;
+        await submitCrud("customer", "/api/v1/clientes", payload);
     });
 
     bindForm("product-form", "product", async (form) => {
@@ -604,13 +1216,43 @@ function bindCrudForms() {
     });
 
     bindForm("work-order-form", "workOrder", async (form) => {
-        await submitCrud("workOrder", "/api/v1/os", getWorkOrderPayload(form));
-        clearWorkOrderForm();
+        await save_order(form);
+    });
+
+    bindForm("appointment-form", "appointment", async (form) => {
+        await saveAppointment(form);
+    });
+
+    bindForm("provider-company-form", "providerCompany", async (form) => {
+        const payload = objectFromForm(form);
+        payload.usuarios_vinculados_ids = Array.from(form.querySelector('[name="usuarios_vinculados_ids"]').selectedOptions)
+            .map((option) => Number(option.value));
+        const id = state.editing.providerCompany;
+        const result = await apiFetch(
+            id ? `/api/v1/empresas-prestadoras/${id}` : "/api/v1/empresas-prestadoras",
+            {
+                method: id ? "PUT" : "POST",
+                body: JSON.stringify(payload),
+            },
+        );
+        state.editing.providerCompany = result.id;
+        form.querySelector(".form-error").classList.add("hidden");
+        form.querySelector('[data-cancel-button="providerCompany"]').classList.remove("hidden");
+        form.querySelector('[data-save-button="providerCompany"]').textContent = "Salvar alteracoes";
+        const note = form.querySelector('[data-mode-note="providerCompany"]');
+        note.classList.remove("hidden");
+        note.textContent = `Editando registro #${result.id}.`;
+        await afterMutation(id ? "Empresa atualizada com sucesso." : "Empresa salva com sucesso.");
+        if (!id) {
+            switchProviderCompanyTab("licencas");
+        }
+        renderProviderCompanyLicenseWorkspace();
     });
 
     bindForm("user-form", "user", async (form) => {
         const payload = objectFromForm(form);
         payload.is_active = payload.is_active === "true";
+        payload.empresa_prestadora_id = payload.empresa_prestadora_id ? Number(payload.empresa_prestadora_id) : null;
         if (state.editing.user && !payload.password) {
             delete payload.password;
         }
@@ -621,6 +1263,7 @@ function bindCrudForms() {
         const payload = objectFromForm(form);
         payload.max_users = Number(payload.max_users);
         payload.notes = payload.notes || null;
+        payload.empresa_prestadora_id = payload.empresa_prestadora_id ? Number(payload.empresa_prestadora_id) : null;
         await submitCrud("license", "/api/v1/licencas", payload);
     });
 }
@@ -630,12 +1273,23 @@ function bindForm(formId, kind, handler) {
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const errorBox = form.querySelector(".form-error");
+        const saveButton = form.querySelector(`[data-save-button="${kind}"]`);
         errorBox.classList.add("hidden");
+        if (saveButton) {
+            saveButton.disabled = true;
+            saveButton.dataset.originalLabel = saveButton.dataset.originalLabel || saveButton.textContent;
+            saveButton.textContent = kind === "workOrder" ? "Salvando..." : "Salvando...";
+        }
         try {
             await handler(form);
         } catch (error) {
             errorBox.textContent = error.message;
             errorBox.classList.remove("hidden");
+        } finally {
+            if (saveButton) {
+                saveButton.disabled = false;
+                saveButton.textContent = saveButton.dataset.originalLabel || saveLabelForKind(kind);
+            }
         }
     });
 
@@ -646,13 +1300,15 @@ function bindForm(formId, kind, handler) {
 
 async function submitCrud(kind, baseUrl, payload) {
     const id = state.editing[kind];
+    let result;
     if (id) {
-        await apiFetch(`${baseUrl}/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+        result = await apiFetch(`${baseUrl}/${id}`, { method: "PUT", body: JSON.stringify(payload) });
     } else {
-        await apiFetch(baseUrl, { method: "POST", body: JSON.stringify(payload) });
+        result = await apiFetch(baseUrl, { method: "POST", body: JSON.stringify(payload) });
     }
     resetFormMode(kind);
     await afterMutation(id ? "Registro atualizado com sucesso." : "Registro salvo com sucesso.");
+    return result;
 }
 
 async function afterMutation(message) {
@@ -664,6 +1320,28 @@ function objectFromForm(form) {
     return Object.fromEntries(new FormData(form).entries());
 }
 
+function extractPrefixedFields(form, prefix) {
+    const entries = Array.from(new FormData(form).entries())
+        .filter(([key]) => key.startsWith(prefix))
+        .map(([key, value]) => [key.replace(prefix, ""), typeof value === "string" ? value.trim() : value]);
+    if (!entries.length) {
+        return null;
+    }
+    const payload = Object.fromEntries(entries);
+    const hasValue = Object.values(payload).some((value) => String(value || "").trim() !== "");
+    return hasValue ? payload : null;
+}
+
+function clearPrefixedFields(form, prefix) {
+    form.querySelectorAll(`[name^="${prefix}"]`).forEach((field) => {
+        if (field.tagName === "SELECT") {
+            field.selectedIndex = 0;
+        } else {
+            field.value = "";
+        }
+    });
+}
+
 function hydrateDynamicControls() {
     setSelectOptions(document.querySelector('#finance-form [name="cliente_id"]'), state.customers, "id", "razao_social");
     setSelectOptions(document.querySelector('#work-order-form [name="cliente_id"]'), state.customers, "id", "razao_social");
@@ -673,24 +1351,38 @@ function hydrateDynamicControls() {
         "id",
         "nome",
     );
+    setSelectOptions(document.querySelector('#appointment-form [name="cliente_id"]'), state.customers, "id", "razao_social");
+    setSelectOptions(
+        document.querySelector('#appointment-form [name="tecnico_id"]'),
+        state.technicians.filter((item) => item.ativo),
+        "id",
+        "nome",
+    );
+    syncAppointmentWorkOrderOptions();
 
     document.querySelectorAll(".product-select").forEach((select) => {
         setSelectOptions(select, state.products, "id", "nome");
     });
-
-    const pestsSelector = document.getElementById("pests-selector");
-    pestsSelector.innerHTML = state.pests.length
-        ? state.pests
-            .map(
-                (pest) => `
-            <label class="checkbox-chip">
-                <input type="checkbox" name="pragas_ids" value="${pest.id}">
-                <span>${escapeHtml(pest.nome_comum)}</span>
-            </label>
-        `,
-            )
-            .join("")
-        : `<div class="empty-state">Cadastre pragas para vincular na OS.</div>`;
+    setSelectOptions(
+        document.querySelector('#user-form [name="empresa_prestadora_id"]'),
+        state.providerCompanies.map((item) => ({ ...item, display_name: item.nome_fantasia || item.razao_social })),
+        "id",
+        "display_name",
+    );
+    setSelectOptions(
+        document.querySelector('#license-form [name="empresa_prestadora_id"]'),
+        state.providerCompanies.map((item) => ({ ...item, display_name: item.nome_fantasia || item.razao_social })),
+        "id",
+        "display_name",
+    );
+    setMultiSelectOptions(
+        document.querySelector('#provider-company-form [name="usuarios_vinculados_ids"]'),
+        state.users.map((item) => ({ ...item, display_name: `${item.nome} | ${item.username} | ${item.role}` })),
+        "id",
+        "display_name",
+    );
+    syncWorkOrderPickerState();
+    renderWorkOrderSelectors();
 }
 
 function setSelectOptions(select, items, valueKey, labelKey) {
@@ -710,21 +1402,53 @@ function setSelectOptions(select, items, valueKey, labelKey) {
     }
 }
 
+function setMultiSelectOptions(select, items, valueKey, labelKey) {
+    if (!select) {
+        return;
+    }
+    const selectedValues = Array.from(select.selectedOptions).map((option) => option.value);
+    select.innerHTML = items
+        .map((item) => `<option value="${item[valueKey]}">${escapeHtml(item[labelKey])}</option>`)
+        .join("");
+    selectedValues.forEach((value) => {
+        const option = select.querySelector(`option[value="${value}"]`);
+        if (option) {
+            option.selected = true;
+        }
+    });
+}
+
 function addProductRow(values = {}) {
     const list = document.getElementById("products-list");
     const row = document.createElement("div");
     row.className = "product-item-row";
     row.innerHTML = `
-        <select class="product-select" required></select>
-        <input type="number" class="product-quantity" min="0.01" step="0.01" placeholder="Quantidade" required>
-        <input type="text" class="product-dilution" placeholder="Diluicao" required>
-        <button type="button" class="btn btn-default ghost-button remove-product">Remover</button>
+        <label class="product-row-field product-row-product">
+            <span class="product-row-label">Produto</span>
+            <select class="product-select" required></select>
+        </label>
+        <label class="product-row-field">
+            <span class="product-row-label">Quantidade</span>
+            <input type="number" class="product-quantity" min="0.01" step="0.01" placeholder="Quantidade" required>
+        </label>
+        <label class="product-row-field">
+            <span class="product-row-label">Diluicao</span>
+            <input type="text" class="product-dilution" placeholder="Diluicao" required>
+        </label>
+        <div class="product-row-actions">
+            <button type="button" class="btn btn-default ghost-button remove-product">Remover</button>
+        </div>
     `;
-    row.querySelector(".remove-product").addEventListener("click", () => row.remove());
+    const productSelect = row.querySelector(".product-select");
+    productSelect.addEventListener("change", () => renderWorkOrderProductPicker());
+    row.querySelector(".remove-product").addEventListener("click", () => {
+        row.remove();
+        renderWorkOrderProductPicker();
+    });
     list.appendChild(row);
-    setSelectOptions(row.querySelector(".product-select"), state.products, "id", "nome");
+    setSelectOptions(productSelect, state.products, "id", "nome");
     if (values.produto_id) {
-        row.querySelector(".product-select").value = String(values.produto_id);
+        productSelect.value = String(values.produto_id);
     }
     if (values.quantidade) {
         row.querySelector(".product-quantity").value = values.quantidade;
@@ -732,16 +1456,31 @@ function addProductRow(values = {}) {
     if (values.diluicao) {
         row.querySelector(".product-dilution").value = values.diluicao;
     }
+    renderWorkOrderProductPicker();
 }
 
 function clearWorkOrderForm() {
     const form = document.getElementById("work-order-form");
     form.reset();
+    clearWorkOrderValidation(form);
+    form.querySelector(".form-error").classList.add("hidden");
     document.getElementById("products-list").innerHTML = "";
-    addProductRow();
-    form.querySelectorAll('input[name="pragas_ids"]').forEach((checkbox) => {
-        checkbox.checked = false;
-    });
+    state.workOrderPicker.productSearch = "";
+    state.workOrderPicker.pestSearch = "";
+    state.workOrderPicker.productTab = "catalogo";
+    state.workOrderPicker.stagedProductIds = [];
+    state.workOrderPicker.stagedPestIds = [];
+    state.workOrderPicker.selectedPestIds = [];
+    document.getElementById("product-picker-search").value = "";
+    document.getElementById("pest-picker-search").value = "";
+    document.getElementById("product-picker-default-quantity").value = "1";
+    document.getElementById("product-picker-default-dilution").value = "";
+    document.getElementById("work-order-photo-input").value = "";
+    form.querySelector('[name="gerar_agendamento"]').value = "true";
+    form.querySelector('[name="duracao_prevista_minutos"]').value = "60";
+    form.querySelector('[name="sincronizar_google_agenda"]').value = "false";
+    renderWorkOrderSelectors();
+    renderWorkOrderFormHeader();
 }
 
 function getWorkOrderPayload(form) {
@@ -767,9 +1506,879 @@ function getWorkOrderPayload(form) {
         status: raw.status,
         valor_servico: raw.valor_servico || "0",
         produtos,
-        pragas_ids: Array.from(form.querySelectorAll('input[name="pragas_ids"]:checked')).map((item) => Number(item.value)),
+        pragas_ids: [...state.workOrderPicker.selectedPestIds],
         gerar_financeiro: raw.gerar_financeiro === "true",
+        gerar_agendamento: raw.gerar_agendamento === "true",
+        tipo_servico_agendamento: raw.tipo_servico_agendamento || null,
+        duracao_prevista_minutos: Number(raw.duracao_prevista_minutos || 60),
+        observacoes_internas_agendamento: raw.observacoes_internas_agendamento || null,
+        instrucoes_tecnicas_agendamento: raw.instrucoes_tecnicas_agendamento || null,
+        retorno_revisita_agendamento: raw.retorno_revisita_agendamento || null,
+        sincronizar_google_agenda: raw.sincronizar_google_agenda === "true",
     };
+}
+
+function validate_work_order_form(form) {
+    clearWorkOrderValidation(form);
+    const payload = getWorkOrderPayload(form);
+    const errors = [];
+    const markFieldInvalid = (selector, message) => {
+        const field = form.querySelector(selector);
+        if (field) {
+            field.classList.add("field-invalid");
+        }
+        errors.push(message);
+    };
+    const markNodeInvalid = (node, message) => {
+        node?.classList.add("field-invalid");
+        errors.push(message);
+    };
+
+    if (!payload.numero?.trim()) {
+        markFieldInvalid('[name="numero"]', "Informe o numero da ordem de servico.");
+    }
+    if (!payload.cliente_id) {
+        markFieldInvalid('[name="cliente_id"]', "Selecione um cliente para a ordem.");
+    }
+    if (!payload.tecnico_id) {
+        markFieldInvalid('[name="tecnico_id"]', "Selecione um tecnico ativo para a ordem.");
+    }
+    if (!payload.data_execucao) {
+        markFieldInvalid('[name="data_execucao"]', "Informe a data de execucao.");
+    }
+    if (!payload.garantia_ate) {
+        markFieldInvalid('[name="garantia_ate"]', "Informe a data de validade da garantia.");
+    }
+    if (!payload.hora_inicio) {
+        markFieldInvalid('[name="hora_inicio"]', "Informe a hora inicial do atendimento.");
+    }
+    if (!payload.local_execucao?.trim()) {
+        markFieldInvalid('[name="local_execucao"]', "Informe o local de execucao da ordem.");
+    }
+
+    const rawStart = form.querySelector('[name="hora_inicio"]')?.value || "";
+    const rawEnd = form.querySelector('[name="hora_fim"]')?.value || "";
+    if (payload.data_execucao && payload.garantia_ate && payload.garantia_ate < payload.data_execucao) {
+        markFieldInvalid('[name="garantia_ate"]', "A garantia deve ser igual ou posterior a data de execucao.");
+    }
+    if (rawStart && rawEnd && rawEnd <= rawStart) {
+        markFieldInvalid('[name="hora_fim"]', "A hora final deve ser posterior a hora inicial.");
+    }
+
+    const selectedProductIds = new Set();
+    const productRows = Array.from(form.querySelectorAll(".product-item-row"));
+    if (!productRows.length) {
+        markNodeInvalid(document.getElementById("products-tab-ordem"), "Adicione pelo menos um produto na ordem.");
+    }
+    productRows.forEach((row, index) => {
+        const productSelect = row.querySelector(".product-select");
+        const quantityInput = row.querySelector(".product-quantity");
+        const dilutionInput = row.querySelector(".product-dilution");
+        const productId = Number(productSelect?.value || 0);
+        const quantity = Number(quantityInput?.value || 0);
+        const dilution = dilutionInput?.value?.trim() || "";
+        if (!productId) {
+            productSelect?.classList.add("field-invalid");
+            errors.push(`Selecione o produto da linha ${index + 1}.`);
+        } else if (selectedProductIds.has(productId)) {
+            productSelect?.classList.add("field-invalid");
+            errors.push(`O produto da linha ${index + 1} esta duplicado na OS.`);
+        } else {
+            selectedProductIds.add(productId);
+        }
+        if (!(quantity > 0)) {
+            quantityInput?.classList.add("field-invalid");
+            errors.push(`Informe uma quantidade valida na linha ${index + 1}.`);
+        }
+        if (!dilution) {
+            dilutionInput?.classList.add("field-invalid");
+            errors.push(`Informe a diluicao do produto na linha ${index + 1}.`);
+        }
+    });
+
+    if (errors.length) {
+        throw new Error([...new Set(errors)].join(" "));
+    }
+
+    return payload;
+}
+
+async function save_order(form) {
+    const payload = validate_work_order_form(form);
+    clearWorkOrderSaveFeedback();
+    const workOrderId = state.editing.workOrder;
+    const result = await apiFetch(
+        workOrderId ? `/api/v1/os/${workOrderId}` : "/api/v1/os",
+        {
+            method: workOrderId ? "PUT" : "POST",
+            body: JSON.stringify(payload),
+        },
+    );
+    resetFormMode("workOrder");
+    await afterMutation("Order saved successfully");
+    setWorkOrderWorkspaceView("new");
+    state.workOrderWorkflow.lastSavedOrderId = result.id;
+    state.workOrderWorkflow.certificateReady = false;
+    try {
+        await generate_certificate(result.id, { mode: "background" });
+        state.workOrderWorkflow.certificateReady = true;
+    } catch (error) {
+        state.workOrderWorkflow.certificateReady = false;
+        toast(`Ordem salva, mas houve falha ao preparar o certificado: ${error.message}`);
+    }
+    renderWorkOrderSaveFeedback();
+    return result;
+}
+
+function clearWorkOrderValidation(form = document.getElementById("work-order-form")) {
+    form?.querySelectorAll(".field-invalid").forEach((node) => node.classList.remove("field-invalid"));
+}
+
+function clearWorkOrderSaveFeedback() {
+    state.workOrderWorkflow.lastSavedOrderId = null;
+    state.workOrderWorkflow.certificateReady = false;
+    renderWorkOrderSaveFeedback();
+}
+
+function bindWorkOrderSelectors() {
+    const workOrderForm = document.getElementById("work-order-form");
+    document.getElementById("add-product-row").addEventListener("click", () => addProductRow());
+    workOrderForm.addEventListener("input", () => {
+        clearWorkOrderValidation(workOrderForm);
+        const errorBox = workOrderForm.querySelector(".form-error");
+        errorBox.classList.add("hidden");
+        if (state.workOrderWorkflow.lastSavedOrderId) {
+            clearWorkOrderSaveFeedback();
+        }
+    });
+    document.getElementById("product-picker-search").addEventListener("input", (event) => {
+        state.workOrderPicker.productSearch = event.target.value.trim().toLowerCase();
+        renderWorkOrderProductPicker();
+    });
+    document.getElementById("pest-picker-search").addEventListener("input", (event) => {
+        state.workOrderPicker.pestSearch = event.target.value.trim().toLowerCase();
+        renderWorkOrderPestPicker();
+    });
+    document.querySelectorAll("[data-products-tab-trigger]").forEach((button) => {
+        button.addEventListener("click", () => {
+            setWorkOrderProductTab(button.dataset.productsTabTrigger);
+        });
+        button.addEventListener("keydown", (event) => {
+            const tabs = Array.from(document.querySelectorAll("[data-products-tab-trigger]"));
+            const currentIndex = tabs.indexOf(button);
+            if (event.key !== "ArrowRight" && event.key !== "ArrowLeft" && event.key !== "Home" && event.key !== "End") {
+                return;
+            }
+            event.preventDefault();
+            if (event.key === "Home") {
+                tabs[0]?.focus();
+                setWorkOrderProductTab(tabs[0]?.dataset.productsTabTrigger);
+                return;
+            }
+            if (event.key === "End") {
+                tabs[tabs.length - 1]?.focus();
+                setWorkOrderProductTab(tabs[tabs.length - 1]?.dataset.productsTabTrigger);
+                return;
+            }
+            const delta = event.key === "ArrowRight" ? 1 : -1;
+            const nextIndex = (currentIndex + delta + tabs.length) % tabs.length;
+            tabs[nextIndex]?.focus();
+            setWorkOrderProductTab(tabs[nextIndex]?.dataset.productsTabTrigger);
+        });
+    });
+    document.getElementById("product-picker-options").addEventListener("click", (event) => {
+        const option = event.target.closest("[data-product-option]");
+        if (!option || option.disabled) {
+            return;
+        }
+        toggleStagedSelection("stagedProductIds", Number(option.dataset.id));
+        renderWorkOrderProductPicker();
+    });
+    document.getElementById("pest-picker-options").addEventListener("click", (event) => {
+        const option = event.target.closest("[data-pest-option]");
+        if (!option || option.disabled) {
+            return;
+        }
+        toggleStagedSelection("stagedPestIds", Number(option.dataset.id));
+        renderWorkOrderPestPicker();
+    });
+    document.getElementById("product-picker-select-visible").addEventListener("click", selectVisibleProductsToWorkOrder);
+    document.getElementById("product-picker-add-selected").addEventListener("click", addSelectedProductsToWorkOrder);
+    document.getElementById("product-picker-clear-selection").addEventListener("click", () => {
+        state.workOrderPicker.stagedProductIds = [];
+        renderWorkOrderProductPicker();
+    });
+    document.getElementById("pest-picker-add-selected").addEventListener("click", addSelectedPestsToWorkOrder);
+    document.getElementById("pest-picker-clear-selection").addEventListener("click", () => {
+        state.workOrderPicker.stagedPestIds = [];
+        renderWorkOrderPestPicker();
+    });
+    document.getElementById("selected-pests-list").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-remove-pest]");
+        if (!button) {
+            return;
+        }
+        state.workOrderPicker.selectedPestIds = state.workOrderPicker.selectedPestIds.filter(
+            (id) => id !== Number(button.dataset.id),
+        );
+        renderWorkOrderPestPicker();
+    });
+    document.getElementById("work-order-photo-upload").addEventListener("click", uploadWorkOrderPhotos);
+    document.getElementById("work-order-photo-list").addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-remove-photo]");
+        if (!button) {
+            return;
+        }
+        if (!window.confirm("Deseja remover esta foto da ordem de servico?")) {
+            return;
+        }
+        try {
+            const workOrderId = Number(button.dataset.workOrderId);
+            const photoId = Number(button.dataset.photoId);
+            await apiFetch(`/api/v1/os/${workOrderId}/fotos/${photoId}`, { method: "DELETE" });
+            await loadAllData();
+            if (state.editing.workOrder === workOrderId) {
+                startEditing("workOrder", workOrderId);
+            }
+            toast("Foto removida com sucesso.");
+        } catch (error) {
+            toast(error.message);
+        }
+    });
+    document.getElementById("work-order-save-feedback").addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-work-order-action][data-id]");
+        if (!button) {
+            return;
+        }
+        try {
+            const workOrderId = Number(button.dataset.id);
+            if (button.dataset.workOrderAction === "print") {
+                await print_order(workOrderId);
+                return;
+            }
+            if (button.dataset.workOrderAction === "certificate-preview") {
+                await generate_certificate(workOrderId, { mode: "preview" });
+                return;
+            }
+            if (button.dataset.workOrderAction === "certificate-download") {
+                await generate_certificate(workOrderId, { mode: "download" });
+            }
+        } catch (error) {
+            toast(error.message);
+        }
+    });
+}
+
+function toggleStagedSelection(key, id) {
+    const current = state.workOrderPicker[key];
+    state.workOrderPicker[key] = current.includes(id)
+        ? current.filter((item) => item !== id)
+        : [...current, id];
+}
+
+function syncWorkOrderPickerState() {
+    const productIds = new Set(state.products.map((item) => item.id));
+    const pestIds = new Set(state.pests.map((item) => item.id));
+    state.workOrderPicker.stagedProductIds = uniqueIds(state.workOrderPicker.stagedProductIds.filter((id) => productIds.has(id)));
+    state.workOrderPicker.stagedPestIds = uniqueIds(state.workOrderPicker.stagedPestIds.filter((id) => pestIds.has(id)));
+    state.workOrderPicker.selectedPestIds = uniqueIds(state.workOrderPicker.selectedPestIds.filter((id) => pestIds.has(id)));
+}
+
+function renderWorkOrderSelectors() {
+    renderWorkOrderProductTabs();
+    renderWorkOrderProductPicker();
+    renderWorkOrderPestPicker();
+    renderWorkOrderPhotoWorkspace();
+}
+
+function setWorkOrderProductTab(tab) {
+    state.workOrderPicker.productTab = tab === "ordem" ? "ordem" : "catalogo";
+    renderWorkOrderProductTabs();
+}
+
+function renderWorkOrderProductTabs() {
+    document.querySelectorAll("[data-products-tab-trigger]").forEach((button) => {
+        const isActive = button.dataset.productsTabTrigger === state.workOrderPicker.productTab;
+        button.classList.toggle("tab-active", isActive);
+        button.setAttribute("aria-selected", isActive ? "true" : "false");
+        button.setAttribute("tabindex", isActive ? "0" : "-1");
+    });
+    document.querySelectorAll("[data-products-tab-panel]").forEach((panel) => {
+        const isActive = panel.dataset.productsTabPanel === state.workOrderPicker.productTab;
+        panel.classList.toggle("tab-content-active", isActive);
+        panel.hidden = !isActive;
+    });
+}
+
+function renderWorkOrderProductPicker() {
+    const target = document.getElementById("product-picker-options");
+    if (!target) {
+        return;
+    }
+    const search = state.workOrderPicker.productSearch;
+    const selectedProductIds = getSelectedProductIds();
+    const filteredProducts = state.products.filter((item) => [item.nome, item.principio_ativo, item.registro_ms, item.grupo_quimico]
+        .join(" ")
+        .toLowerCase()
+        .includes(search));
+    const availableProducts = filteredProducts.filter((item) => !selectedProductIds.includes(item.id));
+
+    target.innerHTML = filteredProducts.length
+        ? filteredProducts
+            .map((item) => {
+                const alreadyAdded = selectedProductIds.includes(item.id);
+                const staged = state.workOrderPicker.stagedProductIds.includes(item.id);
+                return `
+                    <button
+                        type="button"
+                        class="selection-option ${staged ? "is-staged" : ""} ${alreadyAdded ? "is-selected" : ""}"
+                        data-product-option
+                        data-id="${item.id}"
+                        ${alreadyAdded ? "disabled" : ""}
+                    >
+                        <span class="selection-option-topline">
+                            <span class="selection-option-title">${escapeHtml(item.nome)}</span>
+                            <span class="selection-option-stock">${escapeHtml(String(item.estoque_atual))} em estoque</span>
+                        </span>
+                        <span class="selection-option-meta">
+                            ${escapeHtml(item.principio_ativo)} | Grupo ${escapeHtml(item.grupo_quimico)} | Registro ${escapeHtml(item.registro_ms)}
+                        </span>
+                        <span class="selection-option-state">${alreadyAdded ? "Ja adicionado" : staged ? "Selecionado" : "Selecionar"}</span>
+                    </button>
+                `;
+            })
+            .join("")
+        : `<div class="empty-state">Nenhum produto encontrado para a busca informada.</div>`;
+
+    renderWorkOrderProductSummary(filteredProducts.length, availableProducts.length);
+}
+
+function renderWorkOrderPestPicker() {
+    const optionsTarget = document.getElementById("pest-picker-options");
+    const selectedTarget = document.getElementById("selected-pests-list");
+    if (!optionsTarget || !selectedTarget) {
+        return;
+    }
+
+    const search = state.workOrderPicker.pestSearch;
+    const filteredPests = state.pests.filter((item) => [item.nome_comum, item.nome_cientifico, item.descricao]
+        .join(" ")
+        .toLowerCase()
+        .includes(search));
+
+    optionsTarget.innerHTML = filteredPests.length
+        ? filteredPests
+            .map((item) => {
+                const alreadyAdded = state.workOrderPicker.selectedPestIds.includes(item.id);
+                const staged = state.workOrderPicker.stagedPestIds.includes(item.id);
+                return `
+                    <button
+                        type="button"
+                        class="selection-option ${staged ? "is-staged" : ""} ${alreadyAdded ? "is-selected" : ""}"
+                        data-pest-option
+                        data-id="${item.id}"
+                        ${alreadyAdded ? "disabled" : ""}
+                    >
+                        <span class="selection-option-title">${escapeHtml(item.nome_comum)}</span>
+                        <span class="selection-option-meta">${escapeHtml(item.nome_cientifico)}</span>
+                        <span class="selection-option-state">${alreadyAdded ? "Ja adicionada" : staged ? "Selecionada" : "Selecionar"}</span>
+                    </button>
+                `;
+            })
+            .join("")
+        : `<div class="empty-state">Nenhuma praga encontrada para a busca informada.</div>`;
+
+    selectedTarget.innerHTML = state.workOrderPicker.selectedPestIds.length
+        ? state.workOrderPicker.selectedPestIds
+            .map((id) => state.pests.find((item) => item.id === id))
+            .filter(Boolean)
+            .map(
+                (item) => `
+                    <div class="selected-chip">
+                        <div>
+                            <strong>${escapeHtml(item.nome_comum)}</strong>
+                            <span>${escapeHtml(item.nome_cientifico)}</span>
+                        </div>
+                        <button type="button" class="btn btn-default ghost-button" data-remove-pest data-id="${item.id}">Remover</button>
+                    </div>
+                `,
+            )
+            .join("")
+        : `<div class="empty-state">Nenhuma praga selecionada para esta ordem.</div>`;
+}
+
+function addSelectedProductsToWorkOrder() {
+    const existingIds = getSelectedProductIds();
+    const newIds = state.workOrderPicker.stagedProductIds.filter((id) => !existingIds.includes(id));
+    if (!newIds.length) {
+        toast("Selecione pelo menos um produto novo para adicionar.");
+        return;
+    }
+    const defaultQuantity = document.getElementById("product-picker-default-quantity").value || "1";
+    const defaultDilution = document.getElementById("product-picker-default-dilution").value.trim();
+    newIds.forEach((id) => addProductRow({
+        produto_id: id,
+        quantidade: defaultQuantity,
+        diluicao: defaultDilution,
+    }));
+    state.workOrderPicker.stagedProductIds = [];
+    renderWorkOrderProductPicker();
+}
+
+function selectVisibleProductsToWorkOrder() {
+    const search = state.workOrderPicker.productSearch;
+    const selectedProductIds = getSelectedProductIds();
+    const visibleIds = state.products
+        .filter((item) => [item.nome, item.principio_ativo, item.registro_ms, item.grupo_quimico]
+            .join(" ")
+            .toLowerCase()
+            .includes(search))
+        .map((item) => item.id)
+        .filter((id) => !selectedProductIds.includes(id));
+
+    if (!visibleIds.length) {
+        toast("Nenhum produto disponivel nesta busca para selecionar.");
+        return;
+    }
+
+    state.workOrderPicker.stagedProductIds = uniqueIds([...state.workOrderPicker.stagedProductIds, ...visibleIds]);
+    renderWorkOrderProductPicker();
+}
+
+function renderWorkOrderProductSummary(filteredCount, availableCount) {
+    const stagedCount = state.workOrderPicker.stagedProductIds.length;
+    const addedCount = getSelectedProductIds().length;
+    const selectionCountLabel = document.getElementById("product-picker-selection-count");
+    const selectionHintLabel = document.getElementById("product-picker-selection-hint");
+    const addedCountLabel = document.getElementById("product-picker-added-count");
+    const emptyState = document.getElementById("products-empty-state");
+    const addButton = document.getElementById("product-picker-add-selected");
+    const clearButton = document.getElementById("product-picker-clear-selection");
+    const selectVisibleButton = document.getElementById("product-picker-select-visible");
+
+    if (selectionCountLabel) {
+        selectionCountLabel.textContent = `${stagedCount} selecionado(s)`;
+    }
+    if (selectionHintLabel) {
+        if (stagedCount > 0) {
+            selectionHintLabel.textContent = "Defina quantidade e diluicao padrao e adicione tudo em lote.";
+        } else if (filteredCount > 0) {
+            selectionHintLabel.textContent = "Clique nos cards do catalogo para montar o lote desta OS.";
+        } else {
+            selectionHintLabel.textContent = "Ajuste a busca para localizar produtos do catalogo.";
+        }
+    }
+    if (addedCountLabel) {
+        addedCountLabel.textContent = `${addedCount} produto(s) na OS`;
+    }
+    if (emptyState) {
+        emptyState.classList.toggle("hidden", addedCount > 0);
+    }
+    if (addButton) {
+        addButton.disabled = stagedCount === 0;
+    }
+    if (clearButton) {
+        clearButton.disabled = stagedCount === 0;
+    }
+    if (selectVisibleButton) {
+        selectVisibleButton.disabled = availableCount === 0;
+    }
+}
+
+function renderWorkOrderPhotoCards(photos, options = {}) {
+    const { removable = false, workOrderId = null, compact = false } = options;
+    if (!photos.length) {
+        return `<div class="empty-state">Nenhuma foto anexada nesta ordem de servico.</div>`;
+    }
+
+    const listClass = compact ? "work-order-photo-list work-order-photo-list-compact" : "work-order-photo-list";
+    return `
+        <div class="${listClass}">
+            ${photos.map((photo) => `
+                <article class="work-order-photo-card ${compact ? "work-order-photo-card-compact" : ""}">
+                    <div class="work-order-photo-thumb" data-photo-thumb data-photo-url="${escapeHtml(photo.url)}">
+                        <span>Carregando foto...</span>
+                    </div>
+                    <div class="work-order-photo-copy">
+                        <strong>${escapeHtml(photo.filename)}</strong>
+                        <span>${formatDateTime(photo.created_at)}</span>
+                    </div>
+                    ${removable
+        ? `
+                        <button
+                            type="button"
+                            class="btn btn-default ghost-button action-button danger"
+                            data-remove-photo
+                            data-work-order-id="${workOrderId}"
+                            data-photo-id="${photo.id}"
+                        >
+                            Remover
+                        </button>
+                    `
+        : `
+                        <button
+                            type="button"
+                            class="btn btn-default ghost-button"
+                            data-view-photo-url="${escapeHtml(photo.url)}"
+                        >
+                            Abrir foto
+                        </button>
+                    `}
+                </article>
+            `).join("")}
+        </div>
+    `;
+}
+
+function renderWorkOrderPhotoWorkspace() {
+    const photoInput = document.getElementById("work-order-photo-input");
+    const uploadButton = document.getElementById("work-order-photo-upload");
+    const hint = document.getElementById("work-order-photo-hint");
+    const list = document.getElementById("work-order-photo-list");
+    if (!photoInput || !uploadButton || !hint || !list) {
+        return;
+    }
+
+    const workOrderId = state.editing.workOrder;
+    const workOrder = workOrderId ? getEntityByKind("workOrder", workOrderId) : null;
+    const isEditable = Boolean(workOrder);
+
+    photoInput.disabled = !isEditable;
+    uploadButton.disabled = !isEditable;
+
+    if (!isEditable) {
+        hint.textContent = "Salve a ordem e clique em editar para anexar fotos do atendimento.";
+        list.innerHTML = `<div class="empty-state">As fotos ficam disponiveis quando a OS ja existe e esta em edicao.</div>`;
+        return;
+    }
+
+    hint.textContent = "Adicione fotos JPG, PNG ou WEBP para documentar a execucao deste atendimento.";
+    list.innerHTML = renderWorkOrderPhotoCards(workOrder.fotos || [], { removable: true, workOrderId: workOrder.id });
+
+    hydrateWorkOrderPhotoThumbs(list);
+}
+
+async function hydrateWorkOrderPhotoThumbs(root = document) {
+    const nodes = Array.from(root.querySelectorAll("[data-photo-thumb][data-photo-url]"))
+        .filter((node) => node.dataset.photoHydrated !== "true");
+    await Promise.all(nodes.map(async (node) => {
+        try {
+            const blob = await apiFetch(node.dataset.photoUrl);
+            const objectUrl = URL.createObjectURL(blob);
+            node.innerHTML = `<img src="${objectUrl}" alt="Foto da ordem de servico">`;
+            node.dataset.photoHydrated = "true";
+        } catch {
+            node.innerHTML = `<span>Nao foi possivel carregar a foto.</span>`;
+        }
+    }));
+}
+
+async function uploadWorkOrderPhotos() {
+    const workOrderId = state.editing.workOrder;
+    if (!workOrderId) {
+        toast("Salve e edite a ordem de servico antes de anexar fotos.");
+        return;
+    }
+
+    const input = document.getElementById("work-order-photo-input");
+    const files = Array.from(input?.files || []);
+    if (!files.length) {
+        toast("Selecione pelo menos uma foto para enviar.");
+        return;
+    }
+
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file));
+
+    try {
+        await apiFetch(`/api/v1/os/${workOrderId}/fotos`, {
+            method: "POST",
+            body: formData,
+        });
+        if (input) {
+            input.value = "";
+        }
+        await loadAllData();
+        startEditing("workOrder", workOrderId);
+        toast("Fotos anexadas com sucesso.");
+    } catch (error) {
+        toast(error.message);
+    }
+}
+
+function formatDateTime(value) {
+    return new Date(value).toLocaleString("pt-BR");
+}
+
+function addSelectedPestsToWorkOrder() {
+    const newIds = state.workOrderPicker.stagedPestIds.filter((id) => !state.workOrderPicker.selectedPestIds.includes(id));
+    if (!newIds.length) {
+        toast("Selecione pelo menos uma praga nova para adicionar.");
+        return;
+    }
+    state.workOrderPicker.selectedPestIds = uniqueIds([...state.workOrderPicker.selectedPestIds, ...newIds]);
+    state.workOrderPicker.stagedPestIds = [];
+    renderWorkOrderPestPicker();
+}
+
+function getSelectedProductIds() {
+    return uniqueIds(
+        Array.from(document.querySelectorAll("#products-list .product-select"))
+            .map((select) => Number(select.value))
+            .filter(Boolean),
+    );
+}
+
+function uniqueIds(items) {
+    return [...new Set(items.map((item) => Number(item)).filter(Boolean))];
+}
+
+function todayIso() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+function parseLocalDate(value) {
+    return new Date(`${value || todayIso()}T00:00:00`);
+}
+
+function formatTime(value) {
+    return value ? String(value).slice(0, 5) : "--:--";
+}
+
+function getAppointmentPayload(form) {
+    const raw = objectFromForm(form);
+    return {
+        cliente_id: Number(raw.cliente_id),
+        os_id: raw.os_id ? Number(raw.os_id) : null,
+        tecnico_id: raw.tecnico_id ? Number(raw.tecnico_id) : null,
+        tipo_servico: raw.tipo_servico,
+        data_agendamento: raw.data_agendamento,
+        hora_agendamento: raw.hora_agendamento ? `${raw.hora_agendamento}:00` : null,
+        duracao_prevista_minutos: Number(raw.duracao_prevista_minutos || 60),
+        observacoes: raw.observacoes || null,
+        observacoes_internas: raw.observacoes_internas || null,
+        instrucoes_tecnicas: raw.instrucoes_tecnicas || null,
+        retorno_revisita: raw.retorno_revisita || null,
+        status: raw.status,
+        origem: raw.origem,
+        sincronizar_google: raw.sincronizar_google === "true",
+    };
+}
+
+function validateAppointmentForm(form) {
+    const payload = getAppointmentPayload(form);
+    const errors = [];
+    const markFieldInvalid = (selector, message) => {
+        const field = form.querySelector(selector);
+        if (field) {
+            field.classList.add("field-invalid");
+        }
+        errors.push(message);
+    };
+
+    form.querySelectorAll(".field-invalid").forEach((node) => node.classList.remove("field-invalid"));
+    if (!payload.cliente_id) {
+        markFieldInvalid('[name="cliente_id"]', "Selecione o cliente do agendamento.");
+    }
+    if (!payload.tipo_servico?.trim()) {
+        markFieldInvalid('[name="tipo_servico"]', "Informe o tipo de servico.");
+    }
+    if (!payload.data_agendamento) {
+        markFieldInvalid('[name="data_agendamento"]', "Informe a data do agendamento.");
+    }
+    if (!payload.hora_agendamento) {
+        markFieldInvalid('[name="hora_agendamento"]', "Informe a hora do agendamento.");
+    }
+    if (!(payload.duracao_prevista_minutos >= 15)) {
+        markFieldInvalid('[name="duracao_prevista_minutos"]', "Defina uma duracao minima de 15 minutos.");
+    }
+
+    if (errors.length) {
+        throw new Error([...new Set(errors)].join(" "));
+    }
+    return payload;
+}
+
+async function saveAppointment(form) {
+    const payload = validateAppointmentForm(form);
+    const appointmentId = state.editing.appointment;
+    const result = await apiFetch(
+        appointmentId ? `/api/v1/agendamentos/${appointmentId}` : "/api/v1/agendamentos",
+        {
+            method: appointmentId ? "PUT" : "POST",
+            body: JSON.stringify(payload),
+        },
+    );
+    resetFormMode("appointment");
+    await afterMutation(appointmentId ? "Agendamento atualizado com sucesso." : "Agendamento salvo com sucesso.");
+    switchView("agenda");
+    return result;
+}
+
+function bindAppointmentWorkspace() {
+    const form = document.getElementById("appointment-form");
+    if (!form) {
+        return;
+    }
+
+    form.addEventListener("input", () => {
+        form.querySelector(".form-error").classList.add("hidden");
+        form.querySelectorAll(".field-invalid").forEach((node) => node.classList.remove("field-invalid"));
+    });
+
+    form.querySelector('[name="cliente_id"]').addEventListener("change", () => {
+        syncAppointmentWorkOrderOptions();
+        renderAppointmentCustomerSummary();
+    });
+    form.querySelector('[name="os_id"]').addEventListener("change", (event) => {
+        applyWorkOrderToAppointmentForm(Number(event.target.value || 0));
+        renderAppointmentCustomerSummary();
+    });
+    form.querySelector('[name="tecnico_id"]').addEventListener("change", renderAppointmentCustomerSummary);
+    form.querySelector('[name="sincronizar_google"]').addEventListener("change", renderAppointmentCustomerSummary);
+
+    document.getElementById("appointment-open-linked-work-order").addEventListener("click", () => {
+        openLinkedWorkOrderFromAppointmentForm();
+    });
+    document.getElementById("appointment-duplicate-follow-up").addEventListener("click", () => {
+        duplicateAppointmentAsFollowUp();
+    });
+}
+
+function clearAppointmentForm() {
+    const form = document.getElementById("appointment-form");
+    if (!form) {
+        return;
+    }
+    form.reset();
+    form.querySelector(".form-error").classList.add("hidden");
+    form.querySelector('[name="status"]').value = "pendente";
+    form.querySelector('[name="origem"]').value = "manual";
+    form.querySelector('[name="sincronizar_google"]').value = "false";
+    form.querySelector('[name="duracao_prevista_minutos"]').value = "60";
+    form.querySelector('[name="data_agendamento"]').value = todayIso();
+    syncAppointmentWorkOrderOptions();
+    renderAppointmentCustomerSummary();
+    renderAppointmentFormHeader();
+}
+
+function syncAppointmentWorkOrderOptions() {
+    const form = document.getElementById("appointment-form");
+    const select = form?.querySelector('[name="os_id"]');
+    if (!select) {
+        return;
+    }
+    const currentValue = select.value;
+    const customerId = Number(form.querySelector('[name="cliente_id"]')?.value || 0);
+    const items = state.workOrders
+        .filter((item) => !customerId || item.cliente_id === customerId)
+        .sort((a, b) => `${b.data_execucao}${b.hora_inicio}`.localeCompare(`${a.data_execucao}${a.hora_inicio}`));
+    select.innerHTML = `
+        <option value="">Sem vinculacao</option>
+        ${items.map((item) => `
+            <option value="${item.id}">
+                ${escapeHtml(`OS ${item.numero} | ${item.cliente?.razao_social || "Cliente"} | ${formatDate(item.data_execucao)}`)}
+            </option>
+        `).join("")}
+    `;
+    if (currentValue && select.querySelector(`option[value="${currentValue}"]`)) {
+        select.value = currentValue;
+    }
+}
+
+function renderAppointmentCustomerSummary() {
+    const form = document.getElementById("appointment-form");
+    const target = document.getElementById("appointment-customer-summary");
+    if (!form || !target) {
+        return;
+    }
+
+    const customer = getEntityByKind("customer", Number(form.querySelector('[name="cliente_id"]').value || 0));
+    const workOrder = getEntityByKind("workOrder", Number(form.querySelector('[name="os_id"]').value || 0));
+    const technician = getEntityByKind("technician", Number(form.querySelector('[name="tecnico_id"]').value || 0));
+
+    target.innerHTML = `
+        <div class="appointment-customer-card">
+            <span class="order-summary-label">Cliente</span>
+            <strong>${escapeHtml(customer?.razao_social || "Selecione um cliente")}</strong>
+            <span>${escapeHtml(customer?.telefone || "Telefone sera preenchido automaticamente.")}</span>
+        </div>
+        <div class="appointment-customer-card">
+            <span class="order-summary-label">Endereco</span>
+            <strong>${escapeHtml(customer ? `${customer.endereco}, ${customer.numero || "s/n"} - ${customer.cidade}/${customer.estado}` : "Sem endereco selecionado")}</strong>
+            <span>${escapeHtml(workOrder ? `OS vinculada: ${workOrder.numero}` : "Sem OS vinculada")}</span>
+        </div>
+        <div class="appointment-customer-card">
+            <span class="order-summary-label">Responsavel</span>
+            <strong>${escapeHtml(technician?.nome || "Tecnico ainda nao atribuido")}</strong>
+            <span>${escapeHtml(form.querySelector('[name="sincronizar_google"]').value === "true" ? "Google Agenda habilitado" : "Google Agenda desabilitado")}</span>
+        </div>
+    `;
+
+    document.getElementById("appointment-open-linked-work-order").disabled = !workOrder;
+    document.getElementById("appointment-duplicate-follow-up").disabled = !state.editing.appointment;
+}
+
+function applyWorkOrderToAppointmentForm(workOrderId) {
+    if (!workOrderId) {
+        return;
+    }
+    const form = document.getElementById("appointment-form");
+    const workOrder = getEntityByKind("workOrder", workOrderId);
+    if (!form || !workOrder) {
+        return;
+    }
+    form.querySelector('[name="cliente_id"]').value = String(workOrder.cliente_id);
+    syncAppointmentWorkOrderOptions();
+    form.querySelector('[name="os_id"]').value = String(workOrder.id);
+    form.querySelector('[name="tecnico_id"]').value = workOrder.tecnico_id ? String(workOrder.tecnico_id) : "";
+    form.querySelector('[name="tipo_servico"]').value = form.querySelector('[name="tipo_servico"]').value || "Atendimento vinculado a OS";
+    form.querySelector('[name="data_agendamento"]').value = workOrder.data_execucao;
+    form.querySelector('[name="hora_agendamento"]').value = formatTime(workOrder.hora_inicio);
+    form.querySelector('[name="observacoes"]').value = form.querySelector('[name="observacoes"]').value || workOrder.observacoes || "";
+    form.querySelector('[name="origem"]').value = "ordem_servico";
+}
+
+function getAppointmentCounts(items) {
+    const counts = {
+        total: items.length,
+        pendente: 0,
+        confirmado: 0,
+        em_deslocamento: 0,
+        em_atendimento: 0,
+        concluido: 0,
+        reagendado: 0,
+        cancelado: 0,
+        nao_realizado: 0,
+    };
+    items.forEach((item) => {
+        counts[item.status] = (counts[item.status] || 0) + 1;
+    });
+    return counts;
+}
+
+function getFilteredAppointments() {
+    const search = (state.filters.appointmentSearch || "").trim().toLowerCase();
+    const status = state.filters.appointmentStatus || "todos";
+    const technician = state.filters.appointmentTechnician || "";
+    const customer = state.filters.appointmentCustomer || "";
+    const selectedDate = state.filters.appointmentDate || "";
+
+    return state.appointments.filter((item) => {
+        const searchMatch = !search || [
+            item.id,
+            item.cliente_nome,
+            item.telefone,
+            item.os_numero,
+            item.tipo_servico,
+            item.data_agendamento,
+        ].some((value) => String(value || "").toLowerCase().includes(search));
+        const statusMatch = status === "todos" || item.status === status;
+        const technicianMatch = !technician || String(item.tecnico_id || "") === technician;
+        const customerMatch = !customer || String(item.cliente_id) === customer;
+        const dateMatch = !selectedDate || item.data_agendamento === selectedDate;
+        return searchMatch && statusMatch && technicianMatch && customerMatch && dateMatch;
+    });
 }
 
 function renderDashboard() {
@@ -831,6 +2440,463 @@ function renderDashboard() {
 
     renderDashboardWidgets(filteredOrders, filteredStock, filteredFinance);
     renderDashboardCharts(filteredOrders, filteredFinance);
+}
+
+function renderAppointments() {
+    const dashboardTarget = document.getElementById("appointments-dashboard");
+    const calendarTarget = document.getElementById("appointments-calendar");
+    const dayListTarget = document.getElementById("appointments-day-list");
+    if (!dashboardTarget || !calendarTarget || !dayListTarget) {
+        return;
+    }
+
+    const filteredAppointments = getFilteredAppointments();
+    const counts = getAppointmentCounts(filteredAppointments);
+    const referenceDate = parseLocalDate(state.filters.appointmentDate || todayIso());
+
+    dashboardTarget.innerHTML = `
+        <div class="appointments-toolbar">
+            <div class="section-heading compact">
+                <h3>Agenda operacional</h3>
+                <p>Controle compromissos, retornos e o andamento da equipe em um unico painel.</p>
+            </div>
+            <div class="inline-actions">
+                <button type="button" class="btn btn-success" id="appointment-new-button">Novo agendamento</button>
+            </div>
+        </div>
+        <div class="appointments-summary-grid">
+            <article class="summary-metric-card"><span>Total</span><strong>${counts.total}</strong></article>
+            <article class="summary-metric-card is-pending"><span>Pendentes</span><strong>${counts.pendente}</strong></article>
+            <article class="summary-metric-card is-confirmed"><span>Confirmados</span><strong>${counts.confirmado}</strong></article>
+            <article class="summary-metric-card is-progress"><span>Em rota / atendimento</span><strong>${counts.em_deslocamento + counts.em_atendimento}</strong></article>
+            <article class="summary-metric-card is-complete"><span>Concluidos</span><strong>${counts.concluido}</strong></article>
+            <article class="summary-metric-card is-alert"><span>Cancelados / nao realizados</span><strong>${counts.cancelado + counts.nao_realizado}</strong></article>
+        </div>
+        <div class="appointments-filter-grid">
+            <label class="orders-search-field">
+                <span>Busca geral</span>
+                <input id="appointment-search" type="search" placeholder="Cliente, telefone, OS ou data" value="${escapeHtml(state.filters.appointmentSearch || "")}">
+            </label>
+            <label class="orders-search-field">
+                <span>Cliente</span>
+                <select id="appointment-customer-filter">
+                    <option value="">Todos</option>
+                    ${state.customers.map((item) => `<option value="${item.id}" ${String(item.id) === state.filters.appointmentCustomer ? "selected" : ""}>${escapeHtml(item.razao_social)}</option>`).join("")}
+                </select>
+            </label>
+            <label class="orders-search-field">
+                <span>Tecnico</span>
+                <select id="appointment-technician-filter">
+                    <option value="">Todos</option>
+                    ${state.technicians.filter((item) => item.ativo).map((item) => `<option value="${item.id}" ${String(item.id) === state.filters.appointmentTechnician ? "selected" : ""}>${escapeHtml(item.nome)}</option>`).join("")}
+                </select>
+            </label>
+            <label class="orders-search-field">
+                <span>Status</span>
+                <select id="appointment-status-filter">
+                    <option value="todos" ${state.filters.appointmentStatus === "todos" ? "selected" : ""}>Todos</option>
+                    <option value="pendente" ${state.filters.appointmentStatus === "pendente" ? "selected" : ""}>Pendente</option>
+                    <option value="confirmado" ${state.filters.appointmentStatus === "confirmado" ? "selected" : ""}>Confirmado</option>
+                    <option value="em_deslocamento" ${state.filters.appointmentStatus === "em_deslocamento" ? "selected" : ""}>Em deslocamento</option>
+                    <option value="em_atendimento" ${state.filters.appointmentStatus === "em_atendimento" ? "selected" : ""}>Em atendimento</option>
+                    <option value="concluido" ${state.filters.appointmentStatus === "concluido" ? "selected" : ""}>Concluido</option>
+                    <option value="reagendado" ${state.filters.appointmentStatus === "reagendado" ? "selected" : ""}>Reagendado</option>
+                    <option value="cancelado" ${state.filters.appointmentStatus === "cancelado" ? "selected" : ""}>Cancelado</option>
+                    <option value="nao_realizado" ${state.filters.appointmentStatus === "nao_realizado" ? "selected" : ""}>Nao realizado</option>
+                </select>
+            </label>
+            <label class="orders-search-field">
+                <span>Data de referencia</span>
+                <input id="appointment-date-filter" type="date" value="${escapeHtml(state.filters.appointmentDate || "")}">
+            </label>
+            <div class="orders-filter-actions">
+                <button type="button" class="btn btn-default ghost-button" id="appointment-clear-filters">Limpar filtros</button>
+            </div>
+        </div>
+        <div class="tabs appointments-view-tabs" role="tablist" aria-label="Visualizacao da agenda">
+            <button type="button" class="tab ${state.appointmentCalendarView === "day" ? "tab-active" : ""}" data-appointment-view="day">Diario</button>
+            <button type="button" class="tab ${state.appointmentCalendarView === "week" ? "tab-active" : ""}" data-appointment-view="week">Semanal</button>
+            <button type="button" class="tab ${state.appointmentCalendarView === "month" ? "tab-active" : ""}" data-appointment-view="month">Mensal</button>
+        </div>
+    `;
+
+    calendarTarget.innerHTML = renderAppointmentCalendar(filteredAppointments, referenceDate);
+    dayListTarget.innerHTML = renderAppointmentDayLists(filteredAppointments, referenceDate);
+
+    bindAppointmentFilters();
+    bindAppointmentActions();
+}
+
+function renderAppointmentCalendar(appointments, referenceDate) {
+    if (state.appointmentCalendarView === "day") {
+        const dayItems = appointments
+            .filter((item) => item.data_agendamento === referenceDate.toISOString().slice(0, 10))
+            .sort((a, b) => `${a.data_agendamento}${a.hora_agendamento}`.localeCompare(`${b.data_agendamento}${b.hora_agendamento}`));
+        return `
+            <section class="appointments-calendar-panel">
+                <div class="section-heading compact">
+                    <h4>Agenda do dia ${formatDate(referenceDate.toISOString().slice(0, 10))}</h4>
+                    <p>${dayItems.length} compromisso(s) no periodo selecionado.</p>
+                </div>
+                <div class="appointment-day-timeline">
+                    ${dayItems.length ? dayItems.map((item) => renderAppointmentCalendarChip(item)).join("") : '<div class="empty-state">Nenhum compromisso para este dia.</div>'}
+                </div>
+            </section>
+        `;
+    }
+
+    if (state.appointmentCalendarView === "week") {
+        const weekStart = new Date(referenceDate);
+        const mondayShift = (weekStart.getDay() + 6) % 7;
+        weekStart.setDate(weekStart.getDate() - mondayShift);
+        const columns = Array.from({ length: 7 }, (_, index) => {
+            const current = new Date(weekStart);
+            current.setDate(weekStart.getDate() + index);
+            const currentIso = current.toISOString().slice(0, 10);
+            const items = appointments.filter((item) => item.data_agendamento === currentIso);
+            return `
+                <article class="appointment-week-column ${currentIso === todayIso() ? "is-today" : ""}">
+                    <header>
+                        <strong>${current.toLocaleDateString("pt-BR", { weekday: "short" })}</strong>
+                        <span>${formatDate(currentIso)}</span>
+                    </header>
+                    <div class="appointment-week-items">
+                        ${items.length ? items.map((item) => renderAppointmentCalendarChip(item)).join("") : '<span class="empty-inline">Sem compromissos</span>'}
+                    </div>
+                </article>
+            `;
+        }).join("");
+        return `
+            <section class="appointments-calendar-panel">
+                <div class="section-heading compact">
+                    <h4>Visao semanal</h4>
+                    <p>Distribuicao da equipe e dos atendimentos na semana selecionada.</p>
+                </div>
+                <div class="appointment-week-grid">${columns}</div>
+            </section>
+        `;
+    }
+
+    const year = referenceDate.getFullYear();
+    const month = referenceDate.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const firstCell = new Date(firstDay);
+    firstCell.setDate(1 - ((firstDay.getDay() + 6) % 7));
+    const monthCells = Array.from({ length: 42 }, (_, index) => {
+        const current = new Date(firstCell);
+        current.setDate(firstCell.getDate() + index);
+        const currentIso = current.toISOString().slice(0, 10);
+        const items = appointments.filter((item) => item.data_agendamento === currentIso);
+        return `
+            <article class="appointment-month-cell ${current.getMonth() !== month ? "is-muted" : ""} ${currentIso === todayIso() ? "is-today" : ""}">
+                <header>
+                    <strong>${current.getDate()}</strong>
+                    <span>${items.length} ag.</span>
+                </header>
+                <div class="appointment-month-items">
+                    ${items.slice(0, 2).map((item) => renderAppointmentCalendarChip(item)).join("")}
+                    ${items.length > 2 ? `<span class="empty-inline">+${items.length - 2} item(ns)</span>` : ""}
+                </div>
+            </article>
+        `;
+    }).join("");
+    return `
+        <section class="appointments-calendar-panel">
+            <div class="section-heading compact">
+                <h4>${referenceDate.toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}</h4>
+                <p>Mapa mensal para leitura rapida dos compromissos e alertas operacionais.</p>
+            </div>
+            <div class="appointment-month-grid">${monthCells}</div>
+        </section>
+    `;
+}
+
+function renderAppointmentCalendarChip(item) {
+    return `
+        <button type="button" class="appointment-calendar-chip" data-appointment-action="edit" data-id="${item.id}">
+            <strong>${formatTime(item.hora_agendamento)}</strong>
+            <span>${escapeHtml(item.cliente_nome)}</span>
+        </button>
+    `;
+}
+
+function renderAppointmentDayLists(appointments, referenceDate) {
+    const referenceIso = referenceDate.toISOString().slice(0, 10);
+    const visibleAppointments = appointments.filter((item) => {
+        if (state.appointmentCalendarView === "day") {
+            return item.data_agendamento === referenceIso;
+        }
+        if (state.appointmentCalendarView === "week") {
+            const monday = new Date(referenceDate);
+            monday.setDate(referenceDate.getDate() - ((referenceDate.getDay() + 6) % 7));
+            const sunday = new Date(monday);
+            sunday.setDate(monday.getDate() + 6);
+            return item.data_agendamento >= monday.toISOString().slice(0, 10) && item.data_agendamento <= sunday.toISOString().slice(0, 10);
+        }
+        return item.data_agendamento.slice(0, 7) === referenceIso.slice(0, 7);
+    });
+    const todayItems = appointments.filter((item) => item.data_agendamento === todayIso());
+    const overdueItems = appointments.filter((item) =>
+        item.data_agendamento < todayIso()
+        && ["pendente", "confirmado", "em_deslocamento", "em_atendimento"].includes(item.status));
+
+    return `
+        <div class="appointments-day-board">
+            <section class="appointments-day-section">
+                <div class="section-heading compact">
+                    <h4>Lista do dia</h4>
+                    <p>${todayItems.length} compromisso(s) marcados para hoje.</p>
+                </div>
+                <div class="appointment-card-list">
+                    ${todayItems.length ? todayItems.map((item) => renderAppointmentCard(item)).join("") : '<div class="empty-state">Nenhum atendimento programado para hoje.</div>'}
+                </div>
+            </section>
+            <section class="appointments-day-section">
+                <div class="section-heading compact">
+                    <h4>Compromissos em foco</h4>
+                    <p>${visibleAppointments.length} registro(s) conforme filtros e visualizacao.</p>
+                </div>
+                <div class="appointment-card-list">
+                    ${visibleAppointments.length ? visibleAppointments.map((item) => renderAppointmentCard(item)).join("") : '<div class="empty-state">Nenhum agendamento encontrado para esta visualizacao.</div>'}
+                </div>
+            </section>
+            <section class="appointments-day-section ${overdueItems.length ? "is-alert" : ""}">
+                <div class="section-heading compact">
+                    <h4>Compromissos atrasados</h4>
+                    <p>${overdueItems.length} item(ns) exigem atencao operacional.</p>
+                </div>
+                <div class="appointment-card-list">
+                    ${overdueItems.length ? overdueItems.map((item) => renderAppointmentCard(item, { compact: true })).join("") : '<div class="empty-state">Sem compromissos atrasados.</div>'}
+                </div>
+            </section>
+        </div>
+    `;
+}
+
+function renderAppointmentCard(item, options = {}) {
+    const compact = options.compact || false;
+    const linkedWorkOrder = item.os_id ? getEntityByKind("workOrder", item.os_id) : null;
+    const isOverdue = item.data_agendamento < todayIso() && ["pendente", "confirmado", "em_deslocamento", "em_atendimento"].includes(item.status);
+    const detailsHtml = linkedWorkOrder
+        ? `
+            <div class="appointment-linked-assets">
+                <span class="order-summary-label">Fotos e itens da OS</span>
+                ${renderWorkOrderPhotoCards(linkedWorkOrder.fotos || [], { compact: true })}
+            </div>
+        `
+        : "";
+
+    return `
+        <article class="appointment-card ${compact ? "is-compact" : ""} ${isOverdue ? "is-overdue" : ""}">
+            <div class="appointment-card-head">
+                <div>
+                    <p class="order-summary-number">AG ${item.id}${item.os_numero ? ` | OS ${escapeHtml(item.os_numero)}` : ""}</p>
+                    <h4>${escapeHtml(item.cliente_nome)}</h4>
+                    <p class="order-summary-meta">${escapeHtml(item.tipo_servico)} | ${formatDate(item.data_agendamento)} | ${formatTime(item.hora_agendamento)}</p>
+                </div>
+                ${renderAppointmentStatusBadge(item.status)}
+            </div>
+            <div class="appointment-card-grid">
+                <div><span class="order-summary-label">Tecnico</span><strong>${escapeHtml(item.tecnico_nome || "Nao definido")}</strong></div>
+                <div><span class="order-summary-label">Duracao</span><strong>${escapeHtml(String(item.duracao_prevista_minutos))} min</strong></div>
+                <div><span class="order-summary-label">Telefone</span><strong>${escapeHtml(item.telefone || "-")}</strong></div>
+                <div><span class="order-summary-label">Google</span><strong>${escapeHtml((item.google_sync_status || "desconectado").replaceAll("_", " "))}</strong></div>
+            </div>
+            <p class="appointment-card-note">${escapeHtml(item.observacoes || item.observacoes_internas || "Sem observacoes adicionais.")}</p>
+            <div class="appointment-status-actions">
+                ${renderAppointmentProgressActions(item)}
+            </div>
+            <div class="appointment-main-actions">
+                <button type="button" class="btn btn-default ghost-button" data-appointment-action="edit" data-id="${item.id}">Editar / reagendar</button>
+                <button type="button" class="btn btn-default ghost-button" data-appointment-action="sync-google" data-id="${item.id}">Sincronizar Google</button>
+                <button type="button" class="btn btn-default ghost-button" data-appointment-action="open-work-order" data-os-id="${item.os_id || ""}" ${item.os_id ? "" : "disabled"}>Abrir OS</button>
+            </div>
+            <details class="appointment-details">
+                <summary>Ver detalhes</summary>
+                <div class="appointment-details-content">
+                    <dl class="order-details-data">
+                        <div><dt>Endereco</dt><dd>${escapeHtml(item.endereco_completo || "-")}</dd></div>
+                        <div><dt>Observacoes internas</dt><dd>${escapeHtml(item.observacoes_internas || "-")}</dd></div>
+                        <div><dt>Instrucoes tecnicas</dt><dd>${escapeHtml(item.instrucoes_tecnicas || "-")}</dd></div>
+                        <div><dt>Retorno / revisita</dt><dd>${escapeHtml(item.retorno_revisita || "-")}</dd></div>
+                    </dl>
+                    ${detailsHtml}
+                    <div class="appointment-history-list">
+                        ${(item.historico || []).length
+        ? item.historico.slice().reverse().map((entry) => `
+                            <article class="appointment-history-item">
+                                <strong>${escapeHtml(entry.usuario_nome || "Sistema")}</strong>
+                                <span>${formatDateTime(entry.created_at)}</span>
+                                <p>${escapeHtml(entry.detalhes || entry.acao)}</p>
+                            </article>
+                        `).join("")
+        : '<div class="empty-state">Sem historico de movimentacao.</div>'}
+                    </div>
+                </div>
+            </details>
+        </article>
+    `;
+}
+
+function renderAppointmentStatusBadge(status) {
+    const toneMap = {
+        pendente: "warn",
+        confirmado: "",
+        em_deslocamento: "",
+        em_atendimento: "",
+        concluido: "",
+        reagendado: "warn",
+        cancelado: "danger",
+        nao_realizado: "danger",
+    };
+    return badge(status.replaceAll("_", " "), toneMap[status] || "");
+}
+
+function renderAppointmentProgressActions(item) {
+    const actions = [];
+    if (item.status === "pendente" || item.status === "reagendado") {
+        actions.push(`<button type="button" class="btn btn-success" data-appointment-action="status" data-id="${item.id}" data-status="confirmado">Confirmar</button>`);
+    }
+    if (item.status === "confirmado") {
+        actions.push(`<button type="button" class="btn btn-default ghost-button" data-appointment-action="status" data-id="${item.id}" data-status="em_deslocamento">Em deslocamento</button>`);
+    }
+    if (item.status === "em_deslocamento") {
+        actions.push(`<button type="button" class="btn btn-default ghost-button" data-appointment-action="status" data-id="${item.id}" data-status="em_atendimento">Em atendimento</button>`);
+    }
+    if (!["concluido", "cancelado", "nao_realizado"].includes(item.status)) {
+        actions.push(`<button type="button" class="btn btn-success" data-appointment-action="status" data-id="${item.id}" data-status="concluido">Concluir</button>`);
+        actions.push(`<button type="button" class="btn btn-default ghost-button" data-appointment-action="status" data-id="${item.id}" data-status="cancelado">Cancelar</button>`);
+    }
+    return actions.join("");
+}
+
+function bindAppointmentFilters() {
+    document.getElementById("appointment-new-button")?.addEventListener("click", () => {
+        resetFormMode("appointment");
+        switchView("agenda");
+    });
+    document.getElementById("appointment-search")?.addEventListener("input", (event) => {
+        state.filters.appointmentSearch = event.target.value;
+        renderAppointments();
+    });
+    document.getElementById("appointment-customer-filter")?.addEventListener("change", (event) => {
+        state.filters.appointmentCustomer = event.target.value;
+        renderAppointments();
+    });
+    document.getElementById("appointment-technician-filter")?.addEventListener("change", (event) => {
+        state.filters.appointmentTechnician = event.target.value;
+        renderAppointments();
+    });
+    document.getElementById("appointment-status-filter")?.addEventListener("change", (event) => {
+        state.filters.appointmentStatus = event.target.value;
+        renderAppointments();
+    });
+    document.getElementById("appointment-date-filter")?.addEventListener("change", (event) => {
+        state.filters.appointmentDate = event.target.value;
+        renderAppointments();
+    });
+    document.getElementById("appointment-clear-filters")?.addEventListener("click", () => {
+        state.filters.appointmentSearch = "";
+        state.filters.appointmentStatus = "todos";
+        state.filters.appointmentTechnician = "";
+        state.filters.appointmentCustomer = "";
+        state.filters.appointmentDate = "";
+        renderAppointments();
+    });
+    document.querySelectorAll("[data-appointment-view]").forEach((button) => {
+        button.addEventListener("click", () => {
+            state.appointmentCalendarView = button.dataset.appointmentView;
+            renderAppointments();
+        });
+    });
+}
+
+function bindAppointmentActions() {
+    document.querySelectorAll("[data-appointment-action]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            const action = button.dataset.appointmentAction;
+            const appointmentId = Number(button.dataset.id || 0);
+            const osId = Number(button.dataset.osId || 0);
+            try {
+                if (action === "edit") {
+                    startEditing("appointment", appointmentId);
+                    switchView("agenda");
+                    return;
+                }
+                if (action === "open-work-order" && osId) {
+                    startEditing("workOrder", osId);
+                    return;
+                }
+                if (action === "sync-google") {
+                    await apiFetch(`/api/v1/agendamentos/${appointmentId}/sync-google`, { method: "POST" });
+                    await afterMutation("Agendamento sincronizado com Google Agenda.");
+                    switchView("agenda");
+                    return;
+                }
+                if (action === "status") {
+                    const targetStatus = button.dataset.status;
+                    await apiFetch(`/api/v1/agendamentos/${appointmentId}/status`, {
+                        method: "POST",
+                        body: JSON.stringify({
+                            status: targetStatus,
+                            detalhes: `Status ajustado para ${targetStatus.replaceAll("_", " ")} pela agenda.`,
+                        }),
+                    });
+                    await afterMutation("Status do agendamento atualizado.");
+                    switchView("agenda");
+                }
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    });
+    document.querySelectorAll(".appointment-details").forEach((node) => {
+        node.addEventListener("toggle", () => {
+            if (node.open) {
+                hydrateWorkOrderPhotoThumbs(node);
+                bindWorkOrderPhotoViewer();
+            }
+        });
+    });
+}
+
+function openLinkedWorkOrderFromAppointmentForm() {
+    const osId = Number(document.querySelector('#appointment-form [name="os_id"]')?.value || 0);
+    if (!osId) {
+        toast("Selecione uma OS vinculada para abrir os detalhes.");
+        return;
+    }
+    startEditing("workOrder", osId);
+}
+
+function duplicateAppointmentAsFollowUp() {
+    const appointmentId = state.editing.appointment;
+    const original = appointmentId ? getEntityByKind("appointment", appointmentId) : null;
+    if (!original) {
+        toast("Abra um agendamento existente para criar a revisita.");
+        return;
+    }
+    resetFormMode("appointment");
+    const form = document.getElementById("appointment-form");
+    fillForm(form, {
+        cliente_id: String(original.cliente_id),
+        os_id: original.os_id ? String(original.os_id) : "",
+        tecnico_id: original.tecnico_id ? String(original.tecnico_id) : "",
+        tipo_servico: original.tipo_servico,
+        data_agendamento: original.data_agendamento,
+        hora_agendamento: formatTime(original.hora_agendamento),
+        duracao_prevista_minutos: original.duracao_prevista_minutos,
+        status: "pendente",
+        origem: "manual",
+        sincronizar_google: String(original.sincronizar_google),
+        observacoes: original.observacoes || "",
+        observacoes_internas: original.observacoes_internas || "",
+        instrucoes_tecnicas: original.instrucoes_tecnicas || "",
+        retorno_revisita: `Revisita vinculada ao agendamento #${original.id}`,
+    });
+    syncAppointmentWorkOrderOptions();
+    renderAppointmentCustomerSummary();
+    renderAppointmentFormHeader();
 }
 
 function getFilteredWorkOrders() {
@@ -895,17 +2961,18 @@ function getFilteredFinance() {
 function renderCustomers() {
     setTableContent(
         "customers-table",
-        ["Razao social", "Documento", "Cidade", "Contato", "Telefone", "Acoes"],
+        ["Razao social", "Documento", "Cidade", "CEP", "Contato", "Telefone", "Acoes"],
         state.customers.map((item) => [
             item.razao_social,
             item.cpf_cnpj,
             `${item.cidade}/${item.estado}`,
+            item.cep ? formatCep(item.cep) : "-",
             item.contato,
             item.telefone,
             actionButtons("customer", item.id),
         ]),
         "Nenhum cliente cadastrado.",
-        { nonSortableTargets: [5] },
+        { nonSortableTargets: [6] },
     );
     bindEntityActions("customer");
 }
@@ -957,41 +3024,350 @@ function renderTechnicians() {
 }
 
 function renderWorkOrders() {
-    setTableContent(
-        "work-orders-table",
-        ["Numero", "Cliente", "Tecnico", "Data", "Aplicacao", "Valor", "Acoes"],
-        state.workOrders.map((item) => {
-            const linkedFinance = state.finance.find((entry) => entry.os_id === item.id) || null;
-            const quickActions = [];
-            if (item.status !== "concluida" && item.status !== "cancelada") {
-                quickActions.push(actionButton("complete-work-order", "Efetuar", `data-id="${item.id}"`));
-            }
-            if (userCanAccessFinance() && linkedFinance && linkedFinance.status !== "pago") {
-                quickActions.push(actionButton("settle-work-order", "Dar baixa", `data-id="${item.id}"`));
-            }
-            return [
-                item.numero,
-                item.cliente.razao_social,
-                item.tecnico.nome,
-                formatDate(item.data_execucao),
-                `${item.produtos.length} produto(s)`,
-                formatCurrency(item.valor_servico),
-                `<div class="toolbar">
-                    ${badge(item.status.replaceAll("_", " "), "")}
-                    <a href="#" class="subtle-link pdf-link" data-doc="os" data-id="${item.id}">OS PDF</a>
-                    <a href="#" class="subtle-link pdf-link" data-doc="relatorio" data-id="${item.id}">Relatorio tecnico</a>
-                    <a href="#" class="subtle-link pdf-link" data-doc="certificado" data-id="${item.id}">Certificado sanitario</a>
-                    <a href="#" class="subtle-link pdf-link" data-doc="moldura" data-id="${item.id}">Certificado moldura</a>
-                    ${quickActions.join("")}
-                    <button type="button" class="ghost-button action-button secondary edit-entity" data-kind="workOrder" data-id="${item.id}">Editar</button>
-                    <button type="button" class="ghost-button action-button danger delete-entity" data-kind="workOrder" data-id="${item.id}">Excluir</button>
-                </div>`,
-            ];
-        }),
-        "Nenhuma ordem de servico cadastrada.",
-        { nonSortableTargets: [6], pageLength: 6 },
-    );
+    const target = document.getElementById("work-orders-table");
+    if (!target) {
+        return;
+    }
 
+    const filteredOrders = getFilteredWorkOrdersForWorkspace();
+    const activeOrders = filteredOrders.filter((item) => item.status !== "concluida" && item.status !== "cancelada");
+    const archivedOrders = filteredOrders.filter((item) => item.status === "concluida" || item.status === "cancelada");
+
+    target.innerHTML = `
+        <div class="orders-workspace">
+            <div class="orders-toolbar">
+                <div class="orders-filter-grid">
+                    <label class="orders-search-field">
+                        <span>Numero / ID</span>
+                        <input id="work-orders-number-search" type="search" placeholder="OS 1024 ou ID interno" value="${escapeHtml(state.filters.workOrderNumber || "")}">
+                    </label>
+                    <label class="orders-search-field">
+                        <span>Cliente</span>
+                        <input id="work-orders-customer-search" type="search" placeholder="Razao social" value="${escapeHtml(state.filters.workOrderCustomer || "")}">
+                    </label>
+                    <label class="orders-search-field">
+                        <span>Data</span>
+                        <input id="work-orders-date-filter" type="date" value="${escapeHtml(state.filters.workOrderDate || "")}">
+                    </label>
+                    <label class="orders-search-field">
+                        <span>Status</span>
+                        <select id="work-orders-status-filter">
+                            <option value="todos" ${state.filters.workOrderStatus === "todos" ? "selected" : ""}>Todos</option>
+                            <option value="aberta" ${state.filters.workOrderStatus === "aberta" ? "selected" : ""}>Aberta</option>
+                            <option value="em_execucao" ${state.filters.workOrderStatus === "em_execucao" ? "selected" : ""}>Em execucao</option>
+                            <option value="concluida" ${state.filters.workOrderStatus === "concluida" ? "selected" : ""}>Concluida</option>
+                            <option value="cancelada" ${state.filters.workOrderStatus === "cancelada" ? "selected" : ""}>Cancelada</option>
+                        </select>
+                    </label>
+                    <div class="orders-filter-actions">
+                        <button type="button" class="btn btn-default ghost-button" id="work-orders-clear-filters">Limpar filtros</button>
+                    </div>
+                </div>
+                <div class="orders-toolbar-stats">
+                    <span class="orders-stat">${filteredOrders.length} resultado(s)</span>
+                    <span class="orders-stat is-active">${activeOrders.length} ativas</span>
+                    <span class="orders-stat">${archivedOrders.length} finalizadas / historico</span>
+                </div>
+            </div>
+            ${renderWorkOrderLane(
+                "Ordens em andamento",
+                "As OS operacionais ficam em destaque, com acoes rapidas e leitura direta dos itens aplicados.",
+                activeOrders,
+                false,
+            )}
+            ${renderWorkOrderLane(
+                "Ordens finalizadas e historico",
+                "As OS concluidas e canceladas ficam fora da area principal para reduzir ruido visual.",
+                archivedOrders,
+                true,
+            )}
+        </div>
+    `;
+
+    bindWorkOrderWorkspaceFilters();
+
+    bindWorkOrderDocumentLinks();
+    bindEntityActions("workOrder");
+    bindQuickActions();
+    bindWorkOrderDetails();
+    bindWorkOrderPhotoViewer();
+}
+
+function getFilteredWorkOrdersForWorkspace() {
+    const numberSearch = (state.filters.workOrderNumber || "").trim().toLowerCase();
+    const customerSearch = (state.filters.workOrderCustomer || "").trim().toLowerCase();
+    const selectedDate = state.filters.workOrderDate || "";
+    const selectedStatus = state.filters.workOrderStatus || "todos";
+
+    return state.workOrders.filter((item) => {
+        const numberMatch = !numberSearch || [item.numero, item.id]
+            .map((value) => String(value || "").toLowerCase())
+            .some((value) => value.includes(numberSearch));
+        const customerMatch = !customerSearch || (item.cliente?.razao_social || "")
+            .toLowerCase()
+            .includes(customerSearch);
+        const dateMatch = !selectedDate || item.data_execucao === selectedDate;
+        const statusMatch = selectedStatus === "todos" || item.status === selectedStatus;
+        return numberMatch && customerMatch && dateMatch && statusMatch;
+    });
+}
+
+function bindWorkOrderWorkspaceFilters() {
+    const numberSearch = document.getElementById("work-orders-number-search");
+    const customerSearch = document.getElementById("work-orders-customer-search");
+    const dateFilter = document.getElementById("work-orders-date-filter");
+    const statusFilter = document.getElementById("work-orders-status-filter");
+    const clearButton = document.getElementById("work-orders-clear-filters");
+
+    numberSearch?.addEventListener("input", (event) => {
+        state.filters.workOrderNumber = event.target.value;
+        renderWorkOrders();
+    });
+    customerSearch?.addEventListener("input", (event) => {
+        state.filters.workOrderCustomer = event.target.value;
+        renderWorkOrders();
+    });
+    dateFilter?.addEventListener("change", (event) => {
+        state.filters.workOrderDate = event.target.value;
+        renderWorkOrders();
+    });
+    statusFilter?.addEventListener("change", (event) => {
+        state.filters.workOrderStatus = event.target.value;
+        renderWorkOrders();
+    });
+    clearButton?.addEventListener("click", () => {
+        state.filters.workOrderNumber = "";
+        state.filters.workOrderCustomer = "";
+        state.filters.workOrderDate = "";
+        state.filters.workOrderStatus = "todos";
+        renderWorkOrders();
+    });
+}
+
+function renderWorkOrderLane(title, description, orders, archived) {
+    return `
+        <section class="orders-lane ${archived ? "orders-lane-archived" : ""}">
+            <div class="section-heading compact">
+                <h3>${escapeHtml(title)}</h3>
+                <p>${escapeHtml(description)}</p>
+            </div>
+            <div class="orders-card-grid">
+                ${orders.length
+        ? orders.map((item) => renderWorkOrderCard(item, archived)).join("")
+        : `<div class="empty-state">${archived
+            ? "Nenhuma ordem finalizada encontrada para esta busca."
+            : "Nenhuma ordem ativa encontrada para esta busca."}</div>`}
+            </div>
+        </section>
+    `;
+}
+
+function renderWorkOrderCard(item, archived) {
+    const productPreview = item.produtos?.length
+        ? item.produtos
+            .slice(0, 3)
+            .map((product) => `
+                <li>
+                    <strong>${escapeHtml(product.produto.nome)}</strong>
+                    <span>${escapeHtml(String(product.quantidade))} | ${escapeHtml(product.diluicao)}</span>
+                </li>
+            `)
+            .join("")
+        : `<li><strong>Sem produtos aplicados</strong><span>Cadastre itens para detalhar esta execucao.</span></li>`;
+
+    const detailsPanel = renderWorkOrderDetails(item);
+
+    return `
+        <article class="order-summary-card ${archived ? "is-archived" : ""}">
+            <div class="order-summary-head">
+                <div>
+                    <p class="order-summary-number">OS ${escapeHtml(item.numero)}</p>
+                    <h4>${escapeHtml(item.cliente.razao_social)}</h4>
+                    <p class="order-summary-meta">${escapeHtml(item.tecnico.nome)} | ${formatDate(item.data_execucao)} | ${escapeHtml(item.local_execucao)}</p>
+                </div>
+                ${badge(item.status.replaceAll("_", " "), archived ? "warn" : "")}
+            </div>
+            <div class="order-summary-grid">
+                <div>
+                    <span class="order-summary-label">Aplicacao</span>
+                    <strong>${item.produtos.length} item(ns)</strong>
+                </div>
+                <div>
+                    <span class="order-summary-label">Valor</span>
+                    <strong>${formatCurrency(item.valor_servico)}</strong>
+                </div>
+                <div>
+                    <span class="order-summary-label">Fotos</span>
+                    <strong>${item.fotos?.length || 0} anexo(s)</strong>
+                </div>
+                <div>
+                    <span class="order-summary-label">Garantia</span>
+                    <strong>${formatDate(item.garantia_ate)}</strong>
+                </div>
+            </div>
+            <div class="order-summary-products">
+                <span class="order-summary-label">Itens adicionados</span>
+                <ul>${productPreview}</ul>
+            </div>
+            ${renderWorkOrderActionPanel(item)}
+            ${detailsPanel}
+        </article>
+    `;
+}
+
+function renderWorkOrderActionPanel(item) {
+    const linkedFinance = state.finance.find((entry) => entry.os_id === item.id) || null;
+    const quickActions = [];
+    if (item.status !== "concluida" && item.status !== "cancelada") {
+        quickActions.push(`
+            <button type="button" class="btn btn-sm ghost-button action-button complete-work-order" data-id="${item.id}">
+                <i class="fas fa-check-circle"></i>
+                <span>Concluir ordem</span>
+            </button>
+        `);
+    }
+    if (userCanAccessFinance() && linkedFinance && linkedFinance.status !== "pago") {
+        quickActions.push(`
+            <button type="button" class="btn btn-sm ghost-button action-button settle-work-order" data-id="${item.id}">
+                <i class="fas fa-wallet"></i>
+                <span>Dar baixa</span>
+            </button>
+        `);
+    }
+
+    const primaryActions = quickActions.length
+        ? `<div class="order-primary-actions">${quickActions.join("")}</div>`
+        : `<div class="order-primary-actions order-primary-actions-empty"><span class="origin-note">Sem acoes rapidas disponiveis.</span></div>`;
+
+    return `
+        <div class="order-action-panel">
+            <div class="order-action-header">
+                <span class="order-action-counter">${item.produtos.length} item(ns) aplicados</span>
+                <span class="order-action-counter">${item.fotos?.length || 0} foto(s)</span>
+            </div>
+            ${primaryActions}
+            <div class="order-secondary-actions">
+                <details class="action-menu order-details-toggle" data-order-details="${item.id}">
+                    <summary class="action-menu-trigger">
+                        <i class="fas fa-eye"></i>
+                        <span>Ver detalhes</span>
+                    </summary>
+                </details>
+                <details class="action-menu">
+                    <summary class="action-menu-trigger">
+                        <i class="fas fa-file-alt"></i>
+                        <span>Documentos</span>
+                    </summary>
+                    <div class="action-menu-panel">
+                        <a href="#" class="subtle-link toolbar-link pdf-link" data-doc="os" data-id="${item.id}">
+                            <i class="fas fa-file-pdf"></i>
+                            <span>OS PDF</span>
+                        </a>
+                        <a href="#" class="subtle-link toolbar-link pdf-link" data-doc="relatorio" data-id="${item.id}">
+                            <i class="fas fa-clipboard"></i>
+                            <span>Relatorio</span>
+                        </a>
+                        <a href="#" class="subtle-link toolbar-link pdf-link" data-doc="certificado" data-id="${item.id}">
+                            <i class="fas fa-shield-alt"></i>
+                            <span>Sanitario</span>
+                        </a>
+                        <a href="#" class="subtle-link toolbar-link pdf-link" data-doc="moldura" data-id="${item.id}">
+                            <i class="fas fa-certificate"></i>
+                            <span>Moldura</span>
+                        </a>
+                    </div>
+                </details>
+                <details class="action-menu">
+                    <summary class="action-menu-trigger">
+                        <i class="fas fa-ellipsis-h"></i>
+                        <span>Mais acoes</span>
+                    </summary>
+                    <div class="action-menu-panel">
+                        <button type="button" class="btn btn-sm ghost-button action-button secondary edit-entity" data-kind="workOrder" data-id="${item.id}">
+                            <i class="fas fa-pen"></i>
+                            <span>Editar ordem</span>
+                        </button>
+                        <button type="button" class="btn btn-sm ghost-button action-button danger delete-entity" data-kind="workOrder" data-id="${item.id}">
+                            <i class="fas fa-trash-alt"></i>
+                            <span>Excluir ordem</span>
+                        </button>
+                    </div>
+                </details>
+            </div>
+        </div>
+    `;
+}
+
+function renderWorkOrderDetails(item) {
+    const pestList = item.pragas?.length
+        ? item.pragas
+            .map((pest) => `<li>${escapeHtml(pest.praga.nome_comum)} <span>${escapeHtml(pest.praga.nome_cientifico)}</span></li>`)
+            .join("")
+        : `<li>Sem pragas vinculadas.</li>`;
+    const productList = item.produtos?.length
+        ? item.produtos
+            .map((product) => `
+                <li>
+                    <strong>${escapeHtml(product.produto.nome)}</strong>
+                    <span>${escapeHtml(String(product.quantidade))} | ${escapeHtml(product.diluicao)}</span>
+                </li>
+            `)
+            .join("")
+        : `<li>Sem produtos aplicados.</li>`;
+
+    return `
+        <div class="order-details-panel hidden" id="order-details-panel-${item.id}">
+            <div class="order-details-grid">
+                <section class="order-details-block">
+                    <span class="order-summary-label">Resumo operacional</span>
+                    <dl class="order-details-data">
+                        <div><dt>Cliente</dt><dd>${escapeHtml(item.cliente?.razao_social || "-")}</dd></div>
+                        <div><dt>Tecnico</dt><dd>${escapeHtml(item.tecnico?.nome || "-")}</dd></div>
+                        <div><dt>Execucao</dt><dd>${formatDate(item.data_execucao)} | ${escapeHtml(item.hora_inicio?.slice(0, 5) || "-")}</dd></div>
+                        <div><dt>Garantia</dt><dd>${formatDate(item.garantia_ate)}</dd></div>
+                    </dl>
+                </section>
+                <section class="order-details-block">
+                    <span class="order-summary-label">Pragas relacionadas</span>
+                    <ul class="order-details-list">${pestList}</ul>
+                </section>
+                <section class="order-details-block">
+                    <span class="order-summary-label">Produtos da ordem</span>
+                    <ul class="order-details-list">${productList}</ul>
+                </section>
+                <section class="order-details-block">
+                    <span class="order-summary-label">Observacoes</span>
+                    <p class="order-details-note">${escapeHtml(item.observacoes || "Sem observacoes registradas para esta ordem.")}</p>
+                </section>
+            </div>
+            <section class="order-details-block">
+                <span class="order-summary-label">Fotos anexadas</span>
+                ${renderWorkOrderPhotoCards(item.fotos || [], {
+        workOrderId: item.id,
+        compact: true,
+    })}
+            </section>
+        </div>
+    `;
+}
+
+function bindWorkOrderDetails() {
+    document.querySelectorAll(".order-details-toggle").forEach((toggle) => {
+        toggle.addEventListener("toggle", async () => {
+            const panel = document.getElementById(`order-details-panel-${toggle.dataset.orderDetails}`);
+            if (!panel) {
+                return;
+            }
+            const isOpen = toggle.open;
+            panel.classList.toggle("hidden", !isOpen);
+            if (isOpen) {
+                await hydrateWorkOrderPhotoThumbs(panel);
+            }
+        });
+    });
+}
+
+function bindWorkOrderDocumentLinks() {
     document.querySelectorAll(".pdf-link").forEach((link) => {
         link.addEventListener("click", async (event) => {
             event.preventDefault();
@@ -1011,7 +3387,147 @@ function renderWorkOrders() {
             }
         });
     });
-    bindEntityActions("workOrder");
+}
+
+function bindWorkOrderPhotoViewer() {
+    document.querySelectorAll("[data-view-photo-url]").forEach((button) => {
+        button.addEventListener("click", async () => {
+            try {
+                const blob = await apiFetch(button.dataset.viewPhotoUrl);
+                const fileUrl = URL.createObjectURL(blob);
+                window.open(fileUrl, "_blank", "noopener");
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    });
+}
+
+function renderWorkOrderSaveFeedback() {
+    const target = document.getElementById("work-order-save-feedback");
+    if (!target) {
+        return;
+    }
+
+    const workOrder = state.workOrderWorkflow.lastSavedOrderId
+        ? getEntityByKind("workOrder", state.workOrderWorkflow.lastSavedOrderId)
+        : null;
+    if (!workOrder) {
+        target.innerHTML = "";
+        target.classList.add("hidden");
+        return;
+    }
+
+    target.innerHTML = `
+        <section class="work-order-save-card">
+            <div class="section-heading compact">
+                <h4>Order saved successfully</h4>
+                <p>OS ${escapeHtml(workOrder.numero)} pronta para impressao, emissao e download do certificado de dedetizacao.</p>
+            </div>
+            <div class="work-order-save-meta">
+                <span class="orders-stat is-active">${escapeHtml(workOrder.cliente?.razao_social || "Cliente")}</span>
+                <span class="orders-stat">${formatDate(workOrder.data_execucao)}</span>
+                <span class="orders-stat">${state.workOrderWorkflow.certificateReady ? "Certificado pronto" : "Certificado sob demanda"}</span>
+            </div>
+            <div class="work-order-save-actions">
+                <button type="button" class="btn btn-success" data-work-order-action="print" data-id="${workOrder.id}">Print Order</button>
+                <button type="button" class="btn btn-default ghost-button" data-work-order-action="certificate-preview" data-id="${workOrder.id}">Generate Certificate</button>
+                <button type="button" class="btn btn-default ghost-button" data-work-order-action="certificate-download" data-id="${workOrder.id}">Download Certificate</button>
+            </div>
+        </section>
+    `;
+    target.classList.remove("hidden");
+}
+
+async function print_order(workOrderId) {
+    const blob = await apiFetch(`/api/v1/os/${workOrderId}/pdf`);
+    const workOrder = getEntityByKind("workOrder", workOrderId);
+    openBlobPreview(blob, `Ordem de Servico ${workOrder?.numero || workOrderId}`, { printOnLoad: true });
+}
+
+async function generate_certificate(workOrderId, options = {}) {
+    const mode = options.mode || "preview";
+    const blob = await apiFetch(`/api/v1/os/${workOrderId}/certificado-sanitario.pdf`);
+    const workOrder = getEntityByKind("workOrder", workOrderId);
+    if (mode === "background") {
+        return blob;
+    }
+    if (mode === "download") {
+        downloadBlob(blob, buildCertificateFilename(workOrder));
+        return blob;
+    }
+    openBlobPreview(blob, `Certificado ${workOrder?.numero || workOrderId}`);
+    return blob;
+}
+
+function buildCertificateFilename(workOrder) {
+    const customer = sanitizeFilenamePart(workOrder?.cliente?.razao_social || "cliente");
+    return `cert_${workOrder?.id || "os"}_${customer}.pdf`;
+}
+
+function sanitizeFilenamePart(value) {
+    return String(value || "arquivo")
+        .normalize("NFD")
+        .replaceAll(/[\u0300-\u036f]/g, "")
+        .replaceAll(/[^a-zA-Z0-9_-]+/g, "_")
+        .replaceAll(/^_+|_+$/g, "")
+        .toLowerCase() || "arquivo";
+}
+
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function openBlobPreview(blob, title, options = {}) {
+    const previewUrl = URL.createObjectURL(blob);
+    const previewWindow = window.open("", "_blank");
+    if (!previewWindow) {
+        window.open(previewUrl, "_blank", "noopener");
+        return;
+    }
+    const printOnLoad = options.printOnLoad ? "true" : "false";
+    previewWindow.document.write(`
+        <!doctype html>
+        <html lang="pt-BR">
+            <head>
+                <meta charset="utf-8">
+                <title>${escapeHtml(title)}</title>
+                <style>
+                    body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #eef2ea; color: #1e2a22; }
+                    .preview-shell { display: grid; gap: 12px; padding: 16px; }
+                    .preview-note { padding: 12px 14px; background: #ffffff; border-bottom: 1px solid #d7ded1; }
+                    iframe { width: 100%; height: calc(100vh - 86px); border: 0; background: #fff; }
+                </style>
+            </head>
+            <body>
+                <div class="preview-shell">
+                    <div class="preview-note">Documento pronto para visualizacao e impressao.</div>
+                    <iframe id="preview-frame" src="${previewUrl}" title="${escapeHtml(title)}"></iframe>
+                </div>
+                <script>
+                    const frame = document.getElementById('preview-frame');
+                    frame.addEventListener('load', () => {
+                        if (${printOnLoad}) {
+                            setTimeout(() => {
+                                try {
+                                    frame.contentWindow.focus();
+                                    frame.contentWindow.print();
+                                } catch (_) {}
+                            }, 400);
+                        }
+                    });
+                </script>
+            </body>
+        </html>
+    `);
+    previewWindow.document.close();
 }
 
 function renderFinance() {
@@ -1029,7 +3545,13 @@ function renderFinance() {
                 : "";
             const parcelText = Number(item.total_parcelas || 1) > 1 ? `${item.parcela_atual}/${item.total_parcelas}` : "";
             const actions = item.os_id
-                ? `<div class="toolbar"><span class="origin-note">Gerado pela OS ${item.os_id}</span>${parcelText ? `<span class="badge">${escapeHtml(parcelText)}</span>` : ""}${payButton}</div>`
+                ? `<div class="toolbar compact-toolbar">
+                    <div class="toolbar-group">
+                        <span class="origin-note">Gerado pela OS ${item.os_id}</span>
+                        ${parcelText ? `<span class="badge">${escapeHtml(parcelText)}</span>` : ""}
+                    </div>
+                    ${payButton ? `<div class="toolbar-group">${payButton}</div>` : ""}
+                </div>`
                 : actionButtons("finance", item.id, payButton);
             return [
                 badge(item.tipo, item.tipo === "despesa" ? "warn" : ""),
@@ -1084,6 +3606,31 @@ function renderCashLedger() {
     );
 }
 
+function renderProviderCompanies() {
+    const target = document.getElementById("provider-companies-table");
+    if (!target) {
+        return;
+    }
+    if (state.user?.role !== "master") {
+        target.innerHTML = `<div class="empty-state">Disponivel apenas para o perfil MASTER.</div>`;
+        return;
+    }
+    setTableContent(
+        "provider-companies-table",
+        ["Empresa", "CNPJ", "Cidade", "Usuarios vinculados", "Acoes"],
+        state.providerCompanies.map((item) => [
+            item.nome_fantasia ? `${item.razao_social} (${item.nome_fantasia})` : item.razao_social,
+            item.cnpj,
+            item.cidade ? `${item.cidade}/${item.estado || ""}` : "-",
+            item.usuarios_vinculados_nomes?.length ? item.usuarios_vinculados_nomes.join(", ") : "Nenhum usuario",
+            actionButtons("providerCompany", item.id),
+        ]),
+        "Nenhuma empresa prestadora cadastrada.",
+        { nonSortableTargets: [4] },
+    );
+    bindEntityActions("providerCompany");
+}
+
 function renderUsers() {
     const target = document.getElementById("users-table");
     if (!target) {
@@ -1095,16 +3642,17 @@ function renderUsers() {
     }
     setTableContent(
         "users-table",
-        ["Nome", "Usuario", "Perfil", "Status", "Acoes"],
+        ["Nome", "Usuario", "Empresa", "Perfil", "Status", "Acoes"],
         state.users.map((item) => [
             item.nome,
             item.username,
+            item.empresa_prestadora_nome || "Global",
             item.role,
             badge(item.is_active ? "Ativo" : "Inativo", item.is_active ? "" : "warn"),
             actionButtons("user", item.id),
         ]),
         "Nenhum usuario cadastrado.",
-        { nonSortableTargets: [4] },
+        { nonSortableTargets: [5] },
     );
     bindEntityActions("user");
 }
@@ -1120,9 +3668,10 @@ function renderLicenses() {
     }
     setTableContent(
         "licenses-table",
-        ["Descricao", "Inicio", "Fim", "Max usuarios", "Status", "Acoes"],
+        ["Descricao", "Empresa", "Inicio", "Fim", "Max usuarios", "Status", "Acoes"],
         state.licenses.map((item) => [
             item.descricao,
+            item.empresa_prestadora_nome || "Global",
             formatDate(item.start_date),
             formatDate(item.end_date),
             String(item.max_users),
@@ -1130,7 +3679,7 @@ function renderLicenses() {
             actionButtons("license", item.id),
         ]),
         "Nenhuma licenca cadastrada.",
-        { nonSortableTargets: [5] },
+        { nonSortableTargets: [6] },
     );
     bindEntityActions("license");
 }
@@ -1350,11 +3899,14 @@ function actionButton(className, label, dataAttributes = "") {
 }
 
 function actionButtons(kind, id, extraHtml = "") {
+    const extraGroup = extraHtml ? `<div class="toolbar-group">${extraHtml}</div>` : "";
     return `
-        <div class="toolbar">
-            ${extraHtml}
-            <button type="button" class="btn btn-sm ghost-button action-button secondary edit-entity" data-kind="${kind}" data-id="${id}">Editar</button>
-            <button type="button" class="btn btn-sm ghost-button action-button danger delete-entity" data-kind="${kind}" data-id="${id}">Excluir</button>
+        <div class="toolbar compact-toolbar">
+            ${extraGroup}
+            <div class="toolbar-group">
+                <button type="button" class="btn btn-sm ghost-button action-button secondary edit-entity" data-kind="${kind}" data-id="${id}">Editar</button>
+                <button type="button" class="btn btn-sm ghost-button action-button danger delete-entity" data-kind="${kind}" data-id="${id}">Excluir</button>
+            </div>
         </div>
     `;
 }
@@ -1380,6 +3932,10 @@ function bindEntityActions(kind) {
 
 function bindQuickActions() {
     document.querySelectorAll(".pay-finance").forEach((button) => {
+        if (button.dataset.quickActionBound === "true") {
+            return;
+        }
+        button.dataset.quickActionBound = "true";
         button.addEventListener("click", async () => {
             try {
                 const openBalance = Number(button.dataset.openBalance || 0);
@@ -1405,6 +3961,10 @@ function bindQuickActions() {
     });
 
     document.querySelectorAll(".complete-work-order").forEach((button) => {
+        if (button.dataset.quickActionBound === "true") {
+            return;
+        }
+        button.dataset.quickActionBound = "true";
         button.addEventListener("click", async () => {
             try {
                 await apiFetch(`/api/v1/os/${button.dataset.id}/efetuar`, { method: "POST" });
@@ -1416,6 +3976,10 @@ function bindQuickActions() {
     });
 
     document.querySelectorAll(".settle-work-order").forEach((button) => {
+        if (button.dataset.quickActionBound === "true") {
+            return;
+        }
+        button.dataset.quickActionBound = "true";
         button.addEventListener("click", async () => {
             try {
                 await apiFetch(`/api/v1/os/${button.dataset.id}/baixar`, { method: "POST" });
@@ -1435,6 +3999,8 @@ function getEntityByKind(kind, id) {
         technician: state.technicians,
         finance: state.finance,
         workOrder: state.workOrders,
+        appointment: state.appointments,
+        providerCompany: state.providerCompanies,
         user: state.users,
         license: state.licenses,
     };
@@ -1468,6 +4034,15 @@ function startEditing(kind, id) {
         fillForm(form, { ...item, ativo: String(item.ativo) });
         return;
     }
+    if (kind === "providerCompany") {
+        fillForm(form, item);
+        Array.from(form.querySelector('[name="usuarios_vinculados_ids"]').options).forEach((option) => {
+            option.selected = (item.usuarios_vinculados_ids || []).includes(Number(option.value));
+        });
+        switchProviderCompanyTab(state.providerCompanyTab || "dados");
+        renderProviderCompanyLicenseWorkspace();
+        return;
+    }
     if (kind === "finance") {
         fillForm(form, {
             ...item,
@@ -1481,15 +4056,28 @@ function startEditing(kind, id) {
         return;
     }
     if (kind === "user") {
-        fillForm(form, { ...item, is_active: String(item.is_active), password: "" });
+        fillForm(form, {
+            ...item,
+            empresa_prestadora_id: item.empresa_prestadora_id || "",
+            is_active: String(item.is_active),
+            password: "",
+        });
         form.querySelector('[name="password"]').required = false;
         return;
     }
     if (kind === "license") {
-        fillForm(form, item);
+        fillForm(form, { ...item, empresa_prestadora_id: item.empresa_prestadora_id || "" });
+        return;
+    }
+    if (kind === "appointment") {
+        switchView("agenda");
+        fillAppointmentForm(item);
         return;
     }
     if (kind === "workOrder") {
+        clearWorkOrderSaveFeedback();
+        switchView("ordens");
+        setWorkOrderWorkspaceView("new");
         fillWorkOrderForm(item);
         return;
     }
@@ -1497,6 +4085,7 @@ function startEditing(kind, id) {
 }
 
 function resetFormMode(kind) {
+    const wasEditing = Boolean(state.editing[kind]);
     state.editing[kind] = null;
     const form = document.getElementById(formIdForKind(kind));
     form.reset();
@@ -1508,6 +4097,21 @@ function resetFormMode(kind) {
     note.textContent = "";
     if (kind === "workOrder") {
         clearWorkOrderForm();
+        if (wasEditing) {
+            setWorkOrderWorkspaceView("registered");
+        }
+    }
+    if (kind === "appointment") {
+        clearAppointmentForm();
+    }
+    if (kind === "providerCompany") {
+        state.providerCompanyTab = "dados";
+        Array.from(form.querySelector('[name="usuarios_vinculados_ids"]').options).forEach((option) => {
+            option.selected = false;
+        });
+        clearProviderCompanyLicenseForm();
+        switchProviderCompanyTab("dados");
+        renderProviderCompanyLicenseWorkspace();
     }
     if (kind === "user") {
         form.querySelector('[name="password"]').required = true;
@@ -1522,6 +4126,8 @@ function formIdForKind(kind) {
         technician: "technician-form",
         finance: "finance-form",
         workOrder: "work-order-form",
+        appointment: "appointment-form",
+        providerCompany: "provider-company-form",
         user: "user-form",
         license: "license-form",
     }[kind];
@@ -1535,6 +4141,8 @@ function saveLabelForKind(kind) {
         technician: "Salvar tecnico",
         finance: "Salvar lancamento",
         workOrder: "Salvar ordem de servico",
+        appointment: "Salvar agendamento",
+        providerCompany: "Salvar empresa",
         user: "Salvar usuario",
         license: "Salvar licenca",
     }[kind];
@@ -1551,6 +4159,9 @@ function fillForm(form, data) {
 
 function fillWorkOrderForm(item) {
     const form = document.getElementById("work-order-form");
+    const linkedAppointment = state.appointments
+        .filter((appointment) => appointment.os_id === item.id && !appointment.agendamento_pai_id)
+        .sort((a, b) => b.id - a.id)[0] || null;
     fillForm(form, {
         numero: item.numero,
         cliente_id: String(item.cliente_id),
@@ -1564,7 +4175,21 @@ function fillWorkOrderForm(item) {
         valor_servico: item.valor_servico,
         observacoes: item.observacoes || "",
         gerar_financeiro: state.finance.some((entry) => entry.os_id === item.id) ? "true" : "false",
+        gerar_agendamento: linkedAppointment ? "true" : "false",
+        tipo_servico_agendamento: linkedAppointment?.tipo_servico || "",
+        duracao_prevista_minutos: linkedAppointment?.duracao_prevista_minutos || 60,
+        observacoes_internas_agendamento: linkedAppointment?.observacoes_internas || "",
+        instrucoes_tecnicas_agendamento: linkedAppointment?.instrucoes_tecnicas || "",
+        retorno_revisita_agendamento: linkedAppointment?.retorno_revisita || "",
+        sincronizar_google_agenda: linkedAppointment?.sincronizar_google ? "true" : "false",
     });
+    state.workOrderPicker.productSearch = "";
+    state.workOrderPicker.pestSearch = "";
+    state.workOrderPicker.stagedProductIds = [];
+    state.workOrderPicker.stagedPestIds = [];
+    state.workOrderPicker.selectedPestIds = item.pragas.map((pest) => pest.praga.id);
+    document.getElementById("product-picker-search").value = "";
+    document.getElementById("pest-picker-search").value = "";
     document.getElementById("products-list").innerHTML = "";
     item.produtos.forEach((product) => {
         addProductRow({
@@ -1573,9 +4198,74 @@ function fillWorkOrderForm(item) {
             diluicao: product.diluicao,
         });
     });
-    form.querySelectorAll('input[name="pragas_ids"]').forEach((checkbox) => {
-        checkbox.checked = item.pragas.some((pest) => pest.praga.id === Number(checkbox.value));
+    renderWorkOrderSelectors();
+    renderWorkOrderFormHeader();
+}
+
+function fillAppointmentForm(item) {
+    const form = document.getElementById("appointment-form");
+    fillForm(form, {
+        cliente_id: String(item.cliente_id),
+        os_id: item.os_id ? String(item.os_id) : "",
+        tecnico_id: item.tecnico_id ? String(item.tecnico_id) : "",
+        tipo_servico: item.tipo_servico,
+        data_agendamento: item.data_agendamento,
+        hora_agendamento: formatTime(item.hora_agendamento),
+        duracao_prevista_minutos: item.duracao_prevista_minutos,
+        status: item.status,
+        origem: item.origem,
+        sincronizar_google: item.sincronizar_google ? "true" : "false",
+        observacoes: item.observacoes || "",
+        observacoes_internas: item.observacoes_internas || "",
+        instrucoes_tecnicas: item.instrucoes_tecnicas || "",
+        retorno_revisita: item.retorno_revisita || "",
     });
+    syncAppointmentWorkOrderOptions();
+    if (item.os_id) {
+        form.querySelector('[name="os_id"]').value = String(item.os_id);
+    }
+    renderAppointmentCustomerSummary();
+    renderAppointmentFormHeader();
+}
+
+function renderWorkOrderFormHeader() {
+    const title = document.getElementById("work-order-form-title");
+    const description = document.getElementById("work-order-form-description");
+    if (!title || !description) {
+        return;
+    }
+
+    if (state.editing.workOrder) {
+        const current = getEntityByKind("workOrder", state.editing.workOrder);
+        title.textContent = "Edit Order Service";
+        description.textContent = current
+            ? `Atualize a OS ${current.numero}, revise itens, status e anexos antes de salvar as alteracoes.`
+            : "Atualize os dados operacionais, itens aplicados e fotos vinculadas a esta ordem de servico.";
+        return;
+    }
+
+    title.textContent = "New Order Service";
+    description.textContent = "Preencha os dados operacionais, produtos aplicados, status e anexos da ordem de servico.";
+}
+
+function renderAppointmentFormHeader() {
+    const title = document.getElementById("appointment-form-title");
+    const description = document.getElementById("appointment-form-description");
+    if (!title || !description) {
+        return;
+    }
+
+    if (state.editing.appointment) {
+        const current = getEntityByKind("appointment", state.editing.appointment);
+        title.textContent = "Editar agendamento";
+        description.textContent = current
+            ? `Atualize o compromisso #${current.id}, o status operacional e a vinculacao com OS quando necessario.`
+            : "Atualize data, horario, tecnico, status e observacoes do compromisso.";
+        return;
+    }
+
+    title.textContent = "Novo agendamento";
+    description.textContent = "Crie compromissos manuais ou vinculados a ordens de servico com historico e status operacionais.";
 }
 
 async function deleteEntity(kind, id) {
@@ -1586,6 +4276,7 @@ async function deleteEntity(kind, id) {
         technician: "/api/v1/tecnicos",
         finance: "/api/v1/financeiro",
         workOrder: "/api/v1/os",
+        providerCompany: "/api/v1/empresas-prestadoras",
         user: "/api/v1/usuarios",
         license: "/api/v1/licencas",
     };
@@ -1598,6 +4289,18 @@ async function deleteEntity(kind, id) {
 
 function formatDate(value) {
     return new Date(`${value}T00:00:00`).toLocaleDateString("pt-BR");
+}
+
+function digitsOnly(value) {
+    return String(value || "").replace(/\D+/g, "");
+}
+
+function formatCep(value) {
+    const digits = digitsOnly(value);
+    if (digits.length !== 8) {
+        return value || "";
+    }
+    return `${digits.slice(0, 5)}-${digits.slice(5)}`;
 }
 
 function formatCurrency(value) {

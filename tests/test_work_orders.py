@@ -2,6 +2,13 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 
+SAMPLE_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDAT\x08\xd7c\xf8\xcf"
+    b"\xc0\x00\x00\x03\x01\x01\x00\xc9\xfe\x92\xef\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
 def test_create_work_order_decrements_stock_and_generates_finance(client, auth_headers):
     cliente = client.post(
         "/api/v1/clientes",
@@ -165,6 +172,137 @@ def test_create_work_order_requires_stock(client, auth_headers):
     assert "Estoque insuficiente" in os_response.json()["detail"]
 
 
+def test_create_work_order_rejects_duplicate_products(client, auth_headers):
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Produto Duplicado",
+            "cpf_cnpj": "10101010000100",
+            "endereco": "Rua D, 10",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11999990001",
+            "contato": "Luiza",
+        },
+    ).json()
+
+    produto = client.post(
+        "/api/v1/produtos",
+        headers=auth_headers,
+        json={
+            "nome": "Produto Duplicado",
+            "principio_ativo": "Deltametrina",
+            "grupo_quimico": "Piretroide",
+            "toxicidade": "Moderada",
+            "concentracao": "2%",
+            "registro_ms": "MS-DUPL",
+            "estoque_atual": "10.00",
+            "estoque_minimo": "1.00",
+        },
+    ).json()
+
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Duplicado",
+            "registro": "TEC-DUPL",
+            "telefone": "11988880001",
+            "ativo": True,
+        },
+    ).json()
+
+    os_response = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "numero": "OS-DUPLICADA",
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": "2026-03-20",
+            "hora_inicio": "08:00:00",
+            "hora_fim": "09:00:00",
+            "local_execucao": "Area interna",
+            "garantia_ate": "2026-04-20",
+            "valor_servico": "190.00",
+            "produtos": [
+                {"produto_id": produto["id"], "quantidade": "1.00", "diluicao": "1:10"},
+                {"produto_id": produto["id"], "quantidade": "0.50", "diluicao": "1:20"},
+            ],
+            "pragas_ids": [],
+            "gerar_financeiro": True,
+        },
+    )
+
+    assert os_response.status_code == 400
+    assert "mesmo produto" in os_response.json()["detail"]
+
+
+def test_create_work_order_rejects_end_time_before_start(client, auth_headers):
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Horario",
+            "cpf_cnpj": "20202020000100",
+            "endereco": "Rua E, 20",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11999990002",
+            "contato": "Bruno",
+        },
+    ).json()
+
+    produto = client.post(
+        "/api/v1/produtos",
+        headers=auth_headers,
+        json={
+            "nome": "Produto Horario",
+            "principio_ativo": "Permetrina",
+            "grupo_quimico": "Piretroide",
+            "toxicidade": "Moderada",
+            "concentracao": "3%",
+            "registro_ms": "MS-HORA",
+            "estoque_atual": "10.00",
+            "estoque_minimo": "1.00",
+        },
+    ).json()
+
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Horario",
+            "registro": "TEC-HORA",
+            "telefone": "11988880002",
+            "ativo": True,
+        },
+    ).json()
+
+    os_response = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "numero": "OS-HORA-1",
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": "2026-03-20",
+            "hora_inicio": "10:00:00",
+            "hora_fim": "09:30:00",
+            "local_execucao": "Copa",
+            "garantia_ate": "2026-04-20",
+            "valor_servico": "210.00",
+            "produtos": [{"produto_id": produto["id"], "quantidade": "1.00", "diluicao": "1:10"}],
+            "pragas_ids": [],
+            "gerar_financeiro": True,
+        },
+    )
+
+    assert os_response.status_code == 400
+    assert "hora final" in os_response.json()["detail"].lower()
+
+
 def test_quick_actions_complete_and_settle_work_order_and_finance(client, auth_headers):
     execution_date = date.today() + timedelta(days=5)
     warranty_date = execution_date + timedelta(days=30)
@@ -259,3 +397,98 @@ def test_quick_actions_complete_and_settle_work_order_and_finance(client, auth_h
     financeiro_final = client.get("/api/v1/financeiro", headers=auth_headers)
     assert financeiro_final.status_code == 200
     assert financeiro_final.json()[0]["status"] == "pago"
+
+
+def test_work_order_allows_photo_upload_and_removal(client, auth_headers):
+    execution_date = date.today() + timedelta(days=2)
+    warranty_date = execution_date + timedelta(days=30)
+
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Foto",
+            "cpf_cnpj": "22222222000100",
+            "endereco": "Rua Foto, 10",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11955556666",
+            "contato": "Helena",
+        },
+    ).json()
+
+    produto = client.post(
+        "/api/v1/produtos",
+        headers=auth_headers,
+        json={
+            "nome": "Produto Foto",
+            "principio_ativo": "Permetrina",
+            "grupo_quimico": "Piretroide",
+            "toxicidade": "Moderada",
+            "concentracao": "5%",
+            "registro_ms": "MS-FOTO",
+            "estoque_atual": "4.00",
+            "estoque_minimo": "1.00",
+        },
+    ).json()
+
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Foto",
+            "registro": "TEC-FOTO",
+            "telefone": "11944445555",
+            "ativo": True,
+        },
+    ).json()
+
+    work_order = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "numero": "OS-FOTO-1",
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": execution_date.isoformat(),
+            "hora_inicio": "09:00:00",
+            "hora_fim": "10:00:00",
+            "local_execucao": "Cozinha industrial",
+            "observacoes": "Registrar fotos do atendimento",
+            "garantia_ate": warranty_date.isoformat(),
+            "status": "aberta",
+            "valor_servico": "220.00",
+            "produtos": [
+                {
+                    "produto_id": produto["id"],
+                    "quantidade": "1.00",
+                    "diluicao": "1:20",
+                }
+            ],
+            "pragas_ids": [],
+            "gerar_financeiro": True,
+        },
+    ).json()
+
+    upload_response = client.post(
+        f"/api/v1/os/{work_order['id']}/fotos",
+        headers=auth_headers,
+        files=[("files", ("ambiente.png", SAMPLE_PNG, "image/png"))],
+    )
+    assert upload_response.status_code == 200
+    uploaded = upload_response.json()
+    assert len(uploaded["fotos"]) == 1
+    assert uploaded["fotos"][0]["filename"] == "ambiente.png"
+    assert uploaded["fotos"][0]["url"] == f"/api/v1/os/fotos/{uploaded['fotos'][0]['id']}"
+
+    image_response = client.get(uploaded["fotos"][0]["url"], headers=auth_headers)
+    assert image_response.status_code == 200
+    assert image_response.headers["content-type"] == "image/png"
+    assert image_response.content == SAMPLE_PNG
+
+    delete_response = client.delete(
+        f"/api/v1/os/{work_order['id']}/fotos/{uploaded['fotos'][0]['id']}",
+        headers=auth_headers,
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json()["fotos"] == []

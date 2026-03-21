@@ -2,6 +2,18 @@
 
 MVP funcional inspirado nos dois documentos fornecidos para gestao de empresas de controle de pragas.
 
+## Documentacao de engenharia
+
+Documentacao estruturada do projeto:
+
+- [Base de documentacao](E:/Projetos/Controle_de_pragas1.1/docs/README.md)
+- [Especificacao funcional](E:/Projetos/Controle_de_pragas1.1/docs/functional-specification.md)
+- [Arquitetura](E:/Projetos/Controle_de_pragas1.1/docs/architecture.md)
+- [Referencia de API](E:/Projetos/Controle_de_pragas1.1/docs/api-reference.md)
+- [Padroes de codigo](E:/Projetos/Controle_de_pragas1.1/docs/code-standards.md)
+- [Processo de entrega](E:/Projetos/Controle_de_pragas1.1/docs/delivery-process.md)
+- [Guia de contribuicao](E:/Projetos/Controle_de_pragas1.1/CONTRIBUTING.md)
+
 ## O que foi implementado
 
 - API FastAPI em `/api/v1`
@@ -29,8 +41,7 @@ Estrutura baseada em:
 ## Como executar
 
 ```powershell
-.venv\Scripts\activate
-uvicorn app.main:app --reload
+.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
 Interface web:
@@ -136,4 +147,10 @@ Se quiser publicar online, basta usar uma plataforma com suporte a Docker e apon
 
 ```powershell
 .venv\Scripts\python -m pytest
+```
+
+## Instalacao para desenvolvimento
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```

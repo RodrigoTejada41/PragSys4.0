@@ -1,6 +1,8 @@
 from pathlib import Path
 from decimal import Decimal
 
+from app.application import services
+
 
 def create_customer(client, auth_headers, suffix="01"):
     response = client.post(
@@ -485,3 +487,45 @@ def test_import_templates_are_available():
     xlsx_template = Path("app/interfaces/web/static/import_templates/modelo_importacao_produtos_v3_1.xlsx")
     assert csv_template.exists()
     assert xlsx_template.exists()
+
+
+def test_customer_lookup_endpoints_return_company_and_address_data(client, auth_headers, monkeypatch):
+    def fake_fetch_json(url):
+        if "cnpj" in url:
+            return {
+                "razao_social": "Empresa Consulta Ltda",
+                "nome_fantasia": "Empresa Consulta",
+                "ddd_telefone_1": "1133779922",
+                "email": "contato@empresa.com",
+                "cep": "01001000",
+                "logradouro": "Praca da Se",
+                "numero": "100",
+                "complemento": "Sala 5",
+                "bairro": "Se",
+                "municipio": "Sao Paulo",
+                "uf": "SP",
+            }
+        return {
+            "cep": "01001-000",
+            "logradouro": "Praca da Se",
+            "bairro": "Se",
+            "localidade": "Sao Paulo",
+            "uf": "SP",
+        }
+
+    monkeypatch.setattr(services, "_fetch_json", fake_fetch_json)
+
+    cnpj_response = client.get("/api/v1/clientes/consultar-cnpj/12345678000199", headers=auth_headers)
+    assert cnpj_response.status_code == 200
+    assert cnpj_response.json()["razao_social"] == "Empresa Consulta Ltda"
+    assert cnpj_response.json()["cidade"] == "Sao Paulo"
+
+    provider_cnpj_response = client.get("/api/v1/empresas-prestadoras/consultar-cnpj/12345678000199", headers=auth_headers)
+    assert provider_cnpj_response.status_code == 200
+    assert provider_cnpj_response.json()["nome_fantasia"] == "Empresa Consulta"
+    assert provider_cnpj_response.json()["cep"] == "01001000"
+
+    cep_response = client.get("/api/v1/clientes/consultar-cep/01001000", headers=auth_headers)
+    assert cep_response.status_code == 200
+    assert cep_response.json()["endereco"] == "Praca da Se"
+    assert cep_response.json()["estado"] == "SP"

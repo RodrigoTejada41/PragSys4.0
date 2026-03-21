@@ -8,10 +8,28 @@ def test_master_can_manage_users_and_licenses(client, auth_headers):
             "password": "senha123",
             "role": "operador",
             "is_active": True,
+            "nova_empresa_prestadora": {
+                "razao_social": "Prestadora Operador 1 Ltda",
+                "nome_fantasia": "Prestadora Operador 1",
+                "cnpj": "12345678000190",
+                "email": "operador1@prestadora.com",
+                "telefone": "11999990000",
+                "cidade": "Sao Paulo",
+                "estado": "SP",
+            },
+            "licenca_inicial": {
+                "descricao": "Licenca inicial Operador 1",
+                "start_date": "2026-03-20",
+                "end_date": "2027-03-20",
+                "max_users": 5,
+                "status": "ativa",
+                "notes": "Licenca vinculada a empresa da prestadora",
+            },
         },
     )
     assert create_user_response.status_code == 201
     assert create_user_response.json()["role"] == "operador"
+    assert create_user_response.json()["empresa_prestadora_nome"] == "Prestadora Operador 1"
 
     licenses_response = client.get("/api/v1/licencas", headers=auth_headers)
     assert licenses_response.status_code == 200
@@ -43,6 +61,23 @@ def test_operador_can_use_os_but_cannot_access_finance_or_license_management(cli
             "password": "senha123",
             "role": "operador",
             "is_active": True,
+            "nova_empresa_prestadora": {
+                "razao_social": "Prestadora Tecnico App Ltda",
+                "nome_fantasia": "Prestadora Tecnico",
+                "cnpj": "98765432000110",
+                "email": "tecnico@prestadora.com",
+                "telefone": "11988887777",
+                "cidade": "Campinas",
+                "estado": "SP",
+            },
+            "licenca_inicial": {
+                "descricao": "Licenca inicial Tecnico",
+                "start_date": "2026-03-20",
+                "end_date": "2027-03-20",
+                "max_users": 3,
+                "status": "ativa",
+                "notes": "Licenca de teste da prestadora",
+            },
         },
     )
     assert user_response.status_code == 201

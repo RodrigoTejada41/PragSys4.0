@@ -12,7 +12,116 @@
 
     {{ crud_view("tecnicos", "Novo tecnico", "Cadastre equipe responsavel por execucao, registro e contato.", "technician-form", "Equipe cadastrada", "Controle profissionais ativos e inativos vinculados as OS.", "technicians-table") }}
 
-    {{ crud_view("ordens", "Nova ordem de servico", "Gere a OS, desconte o estoque e registre o financeiro automaticamente.", "work-order-form", "Ordens registradas", "Historico operacional com acesso rapido ao PDF e aos certificados.", "work-orders-table", "orders-layout") }}
+    <section class="view" id="view-ordens">
+        <div class="orders-module-shell">
+            <section class="card panel panel-accent">
+                <div class="card-body">
+                    <div class="orders-module-header">
+                        <div class="section-heading compact">
+                            <p class="eyebrow">Ordens de servico</p>
+                            <h3>Cadastro e acompanhamento em contextos separados</h3>
+                            <p>Use uma tela focada para criar ou editar a OS e outra para localizar, revisar e finalizar ordens ja registradas.</p>
+                        </div>
+                        <div class="tabs orders-module-tabs" role="tablist" aria-label="Navegacao da ordem de servico">
+                            <button
+                                type="button"
+                                class="tab tab-active"
+                                role="tab"
+                                aria-selected="true"
+                                aria-controls="work-order-screen-new"
+                                id="work-order-screen-trigger-new"
+                                data-work-order-screen-trigger="new"
+                            >
+                                New Order
+                            </button>
+                            <button
+                                type="button"
+                                class="tab"
+                                role="tab"
+                                aria-selected="false"
+                                aria-controls="work-order-screen-registered"
+                                id="work-order-screen-trigger-registered"
+                                data-work-order-screen-trigger="registered"
+                            >
+                                Registered Orders
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section
+                class="orders-screen is-active"
+                role="tabpanel"
+                id="work-order-screen-new"
+                aria-labelledby="work-order-screen-trigger-new"
+                data-work-order-screen-panel="new"
+            >
+                <section class="card panel form-panel orders-form-panel">
+                    <div class="card-body">
+                        <div class="section-heading">
+                            <h3 id="work-order-form-title">New Order Service</h3>
+                            <p id="work-order-form-description">Preencha os dados operacionais, produtos aplicados, status e anexos da ordem de servico.</p>
+                        </div>
+                        <form id="work-order-form" class="data-form"></form>
+                    </div>
+                </section>
+            </section>
+
+            <section
+                class="orders-screen"
+                role="tabpanel"
+                id="work-order-screen-registered"
+                aria-labelledby="work-order-screen-trigger-registered"
+                data-work-order-screen-panel="registered"
+                hidden
+            >
+                <section class="card panel orders-list-panel">
+                    <div class="card-body">
+                        <div class="section-heading">
+                            <h3>Registered Orders</h3>
+                            <p>Pesquise por cliente, numero, data ou status e execute as acoes operacionais sem misturar o fluxo com o formulario.</p>
+                        </div>
+                        <div id="work-orders-table"></div>
+                    </div>
+                </section>
+            </section>
+        </div>
+    </section>
+
+    <section class="view" id="view-agenda">
+        <div class="appointments-module-shell">
+            <section class="card panel panel-accent">
+                <div class="card-body">
+                    <div class="section-heading">
+                        <p class="eyebrow">Agenda operacional</p>
+                        <h3>Planejamento integrado com clientes e ordens de servico</h3>
+                        <p>Gerencie visitas tecnicas, retornos e lembretes operacionais com historico, status claros e acesso rapido a OS vinculada.</p>
+                    </div>
+                </div>
+            </section>
+
+            <div class="appointments-layout">
+                <section class="card panel form-panel appointment-form-panel">
+                    <div class="card-body">
+                        <div class="section-heading">
+                            <h3 id="appointment-form-title">Novo agendamento</h3>
+                            <p id="appointment-form-description">Crie, reagende ou atualize compromissos vinculados a clientes e, quando necessario, a uma ordem de servico.</p>
+                        </div>
+                        <form id="appointment-form" class="data-form"></form>
+                    </div>
+                </section>
+
+                <section class="card panel appointment-workspace-panel">
+                    <div class="card-body">
+                        <div id="appointments-dashboard"></div>
+                        <div id="appointments-calendar"></div>
+                        <div id="appointments-day-list"></div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </section>
 
     <section class="view" id="view-financeiro">
         <div class="row widget-grid finance-only">
@@ -85,6 +194,8 @@
             </div>
         </section>
     </section>
+
+    {{ crud_view("empresas", "Cadastrar empresa", "Cadastre a empresa prestadora e vincule os usuarios dela em uma unica tela.", "provider-company-form", "Empresas prestadoras", "Controle as prestadoras cadastradas e seus usuarios vinculados.", "provider-companies-table") }}
 
     {{ crud_view("usuarios", "Novo usuario", "Gestao exclusiva do perfil MASTER com controle de acesso.", "user-form", "Usuarios do sistema", "Controle de perfis, status e acesso administrativo.", "users-table") }}
 
