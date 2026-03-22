@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>netstandard2.0</TargetFramework>
+		<PackageId>Zeus.Net.NFe.Danfe.Html</PackageId>
+		<Title>Zeus.Net.NFe.Danfe.Html</Title>
+		<Authors>ZeusAutomacao</Authors>
+		<Company>Zeus Automacao</Company>
+		<Description>Biblioteca para geração de DANFE em HTML da NF-e.</Description>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="NetBarcode" Version="1.7.0" />
+		<PackageReference Include="Zeus.Net.NFe.NFCe" Version="2025.12.22.2042" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Compile Update="Resource.Designer.cs">
+			<DesignTime>True</DesignTime>
+			<AutoGen>True</AutoGen>
+			<DependentUpon>Resource.resx</DependentUpon>
+		</Compile>
+	</ItemGroup>
+
+	<ItemGroup>
+		<EmbeddedResource Update="Resource.resx">
+			<Generator>ResXFileCodeGenerator</Generator>
+			<LastGenOutput>Resource.Designer.cs</LastGenOutput>
+		</EmbeddedResource>
+	</ItemGroup>
+
+</Project>

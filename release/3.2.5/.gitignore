@@ -1,0 +1,15 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.db
+.vs/
+tmp/
+output/
+*.log
+build/
+dist/
+*.spec
+*.egg-info/
+.venv_backup_*/
+.venv_py39_backup/

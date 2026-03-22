@@ -1,0 +1,54 @@
+services:
+  syspragas:
+    build: .
+    container_name: syspragas
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:////data/syspragas.db
+      JWT_SECRET: <SECRET>
+      DEFAULT_ADMIN_USERNAME: admin
+      DEFAULT_ADMIN_PASSWORD: syspragas123
+      GOOGLE_CALENDAR_ENABLED: ${GOOGLE_CALENDAR_ENABLED:-false}
+      GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-primary}
+      GOOGLE_CALENDAR_ACCESS_TOKEN: ${GOOGLE_CALENDAR_ACCESS_TOKEN:-}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
+      GOOGLE_OAUTH_SCOPES: ${GOOGLE_OAUTH_SCOPES:-https://www.googleapis.com/auth/calendar.events openid email profile}
+      NFE_PROVIDER: ${NFE_PROVIDER:-focus_nfe}
+      FOCUS_NFE_API_BASE_URL: ${FOCUS_NFE_API_BASE_URL:-}
+      FOCUS_NFE_API_KEY: ${FOCUS_NFE_API_KEY:-}
+      FOCUS_NFE_ENVIRONMENT: ${FOCUS_NFE_ENVIRONMENT:-homologacao}
+      FOCUS_NFE_TIMEOUT_SECONDS: ${FOCUS_NFE_TIMEOUT_SECONDS:-30}
+      FOCUS_NFE_WEBHOOK_SECRET: ${FOCUS_NFE_WEBHOOK_SECRET:-}
+      SEFAZ_NFE_UF: ${SEFAZ_NFE_UF:-}
+      SEFAZ_NFE_SERIE: ${SEFAZ_NFE_SERIE:-1}
+      SEFAZ_NFE_CERTIFICATE_PATH: /run/sefaz/certificado/certificado_a1.pfx
+      SEFAZ_NFE_CERTIFICATE_PASSWORD: ${SEFAZ_NFE_CERTIFICATE_PASSWORD:-}
+      SEFAZ_NFE_XSD_DIR: /run/sefaz/xsd
+      SEFAZ_NFE_WS_URLS_JSON: ${SEFAZ_NFE_WS_URLS_JSON:-}
+      SEFAZ_NFE_VERIFY_TLS: ${SEFAZ_NFE_VERIFY_TLS:-true}
+      COMPANY_CNPJ: ${COMPANY_CNPJ:-}
+      COMPANY_IE: ${COMPANY_IE:-}
+      COMPANY_IM: ${COMPANY_IM:-}
+      COMPANY_CNAE: ${COMPANY_CNAE:-}
+      COMPANY_CRT: ${COMPANY_CRT:-1}
+      COMPANY_LEGAL_NAME: ${COMPANY_LEGAL_NAME:-}
+      COMPANY_TRADE_NAME: ${COMPANY_TRADE_NAME:-}
+      COMPANY_STREET: ${COMPANY_STREET:-}
+      COMPANY_NUMBER: ${COMPANY_NUMBER:-}
+      COMPANY_DISTRICT: ${COMPANY_DISTRICT:-}
+      COMPANY_CITY: ${COMPANY_CITY:-}
+      COMPANY_CITY_CODE: ${COMPANY_CITY_CODE:-}
+      COMPANY_STATE: ${COMPANY_STATE:-}
+      COMPANY_STATE_CODE: ${COMPANY_STATE_CODE:-}
+      COMPANY_ZIP_CODE: ${COMPANY_ZIP_CODE:-}
+      COMPANY_PHONE: ${COMPANY_PHONE:-}
+    volumes:
+      - syspragas_data:/data
+      - ./certificado/62028102 RODRIGO ALVES TEJADA62028102000172.pfx:/run/sefaz/certificado/certificado_a1.pfx:ro
+      - ./XSD/DFe.NET-master/NFe.AppTeste/Schemas:/run/sefaz/xsd:ro
+
+volumes:
+  syspragas_data:
