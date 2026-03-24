@@ -1183,6 +1183,7 @@ def list_finance_entries(
     cliente_id: Optional[int] = None,
     status_filter: Optional[str] = None,
     tipo: Optional[str] = None,
+    search: Optional[str] = None,
 ) -> List[FinanceEntry]:
     query = db.query(FinanceEntry)
     if start_date:
@@ -1195,6 +1196,13 @@ def list_finance_entries(
         query = query.filter(FinanceEntry.status == status_filter)
     if tipo:
         query = query.filter(FinanceEntry.tipo == tipo)
+    if search:
+        lookup = search.strip()
+        query = query.filter(
+            (FinanceEntry.descricao.ilike(f"%{lookup}%"))
+            | (FinanceEntry.referencia.ilike(f"%{lookup}%"))
+            | (FinanceEntry.fornecedor_nome.ilike(f"%{lookup}%"))
+        )
     entries = query.order_by(FinanceEntry.vencimento.asc(), FinanceEntry.id.desc()).all()
     _sync_finance_statuses(db, entries)
     return entries
@@ -1202,6 +1210,8 @@ def list_finance_entries(
 
 def update_finance_entry(db: Session, finance_entry_id: int, payload: FinanceEntryUpdate) -> FinanceEntry:
     entry = _get_finance_entry_or_fail(db, finance_entry_id)
+    if entry.recibo_id:
+        raise BusinessRuleViolation("Lancamentos gerados por recibo devem ser alterados pelo proprio recibo.")
     if entry.os_id:
         raise BusinessRuleViolation("Lancamentos gerados por OS devem ser alterados pela propria ordem de servico.")
     _validate_finance_payload(db, payload, current_entry=entry)
@@ -1232,6 +1242,8 @@ def mark_finance_entry_as_paid(
 
 def delete_finance_entry(db: Session, finance_entry_id: int) -> None:
     entry = _get_finance_entry_or_fail(db, finance_entry_id)
+    if entry.recibo_id:
+        raise BusinessRuleViolation("Lancamentos gerados por recibo devem ser excluidos pelo proprio recibo.")
     if entry.os_id:
         raise BusinessRuleViolation("Lancamentos gerados por OS devem ser excluidos pela propria ordem de servico.")
     if entry.status == FinanceStatus.PAGO.value or Decimal(entry.valor_pago) > 0:

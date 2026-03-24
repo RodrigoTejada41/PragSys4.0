@@ -19,6 +19,7 @@ from app.interfaces.api.routes import (
     pests,
     products,
     provider_companies,
+    receipts,
     technicians,
     users,
     whatsapp,
@@ -60,6 +61,7 @@ app.include_router(customers.router, prefix=settings.api_v1_prefix)
 app.include_router(products.router, prefix=settings.api_v1_prefix)
 app.include_router(pests.router, prefix=settings.api_v1_prefix)
 app.include_router(technicians.router, prefix=settings.api_v1_prefix)
+app.include_router(receipts.router, prefix=settings.api_v1_prefix)
 app.include_router(finance.router, prefix=settings.api_v1_prefix)
 app.include_router(fiscal.router, prefix=settings.api_v1_prefix)
 app.include_router(nfe.router, prefix=settings.api_v1_prefix)

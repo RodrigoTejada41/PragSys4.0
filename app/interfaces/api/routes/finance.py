@@ -38,6 +38,7 @@ def get_finance_entries(
     cliente_id: Optional[int] = None,
     status_filter: Optional[str] = None,
     tipo: Optional[str] = None,
+    search: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> List[FinanceEntryRead]:
     return list_finance_entries(
@@ -47,6 +48,7 @@ def get_finance_entries(
         cliente_id=cliente_id,
         status_filter=status_filter,
         tipo=tipo,
+        search=search,
     )
 
 
