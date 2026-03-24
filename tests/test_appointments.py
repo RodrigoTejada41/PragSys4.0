@@ -1,6 +1,8 @@
 from datetime import date, timedelta
 
 from app.core.config import get_settings
+from app.infrastructure.db import get_session_local
+from app.infrastructure.models import ProviderCompany
 
 
 def create_customer(client, auth_headers, suffix="01"):
@@ -274,6 +276,46 @@ def test_google_sync_route_requests_oauth_when_account_not_connected(client, aut
     assert payload["mode"] == "oauth_required"
     assert "accounts.google.com" in payload["authorization_url"]
     get_settings.cache_clear()
+
+
+def test_google_status_and_logout_flow_for_provider_company(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id-teste")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret-teste")
+    monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "http://testserver/api/v1/google-calendar/oauth/callback")
+    get_settings.cache_clear()
+
+    with get_session_local()() as db:
+        company = ProviderCompany(
+            razao_social="Google Agenda Teste Ltda",
+            nome_fantasia="Agenda Teste",
+            cnpj="11222333000199",
+            google_calendar_id="primary",
+            google_account_email="contato@agenda.teste",
+            google_access_token="access-token",
+            google_refresh_token="refresh-token",
+        )
+        db.add(company)
+        db.commit()
+        db.refresh(company)
+        company_id = company.id
+
+    status_response = client.get(f"/api/v1/google-calendar/status?provider_company_id={company_id}", headers=auth_headers)
+
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "ativo"
+    assert status_response.json()["account_email"] == "contato@agenda.teste"
+
+    logout_response = client.post(f"/api/v1/google-calendar/logout?provider_company_id={company_id}", headers=auth_headers)
+
+    assert logout_response.status_code == 200
+    payload = logout_response.json()
+    assert payload["status"] == "desconectado"
+    assert payload["account_email"] is None
+
+    status_after_logout = client.get(f"/api/v1/google-calendar/status?provider_company_id={company_id}", headers=auth_headers)
+
+    assert status_after_logout.status_code == 200
+    assert status_after_logout.json()["status"] == "aguardando_conexao"
 
 
 def test_completing_appointment_updates_linked_work_order(client, auth_headers):

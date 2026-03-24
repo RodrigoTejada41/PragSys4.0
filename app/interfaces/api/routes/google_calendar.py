@@ -6,10 +6,16 @@ from sqlalchemy.orm import Session
 
 from app.application.google_calendar_service import (
     build_google_oauth_authorization_url,
+    get_google_connection_status,
     handle_google_oauth_callback,
+    logout_google_calendar,
     sync_appointment_with_google_or_request_oauth,
 )
-from app.application.schemas import GoogleCalendarAppointmentSyncRead, GoogleCalendarOAuthStartRead
+from app.application.schemas import (
+    GoogleCalendarAppointmentSyncRead,
+    GoogleCalendarConnectionStatusRead,
+    GoogleCalendarOAuthStartRead,
+)
 from app.core.exceptions import BusinessRuleViolation
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
@@ -24,12 +30,72 @@ router = APIRouter(prefix="/google-calendar", tags=["google-calendar"])
 )
 def post_google_oauth_start(
     appointment_id: int | None = None,
+    provider_company_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(["master", "admin", "operador"])),
 ) -> GoogleCalendarOAuthStartRead:
     return GoogleCalendarOAuthStartRead(
-        authorization_url=build_google_oauth_authorization_url(db, current_user.id, appointment_id=appointment_id),
+        authorization_url=build_google_oauth_authorization_url(
+            db,
+            current_user.id,
+            appointment_id=appointment_id,
+            provider_company_id=provider_company_id,
+        ),
         message="Abra a autenticacao Google para conectar a conta e concluir a sincronizacao.",
+    )
+
+
+@router.post(
+    "/login",
+    response_model=GoogleCalendarOAuthStartRead,
+)
+def post_google_login(
+    appointment_id: int | None = None,
+    provider_company_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> GoogleCalendarOAuthStartRead:
+    return post_google_oauth_start(
+        appointment_id=appointment_id,
+        provider_company_id=provider_company_id,
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.get(
+    "/status",
+    response_model=GoogleCalendarConnectionStatusRead,
+)
+def get_google_status(
+    provider_company_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> GoogleCalendarConnectionStatusRead:
+    return GoogleCalendarConnectionStatusRead(
+        **get_google_connection_status(
+            db,
+            user_id=current_user.id,
+            provider_company_id=provider_company_id,
+        )
+    )
+
+
+@router.post(
+    "/logout",
+    response_model=GoogleCalendarConnectionStatusRead,
+)
+def post_google_logout(
+    provider_company_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> GoogleCalendarConnectionStatusRead:
+    return GoogleCalendarConnectionStatusRead(
+        **logout_google_calendar(
+            db,
+            user_id=current_user.id,
+            provider_company_id=provider_company_id,
+        )
     )
 
 

@@ -17,3 +17,5 @@ dist/
 certificado/
 *.pfx
 XSD/
+assinaturas_tecnicas/*
+!assinaturas_tecnicas/.gitkeep

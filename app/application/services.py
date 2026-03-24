@@ -19,6 +19,7 @@ from reportlab.lib.utils import ImageReader
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import get_settings
+from app.application.certificate_assets import require_certificate_model_path, require_technical_signature_path
 from app.application.schemas import (
     AddressLookupRead,
     CustomerCnpjLookupRead,
@@ -1934,8 +1935,10 @@ def _company_identification_summary_lines() -> List[str]:
 
 
 def _resolve_sanitary_certificate_template_path() -> Optional[Path]:
-    candidate = Path(__file__).resolve().parents[2] / "modelo" / "modelo.png"
-    return candidate if candidate.exists() else None
+    try:
+        return require_certificate_model_path()
+    except BusinessRuleViolation:
+        return None
 
 
 def _split_text_to_width(pdf: canvas.Canvas, text: str, font_name: str, font_size: float, max_width: float) -> List[str]:
@@ -1999,6 +2002,53 @@ def _draw_centered_paragraph(
 
 def _draw_template_certificate_background(pdf: canvas.Canvas, template_path: Path, page_width: float, page_height: float) -> None:
     pdf.drawImage(ImageReader(str(template_path)), 0, 0, width=page_width, height=page_height, mask="auto")
+
+
+def _resolve_responsible_name(settings, work_order: WorkOrder) -> str:
+    responsible_name = settings.technical_responsible_name
+    if responsible_name == "Responsavel tecnico nao configurado":
+        responsible_name = work_order.tecnico.nome
+    return responsible_name
+
+
+def _draw_signature_stamp(
+    pdf: canvas.Canvas,
+    *,
+    signature_path: Path,
+    center_x: float,
+    line_y: float,
+    label: str,
+    name: str,
+    max_width: float = 40 * mm,
+    max_height: float = 14 * mm,
+) -> None:
+    image = ImageReader(str(signature_path))
+    image_width, image_height = image.getSize()
+    scale = min(max_width / image_width, max_height / image_height)
+    draw_width = image_width * scale
+    draw_height = image_height * scale
+    pdf.drawImage(
+        image,
+        center_x - (draw_width / 2),
+        line_y + 2 * mm,
+        width=draw_width,
+        height=draw_height,
+        preserveAspectRatio=True,
+        mask="auto",
+    )
+    pdf.line(center_x - (max_width / 2), line_y, center_x + (max_width / 2), line_y)
+    _draw_centered_text_to_fit(
+        pdf,
+        name,
+        center_x=center_x,
+        baseline_y=line_y - 5.2 * mm,
+        max_width=max_width,
+        font_name="Helvetica",
+        initial_size=8.4,
+        min_size=7.0,
+    )
+    pdf.setFont("Helvetica-Oblique", 7.8)
+    pdf.drawCentredString(center_x, line_y - 9.1 * mm, label)
 
 
 def _classify_food_risk_environment(work_order: WorkOrder) -> str:
@@ -2498,8 +2548,152 @@ def _generate_template_sanitary_certificate_pdf(db: Session, work_order_id: int,
     return buffer.getvalue()
 
 
+def _generate_official_sanitary_certificate_pdf(
+    db: Session,
+    work_order_id: int,
+    *,
+    framed: bool,
+) -> bytes:
+    work_order = get_work_order(db, work_order_id)
+    settings = get_settings()
+    signature_path = require_technical_signature_path(work_order.tecnico)
+    template_path = require_certificate_model_path()
+    buffer = BytesIO()
+    width, height = landscape(A4)
+    pdf = canvas.Canvas(buffer, pagesize=(width, height))
+    pdf.setTitle("Certificado Sanitario")
+
+    _draw_template_certificate_background(pdf, template_path, width, height)
+
+    ink = colors.HexColor("#2f2720")
+    accent = colors.HexColor("#8e6b2d")
+    panel_fill = colors.HexColor("#f7f1e7")
+    line_color = colors.HexColor("#d8c39b")
+
+    pdf.setFillColor(panel_fill)
+    pdf.setStrokeColor(line_color)
+    pdf.roundRect(29 * mm, height - 38 * mm, width - 58 * mm, 12 * mm, 3 * mm, stroke=1, fill=1)
+    pdf.roundRect(33 * mm, 34 * mm, width - 66 * mm, 92 * mm, 4 * mm, stroke=1, fill=1)
+    pdf.roundRect(33 * mm, 18 * mm, width - 66 * mm, 12 * mm, 3 * mm, stroke=1, fill=1)
+
+    company_name = (settings.company_trade_name or settings.company_name or settings.company_legal_name).upper()
+    pdf.setFillColor(accent)
+    pdf.setFont("Times-Bold", 15)
+    pdf.drawCentredString(width / 2, height - 31.5 * mm, company_name[:64])
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Bold", 28)
+    pdf.drawCentredString(width / 2, height - 47 * mm, "CERTIFICADO SANITARIO")
+    pdf.setFillColor(accent)
+    pdf.setFont("Times-Italic", 12)
+    pdf.drawCentredString(
+        width / 2,
+        height - 55 * mm,
+        "Modelo oficial para impressao e moldura" if framed else "Modelo oficial de conformidade sanitaria",
+    )
+
+    pdf.setFillColor(colors.HexColor("#fffaf1"))
+    pdf.roundRect(48 * mm, height - 78 * mm, width - 96 * mm, 13 * mm, 3 * mm, stroke=0, fill=1)
+    pdf.setFillColor(ink)
+    _draw_centered_text_to_fit(
+        pdf,
+        str(work_order.cliente.razao_social or "").upper(),
+        center_x=width / 2,
+        baseline_y=height - 72.5 * mm,
+        max_width=width - 110 * mm,
+        font_name="Times-Bold",
+        initial_size=18,
+        min_size=11,
+    )
+
+    body_text = _build_framed_sanitary_certificate_text(work_order)
+    if not framed:
+        body_text = f"{_build_standard_sanitary_certificate_text(work_order)} {_build_standard_sanitary_declaration(work_order)}"
+    pdf.setFillColor(ink)
+    _draw_centered_paragraph(
+        pdf,
+        body_text,
+        center_x=width / 2,
+        top_y=height - 88 * mm,
+        max_width=182 * mm,
+        font_name="Times-Roman",
+        font_size=10.2,
+        leading=4.55 * mm,
+    )
+
+    risk_environment = _classify_food_risk_environment(work_order)
+    left_lines = [
+        f"CNPJ/CPF: {work_order.cliente.cpf_cnpj}",
+        f"Endereco: {work_order.cliente.endereco}, {work_order.cliente.cidade}/{work_order.cliente.estado}",
+        f"Area atendida: {work_order.local_execucao}",
+        f"Ambiente: {_short_food_risk_environment_label(risk_environment)}",
+    ]
+    right_lines = [
+        f"Data do servico: {work_order.data_execucao.strftime('%d/%m/%Y')}",
+        f"Validade tecnica: {work_order.garantia_ate.strftime('%d/%m/%Y')}",
+        f"OS: {work_order.numero}",
+        f"Tecnico executor: {work_order.tecnico.nome}",
+    ]
+    company_lines = _company_identification_summary_lines()
+
+    _draw_certificate_info_box(
+        pdf,
+        x=41 * mm,
+        y=52 * mm,
+        width=83 * mm,
+        height=40 * mm,
+        title="Estabelecimento atendido",
+        lines=left_lines,
+    )
+    _draw_certificate_info_box(
+        pdf,
+        x=129 * mm,
+        y=52 * mm,
+        width=63 * mm,
+        height=40 * mm,
+        title="Rastreabilidade tecnica",
+        lines=right_lines,
+    )
+    _draw_certificate_info_box(
+        pdf,
+        x=197 * mm,
+        y=52 * mm,
+        width=55 * mm,
+        height=40 * mm,
+        title="Empresa especializada",
+        lines=company_lines[:4],
+    )
+
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Italic", 9)
+    pdf.drawCentredString(
+        width / 2,
+        25.2 * mm,
+        "Documento tecnico emitido com assinatura do responsavel e base normativa sanitaria aplicavel.",
+    )
+
+    responsible_name = _resolve_responsible_name(settings, work_order)
+    emission_date = date.today().strftime("%d/%m/%Y")
+    _draw_signature_stamp(
+        pdf,
+        signature_path=signature_path,
+        center_x=97 * mm,
+        line_y=16 * mm,
+        label="Responsavel tecnico",
+        name=responsible_name,
+    )
+    pdf.line(178 * mm, 16 * mm, 232 * mm, 16 * mm)
+    pdf.setFont("Helvetica", 8.4)
+    pdf.drawCentredString(205 * mm, 10.8 * mm, emission_date)
+    pdf.setFont("Helvetica-Oblique", 7.8)
+    pdf.drawCentredString(205 * mm, 6.7 * mm, "Data de emissao")
+
+    pdf.showPage()
+    pdf.save()
+    return buffer.getvalue()
+
+
 def generate_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
-    return _generate_standard_sanitary_certificate_pdf(db, work_order_id)
+    return _generate_official_sanitary_certificate_pdf(db, work_order_id, framed=False)
 
 
 def _generate_ornamental_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
@@ -2746,4 +2940,4 @@ def _generate_premium_framed_sanitary_certificate_pdf(db: Session, work_order_id
 
 
 def generate_framed_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
-    return _generate_premium_framed_sanitary_certificate_pdf(db, work_order_id)
+    return _generate_official_sanitary_certificate_pdf(db, work_order_id, framed=True)

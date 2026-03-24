@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+import httpx
+
 from app.core.config import get_settings
 from app.modules.whatsapp.service import WhatsAppSendResult
 
@@ -43,7 +45,49 @@ def configure_whatsapp(monkeypatch):
     monkeypatch.setenv("WHATSAPP_API_BASE_URL", "https://whatsapp.example.test/send")
     monkeypatch.setenv("WHATSAPP_AUTH_TOKEN", "token-teste")
     monkeypatch.setenv("WHATSAPP_SENDER_ID", "sender-teste")
+    monkeypatch.setenv("WHATSAPP_INSTANCE_NAME", "instancia-teste")
+    monkeypatch.setenv("WHATSAPP_STATUS_API_URL", "https://whatsapp.example.test/status")
     get_settings.cache_clear()
+
+
+def test_whatsapp_status_endpoint_reports_active_connection(client, auth_headers, monkeypatch):
+    configure_whatsapp(monkeypatch)
+
+    class FakeResponse:
+        status_code = 200
+        content = b'{"status":"connected","instance_name":"instancia-teste"}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"status": "connected", "instance_name": "instancia-teste"}
+
+    monkeypatch.setattr("app.modules.whatsapp.service.httpx.get", lambda *args, **kwargs: FakeResponse())
+
+    response = client.get("/api/v1/whatsapp/status", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ativo"
+    assert payload["instance_name"] == "instancia-teste"
+    assert payload["error_message"] is None
+
+
+def test_whatsapp_status_endpoint_reports_error_on_timeout(client, auth_headers, monkeypatch):
+    configure_whatsapp(monkeypatch)
+
+    def raise_timeout(*args, **kwargs):
+        raise httpx.TimeoutException("timeout")
+
+    monkeypatch.setattr("app.modules.whatsapp.service.httpx.get", raise_timeout)
+
+    response = client.get("/api/v1/whatsapp/status", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "erro"
+    assert "Timeout" in payload["error_message"]
 
 
 def test_create_appointment_sends_whatsapp_automatically(client, auth_headers, monkeypatch):

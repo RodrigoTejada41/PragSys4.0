@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
@@ -13,12 +14,23 @@ from app.modules.whatsapp.config import WhatsAppIntegrationConfig, load_whatsapp
 from app.modules.whatsapp.repository import create_appointment_whatsapp_log
 from app.modules.whatsapp.utils import build_appointment_whatsapp_message, compact_error_message, normalize_whatsapp_phone
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class WhatsAppSendResult:
     provider: str
     external_message_id: Optional[str]
     raw_response: Optional[dict | str]
+
+
+@dataclass(frozen=True)
+class WhatsAppConnectionStatus:
+    status: str
+    provider: str
+    instance_name: Optional[str]
+    error_message: Optional[str]
+    configured: bool
 
 
 class WhatsAppProviderClient(Protocol):
@@ -173,6 +185,118 @@ def get_whatsapp_configuration_status() -> dict:
         "sender_id_configured": bool(config.sender_id),
         "auth_configured": bool(config.auth_token or config.api_key),
     }
+
+
+def _resolve_status_url(config: WhatsAppIntegrationConfig) -> Optional[str]:
+    if config.status_api_url:
+        return config.status_api_url
+    if config.provider == "custom" and config.api_base_url:
+        return f"{config.api_base_url.rstrip('/')}/status"
+    return None
+
+
+def _normalize_connection_status(payload: dict | None, config: WhatsAppIntegrationConfig) -> WhatsAppConnectionStatus:
+    payload = payload or {}
+    instance_name = (
+        payload.get("instance_name")
+        or payload.get("instance")
+        or payload.get("name")
+        or config.instance_name
+        or config.sender_id
+    )
+    connected_flag = payload.get("connected")
+    raw_status = str(
+        payload.get("status")
+        or payload.get("state")
+        or payload.get("connection_status")
+        or ""
+    ).strip().lower()
+
+    if connected_flag is True or raw_status in {"ativo", "active", "connected", "open", "ready"}:
+        status = "ativo"
+    elif connected_flag is False or raw_status in {"desconectado", "disconnected", "closed", "logout"}:
+        status = "desconectado"
+    elif raw_status in {"aguardando", "aguardando_conexao", "pending", "connecting", "qr", "awaiting_connection"}:
+        status = "aguardando_conexao"
+    else:
+        status = "ativo" if config.is_ready else "aguardando_conexao"
+
+    error_message = payload.get("error") or payload.get("message") or None
+    return WhatsAppConnectionStatus(
+        status=status,
+        provider=config.provider,
+        instance_name=instance_name,
+        error_message=compact_error_message(error_message) if error_message else None,
+        configured=config.is_ready,
+    )
+
+
+class WhatsAppService:
+    @staticmethod
+    def get_status() -> WhatsAppConnectionStatus:
+        config = load_whatsapp_config()
+        instance_name = config.instance_name or config.sender_id
+
+        if not config.enabled:
+            return WhatsAppConnectionStatus(
+                status="desconectado",
+                provider=config.provider,
+                instance_name=instance_name,
+                error_message="Integracao WhatsApp desabilitada nas configuracoes.",
+                configured=False,
+            )
+        if not config.is_ready:
+            return WhatsAppConnectionStatus(
+                status="aguardando_conexao",
+                provider=config.provider,
+                instance_name=instance_name,
+                error_message="Configuracao da integracao WhatsApp incompleta.",
+                configured=False,
+            )
+
+        status_url = _resolve_status_url(config)
+        if not status_url:
+            return WhatsAppConnectionStatus(
+                status="ativo",
+                provider=config.provider,
+                instance_name=instance_name,
+                error_message=None,
+                configured=True,
+            )
+
+        headers = {}
+        if config.auth_token:
+            headers["Authorization"] = f"Bearer {config.auth_token}"
+        if config.api_key:
+            headers["X-API-Key"] = config.api_key
+
+        try:
+            response = httpx.get(status_url, headers=headers, timeout=config.timeout_seconds)
+            response.raise_for_status()
+            payload = response.json() if response.content else {}
+            return _normalize_connection_status(payload, config)
+        except httpx.TimeoutException:
+            logger.warning("WhatsApp status check timed out for %s", status_url)
+            return WhatsAppConnectionStatus(
+                status="erro",
+                provider=config.provider,
+                instance_name=instance_name,
+                error_message="Timeout ao consultar o status da conexao WhatsApp.",
+                configured=True,
+            )
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("WhatsApp status check failed: %s", exc)
+            return WhatsAppConnectionStatus(
+                status="erro",
+                provider=config.provider,
+                instance_name=instance_name,
+                error_message=compact_error_message(str(exc)) or "Falha ao consultar o status da conexao WhatsApp.",
+                configured=True,
+            )
+
+
+def get_whatsapp_connection_status() -> dict:
+    return WhatsAppService.get_status().__dict__
 
 
 def send_appointment_whatsapp_message(

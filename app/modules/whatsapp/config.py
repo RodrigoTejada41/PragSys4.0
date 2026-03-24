@@ -14,6 +14,8 @@ class WhatsAppIntegrationConfig:
     api_key: Optional[str]
     auth_token: Optional[str]
     sender_id: Optional[str]
+    instance_name: Optional[str]
+    status_api_url: Optional[str]
     timeout_seconds: float
 
     @property
@@ -35,6 +37,7 @@ def load_whatsapp_config(settings: Optional[Settings] = None) -> WhatsAppIntegra
         api_key=(runtime_settings.whatsapp_api_key or "").strip() or None,
         auth_token=(runtime_settings.whatsapp_auth_token or "").strip() or None,
         sender_id=(runtime_settings.whatsapp_sender_id or "").strip() or None,
+        instance_name=(runtime_settings.whatsapp_instance_name or "").strip() or None,
+        status_api_url=(runtime_settings.whatsapp_status_api_url or "").strip() or None,
         timeout_seconds=runtime_settings.whatsapp_timeout_seconds,
     )
-

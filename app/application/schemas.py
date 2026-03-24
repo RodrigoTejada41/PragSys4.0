@@ -775,9 +775,26 @@ class WhatsAppConfigStatusRead(BaseModel):
     auth_configured: bool
 
 
+class WhatsAppConnectionStatusRead(BaseModel):
+    status: str
+    provider: str
+    instance_name: Optional[str] = None
+    error_message: Optional[str] = None
+    configured: bool
+
+
 class GoogleCalendarOAuthStartRead(BaseModel):
     authorization_url: str
     message: str
+
+
+class GoogleCalendarConnectionStatusRead(BaseModel):
+    status: str
+    message: str
+    company_id: int
+    company_name: str
+    account_email: Optional[str] = None
+    calendar_id: Optional[str] = None
 
 
 class GoogleCalendarAppointmentSyncRead(BaseModel):

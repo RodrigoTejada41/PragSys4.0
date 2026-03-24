@@ -38,8 +38,22 @@ def _get_company_for_user(db: Session, user_id: Optional[int]) -> Optional[Provi
     return db.query(ProviderCompany).order_by(ProviderCompany.id.asc()).first()
 
 
-def _get_company_or_fail(db: Session, user_id: Optional[int]) -> ProviderCompany:
-    company = _get_company_for_user(db, user_id)
+def _get_company_for_context(
+    db: Session,
+    user_id: Optional[int],
+    provider_company_id: Optional[int] = None,
+) -> Optional[ProviderCompany]:
+    if provider_company_id is not None:
+        return db.query(ProviderCompany).filter(ProviderCompany.id == provider_company_id).first()
+    return _get_company_for_user(db, user_id)
+
+
+def _get_company_or_fail(
+    db: Session,
+    user_id: Optional[int],
+    provider_company_id: Optional[int] = None,
+) -> ProviderCompany:
+    company = _get_company_for_context(db, user_id, provider_company_id=provider_company_id)
     if not company:
         raise BusinessRuleViolation("Nao existe empresa prestadora disponivel para vincular a integracao Google.")
     return company
@@ -87,7 +101,12 @@ def _decode_oauth_state(token: str) -> dict:
     return payload
 
 
-def build_google_oauth_authorization_url(db: Session, user_id: int, appointment_id: Optional[int] = None) -> str:
+def build_google_oauth_authorization_url(
+    db: Session,
+    user_id: int,
+    appointment_id: Optional[int] = None,
+    provider_company_id: Optional[int] = None,
+) -> str:
     if not _oauth_is_configured():
         raise BusinessRuleViolation(
             "OAuth do Google nao configurado. Defina GOOGLE_OAUTH_CLIENT_ID, "
@@ -95,7 +114,7 @@ def build_google_oauth_authorization_url(db: Session, user_id: int, appointment_
         )
 
     settings = get_settings()
-    company = _get_company_or_fail(db, user_id)
+    company = _get_company_or_fail(db, user_id, provider_company_id=provider_company_id)
     state = _build_oauth_state(user_id, company.id, appointment_id)
     params = {
         "client_id": settings.google_oauth_client_id,
@@ -162,6 +181,15 @@ def _apply_company_token_payload(company: ProviderCompany, payload: dict) -> Non
     company.google_account_email = _fetch_google_account_email(access_token) or company.google_account_email
 
 
+def _clear_company_google_session(company: ProviderCompany) -> None:
+    company.google_access_token = None
+    company.google_refresh_token = None
+    company.google_token_expires_at = None
+    company.google_connected_at = None
+    company.google_account_email = None
+    company.google_calendar_id = get_settings().google_calendar_id or "primary"
+
+
 def handle_google_oauth_callback(db: Session, code: str, state_token: str) -> dict:
     payload = _decode_oauth_state(state_token)
     user_id = int(payload["sub"])
@@ -222,7 +250,7 @@ def _refresh_company_access_token(company: ProviderCompany) -> None:
 
 
 def _get_runtime_google_credentials(db: Session, user_id: Optional[int]) -> tuple[str, str]:
-    company = _get_company_for_user(db, user_id)
+    company = _get_company_for_context(db, user_id)
     if company and (company.google_access_token or company.google_refresh_token):
         if (
             not company.google_access_token
@@ -292,3 +320,62 @@ def sync_appointment_with_google_or_request_oauth(db: Session, appointment_id: i
             "authorization_url": authorization_url,
             "appointment": None,
         }
+
+
+def get_google_connection_status(
+    db: Session,
+    *,
+    user_id: Optional[int] = None,
+    provider_company_id: Optional[int] = None,
+) -> dict:
+    company = _get_company_for_context(db, user_id, provider_company_id=provider_company_id)
+    if not company:
+        settings = get_settings()
+        if settings.google_calendar_enabled and settings.google_calendar_access_token:
+            return {
+                "status": "ativo",
+                "message": "Configuracao global de Google Agenda ativa.",
+                "company_id": 0,
+                "company_name": "Configuracao global",
+                "account_email": None,
+                "calendar_id": settings.google_calendar_id or "primary",
+            }
+        raise BusinessRuleViolation("Nao existe empresa prestadora disponivel para verificar a conexao Google.")
+
+    if company.google_refresh_token or company.google_access_token:
+        status = "ativo"
+        message = "Conta Google conectada para sincronizacao de agenda."
+    elif _oauth_is_configured():
+        status = "aguardando_conexao"
+        message = "Nenhuma conta Google conectada. Inicie a autenticacao para vincular uma conta."
+    else:
+        status = "desconectado"
+        message = "OAuth do Google ainda nao foi configurado."
+
+    return {
+        "status": status,
+        "message": message,
+        "company_id": company.id,
+        "company_name": company.nome_fantasia or company.razao_social,
+        "account_email": company.google_account_email,
+        "calendar_id": _resolve_calendar_id(company),
+    }
+
+
+def logout_google_calendar(
+    db: Session,
+    *,
+    user_id: Optional[int] = None,
+    provider_company_id: Optional[int] = None,
+) -> dict:
+    company = _get_company_or_fail(db, user_id, provider_company_id=provider_company_id)
+    _clear_company_google_session(company)
+    db.commit()
+    return {
+        "status": "desconectado",
+        "message": "Conta Google desconectada com sucesso. Voce ja pode conectar outra conta.",
+        "company_id": company.id,
+        "company_name": company.nome_fantasia or company.razao_social,
+        "account_email": None,
+        "calendar_id": _resolve_calendar_id(company),
+    }

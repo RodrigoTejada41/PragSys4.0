@@ -1,11 +1,15 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.application.schemas import AppointmentRead, WhatsAppConfigStatusRead
+from app.application.schemas import AppointmentRead, WhatsAppConfigStatusRead, WhatsAppConnectionStatusRead
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
 from app.interfaces.api.deps import require_roles
-from app.modules.whatsapp.service import get_whatsapp_configuration_status, send_appointment_whatsapp_message
+from app.modules.whatsapp.service import (
+    get_whatsapp_configuration_status,
+    get_whatsapp_connection_status,
+    send_appointment_whatsapp_message,
+)
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
@@ -18,6 +22,16 @@ def get_whatsapp_configuration(
     current_user: User = Depends(require_roles(["master", "admin"])),
 ) -> WhatsAppConfigStatusRead:
     return WhatsAppConfigStatusRead(**get_whatsapp_configuration_status())
+
+
+@router.get(
+    "/status",
+    response_model=WhatsAppConnectionStatusRead,
+)
+def get_whatsapp_status(
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> WhatsAppConnectionStatusRead:
+    return WhatsAppConnectionStatusRead(**get_whatsapp_connection_status())
 
 
 @router.post(

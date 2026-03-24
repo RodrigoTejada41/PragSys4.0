@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -20,6 +21,9 @@ class Settings(BaseSettings):
     company_address: str = "Endereco da empresa nao configurado"
     company_phone: str = "Telefone da empresa nao configurado"
     company_logo_path: Optional[str] = None
+    technical_signatures_dir: str = "assinaturas_tecnicas"
+    certificate_models_dir: str = "modelos"
+    legacy_certificate_models_dir: str = "modelo"
     sanitary_license_number: str = "Licenca sanitaria nao configurada"
     sanitary_license_expiry: str = "Validade nao configurada"
     environmental_license_number: str = "Licenca ambiental nao configurada"
@@ -42,6 +46,8 @@ class Settings(BaseSettings):
     whatsapp_api_key: Optional[str] = None
     whatsapp_auth_token: Optional[str] = None
     whatsapp_sender_id: Optional[str] = None
+    whatsapp_instance_name: Optional[str] = None
+    whatsapp_status_api_url: Optional[str] = None
     whatsapp_timeout_seconds: float = 15.0
     ncm_external_source_url: Optional[str] = None
     ncm_external_source_token: Optional[str] = None
@@ -78,6 +84,31 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+
+    @property
+    def project_root(self) -> Path:
+        return Path(__file__).resolve().parents[2]
+
+    def resolve_project_path(self, raw_path: Optional[str], *, default: Optional[str] = None) -> Optional[Path]:
+        candidate = str(raw_path or default or "").strip()
+        if not candidate:
+            return None
+        path = Path(candidate)
+        if not path.is_absolute():
+            path = self.project_root / path
+        return path.resolve()
+
+    @property
+    def technical_signatures_path(self) -> Path:
+        return self.resolve_project_path(self.technical_signatures_dir, default="assinaturas_tecnicas")
+
+    @property
+    def certificate_models_path(self) -> Path:
+        return self.resolve_project_path(self.certificate_models_dir, default="modelos")
+
+    @property
+    def legacy_certificate_models_path(self) -> Optional[Path]:
+        return self.resolve_project_path(self.legacy_certificate_models_dir, default="modelo")
 
 
 @lru_cache

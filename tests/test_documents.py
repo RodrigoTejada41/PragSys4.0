@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from app.core.config import get_settings
 from app.application.services import (
     _build_framed_sanitary_certificate_text,
     _build_standard_sanitary_certificate_text,
@@ -145,3 +146,15 @@ def test_standard_certificate_text_covers_food_risk_compliance_language():
     assert "RDC 275/2002" in declaration
     assert "boas praticas sanitarias" in declaration
     assert "seguranca ambiental" in declaration
+
+
+def test_certificate_generation_returns_controlled_error_when_signature_is_missing(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("TECHNICAL_SIGNATURES_DIR", "test_assets/assinaturas_vazias")
+    monkeypatch.setenv("CERTIFICATE_MODELS_DIR", "test_assets/modelos")
+    get_settings.cache_clear()
+
+    work_order = _create_base_work_order(client, auth_headers)
+    response = client.get(f"/api/v1/os/{work_order['id']}/certificado-sanitario.pdf", headers=auth_headers)
+
+    assert response.status_code == 400
+    assert "Assinatura tecnica nao encontrada" in response.json()["detail"]
