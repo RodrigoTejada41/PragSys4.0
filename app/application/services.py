@@ -1,7 +1,7 @@
 import csv
 import json
 from calendar import monthrange
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from io import BytesIO
 from io import StringIO
@@ -265,6 +265,14 @@ def _validate_finance_payload(
         _get_work_order_or_fail(db, payload.os_id)
         if _enum_value(payload.tipo) != "receita":
             raise BusinessRuleViolation("Lancamentos vinculados a OS devem ser do tipo receita.")
+    if payload.nfe_id:
+        from app.application.fiscal_services import _get_nfe_or_fail
+
+        invoice = _get_nfe_or_fail(db, payload.nfe_id)
+        if _enum_value(payload.tipo) != "receita":
+            raise BusinessRuleViolation("Lancamentos vinculados a NF-e devem ser do tipo receita.")
+        if payload.cliente_id and payload.cliente_id != invoice.cliente_id:
+            raise BusinessRuleViolation("O cliente do lancamento financeiro deve ser o mesmo da NF-e vinculada.")
     if payload.parcela_atual > payload.total_parcelas:
         raise BusinessRuleViolation("A parcela atual nao pode ser maior que o total de parcelas.")
     if current_entry and _money(payload.valor) < _money(current_entry.valor_pago):
@@ -837,7 +845,16 @@ def delete_customer(db: Session, customer_id: int) -> None:
 
 
 def create_product(db: Session, payload: ProductCreate) -> Product:
+    from app.application.fiscal_services import apply_tax_profile_to_product
+
     product = Product(**payload.model_dump())
+    apply_tax_profile_to_product(
+        db,
+        product,
+        ncm_code=payload.ncm,
+        manual_override=payload.override_tributacao,
+        manual_rates=payload.model_dump(),
+    )
     db.add(product)
     db.commit()
     db.refresh(product)
@@ -849,9 +866,18 @@ def list_products(db: Session) -> List[Product]:
 
 
 def update_product(db: Session, product_id: int, payload: ProductUpdate) -> Product:
+    from app.application.fiscal_services import apply_tax_profile_to_product
+
     product = _get_product_or_fail(db, product_id)
     for field, value in payload.model_dump().items():
         setattr(product, field, value)
+    apply_tax_profile_to_product(
+        db,
+        product,
+        ncm_code=payload.ncm,
+        manual_override=payload.override_tributacao,
+        manual_rates=payload.model_dump(),
+    )
     db.commit()
     db.refresh(product)
     return product
@@ -896,6 +922,7 @@ def import_products_from_invoice_xml(
                 toxicidade="Nao informado",
                 concentracao="Nao informado",
                 registro_ms=item["codigo"] or item["codigo_barras"] or f"XML-{invoice_data['nota_numero']}-{index}",
+                ncm=item["ncm"] or None,
                 estoque_atual=Decimal("0.00"),
                 estoque_minimo=Decimal("0.00"),
             )
@@ -905,6 +932,14 @@ def import_products_from_invoice_xml(
             action = "criado"
         else:
             updated_count += 1
+
+        if item.get("ncm"):
+            try:
+                from app.application.fiscal_services import apply_tax_profile_to_product
+
+                apply_tax_profile_to_product(db, product, ncm_code=item["ncm"], manual_override=False)
+            except BusinessRuleViolation:
+                product.ncm = item["ncm"]
 
         product.estoque_atual = _money(Decimal(product.estoque_atual) + Decimal(item["quantidade"]))
 
@@ -995,6 +1030,7 @@ def import_products_from_csv(
                 toxicidade=row.get("toxicidade") or "Nao informado",
                 concentracao=row.get("concentracao") or "Nao informado",
                 registro_ms=registro_ms,
+                ncm=row.get("ncm") or None,
                 estoque_atual=Decimal("0.00"),
                 estoque_minimo=estoque_minimo,
             )
@@ -1013,6 +1049,14 @@ def import_products_from_csv(
             if row.get("concentracao"):
                 product.concentracao = row["concentracao"]
             product.estoque_minimo = estoque_minimo
+
+        if row.get("ncm"):
+            try:
+                from app.application.fiscal_services import apply_tax_profile_to_product
+
+                apply_tax_profile_to_product(db, product, ncm_code=row.get("ncm"), manual_override=False)
+            except BusinessRuleViolation:
+                product.ncm = row.get("ncm")
 
         product.estoque_atual = _money(Decimal(product.estoque_atual) + quantidade_entrada)
 
@@ -1141,7 +1185,7 @@ def delete_technician(db: Session, technician_id: int) -> None:
 
 def create_finance_entry(db: Session, payload: FinanceEntryCreate) -> FinanceEntry:
     _validate_finance_payload(db, payload)
-    reference = payload.referencia or f"FIN-{int(datetime.utcnow().timestamp())}"
+    reference = payload.referencia or f"FIN-{int(datetime.now(timezone.utc).timestamp())}"
     installments = _split_installments(payload.valor, payload.total_parcelas)
     created_entries: List[FinanceEntry] = []
 
@@ -1162,6 +1206,7 @@ def create_finance_entry(db: Session, payload: FinanceEntryCreate) -> FinanceEnt
             observacoes=payload.observacoes,
             cliente_id=payload.cliente_id,
             os_id=payload.os_id,
+            nfe_id=payload.nfe_id,
         )
         db.add(entry)
         created_entries.append(entry)
@@ -1214,6 +1259,8 @@ def update_finance_entry(db: Session, finance_entry_id: int, payload: FinanceEnt
         raise BusinessRuleViolation("Lancamentos gerados por recibo devem ser alterados pelo proprio recibo.")
     if entry.os_id:
         raise BusinessRuleViolation("Lancamentos gerados por OS devem ser alterados pela propria ordem de servico.")
+    if entry.nfe_id:
+        raise BusinessRuleViolation("Lancamentos gerados por NF-e devem ser alterados pela propria nota fiscal.")
     _validate_finance_payload(db, payload, current_entry=entry)
     requested_status = _enum_value(payload.status)
     for field, value in payload.model_dump().items():
@@ -1246,6 +1293,8 @@ def delete_finance_entry(db: Session, finance_entry_id: int) -> None:
         raise BusinessRuleViolation("Lancamentos gerados por recibo devem ser excluidos pelo proprio recibo.")
     if entry.os_id:
         raise BusinessRuleViolation("Lancamentos gerados por OS devem ser excluidos pela propria ordem de servico.")
+    if entry.nfe_id:
+        raise BusinessRuleViolation("Lancamentos gerados por NF-e devem ser excluidos pela propria nota fiscal.")
     if entry.status == FinanceStatus.PAGO.value or Decimal(entry.valor_pago) > 0:
         raise BusinessRuleViolation("Nao e permitido excluir registros financeiros pagos ou com baixa parcial.")
     db.delete(entry)
