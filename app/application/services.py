@@ -1411,6 +1411,7 @@ def _sync_work_order_finance(
 def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Optional[int] = None) -> WorkOrder:
     from app.application.scheduling_services import _sync_google_for_appointment, get_appointment, sync_work_order_appointment
     from app.domain.enums import AppointmentStatus
+    from app.modules.whatsapp.service import send_appointment_whatsapp_message
 
     customer, normalized = _validate_work_order_payload(db, payload)
 
@@ -1433,7 +1434,7 @@ def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Op
     _apply_work_order_products(db, work_order, payload.produtos)
     _sync_work_order_pests(db, work_order, payload.pragas_ids)
     _sync_work_order_finance(db, work_order, customer, payload.gerar_financeiro, payload.valor_servico)
-    appointment = sync_work_order_appointment(
+    appointment, appointment_created = sync_work_order_appointment(
         db,
         work_order,
         current_user_id=current_user_id,
@@ -1447,6 +1448,13 @@ def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Op
     )
 
     db.commit()
+    if get_settings().whatsapp_enabled and appointment_created and appointment:
+        appointment = send_appointment_whatsapp_message(
+            db,
+            appointment.id,
+            current_user_id=current_user_id,
+            automatic=True,
+        )
     if appointment and appointment.sincronizar_google:
         appointment = get_appointment(db, appointment.id)
         _sync_google_for_appointment(
@@ -1475,6 +1483,7 @@ def update_work_order(
 ) -> WorkOrder:
     from app.application.scheduling_services import _sync_google_for_appointment, get_appointment, sync_work_order_appointment
     from app.domain.enums import AppointmentStatus
+    from app.modules.whatsapp.service import send_appointment_whatsapp_message
 
     work_order = _get_work_order_or_fail(db, work_order_id)
     customer, normalized = _validate_work_order_payload(db, payload, current_work_order_id=work_order_id)
@@ -1499,7 +1508,7 @@ def update_work_order(
     _apply_work_order_products(db, work_order, payload.produtos)
     _sync_work_order_pests(db, work_order, payload.pragas_ids)
     _sync_work_order_finance(db, work_order, customer, payload.gerar_financeiro, payload.valor_servico)
-    appointment = sync_work_order_appointment(
+    appointment, appointment_created = sync_work_order_appointment(
         db,
         work_order,
         current_user_id=current_user_id,
@@ -1513,6 +1522,13 @@ def update_work_order(
     )
 
     db.commit()
+    if get_settings().whatsapp_enabled and appointment_created and appointment:
+        appointment = send_appointment_whatsapp_message(
+            db,
+            appointment.id,
+            current_user_id=current_user_id,
+            automatic=True,
+        )
     if appointment and appointment.sincronizar_google:
         appointment = get_appointment(db, appointment.id)
         _sync_google_for_appointment(

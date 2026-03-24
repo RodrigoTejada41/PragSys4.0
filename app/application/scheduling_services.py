@@ -16,7 +16,7 @@ from app.application.google_calendar_service import google_calendar_request
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
 from app.domain.enums import AppointmentSource, AppointmentStatus, GoogleSyncStatus, WorkOrderStatus
-from app.infrastructure.models import Appointment, AppointmentHistory, Customer, Technician, User, WorkOrder
+from app.infrastructure.models import Appointment, AppointmentHistory, AppointmentWhatsAppLog, Customer, Technician, User, WorkOrder
 
 ACTIVE_APPOINTMENT_STATUSES = {
     AppointmentStatus.PENDENTE.value,
@@ -41,6 +41,7 @@ def _appointment_query(db: Session):
         joinedload(Appointment.usuario_responsavel),
         joinedload(Appointment.usuario_ultima_atualizacao),
         joinedload(Appointment.historico).joinedload(AppointmentHistory.usuario),
+        joinedload(Appointment.whatsapp_logs).joinedload(AppointmentWhatsAppLog.usuario),
     )
 
 
@@ -110,6 +111,11 @@ def _serialize_history_entry(entry: AppointmentHistory) -> AppointmentHistory:
     return entry
 
 
+def _serialize_whatsapp_log(entry: AppointmentWhatsAppLog) -> AppointmentWhatsAppLog:
+    entry.usuario_nome = entry.usuario.nome if entry.usuario else None
+    return entry
+
+
 def _serialize_appointment(appointment: Appointment) -> Appointment:
     appointment.cliente_nome = appointment.cliente.razao_social
     appointment.os_numero = appointment.ordem_servico.numero if appointment.ordem_servico else None
@@ -119,6 +125,7 @@ def _serialize_appointment(appointment: Appointment) -> Appointment:
         appointment.usuario_ultima_atualizacao.nome if appointment.usuario_ultima_atualizacao else None
     )
     appointment.historico = [_serialize_history_entry(entry) for entry in appointment.historico]
+    appointment.whatsapp_logs = [_serialize_whatsapp_log(entry) for entry in appointment.whatsapp_logs]
     return appointment
 
 
@@ -407,6 +414,8 @@ def create_appointment(
     *,
     sync_google_after_commit: bool = True,
 ) -> Appointment:
+    from app.modules.whatsapp.service import send_appointment_whatsapp_message
+
     _get_user_or_fail(db, current_user_id)
     customer, _, _, normalized = _validate_appointment_payload(db, payload)
     appointment = Appointment(
@@ -446,6 +455,16 @@ def create_appointment(
     )
     db.commit()
     appointment = get_appointment(db, appointment.id)
+    if (
+        get_settings().whatsapp_enabled
+        and appointment.status not in {AppointmentStatus.CANCELADO.value, AppointmentStatus.NAO_REALIZADO.value}
+    ):
+        appointment = send_appointment_whatsapp_message(
+            db,
+            appointment.id,
+            current_user_id=current_user_id,
+            automatic=True,
+        )
     if sync_google_after_commit and appointment.sincronizar_google:
         _sync_google_for_appointment(db, appointment, user_id=current_user_id)
         db.commit()
@@ -593,7 +612,7 @@ def sync_work_order_appointment(
     technical_instructions: Optional[str],
     follow_up_notes: Optional[str],
     sync_google: bool,
-) -> Optional[Appointment]:
+) -> tuple[Optional[Appointment], bool]:
     appointment = (
         _appointment_query(db)
         .filter(
@@ -619,7 +638,7 @@ def sync_work_order_appointment(
                 previous_status,
                 appointment.status,
             )
-        return appointment
+        return appointment, False
 
     customer = _get_customer_or_fail(db, work_order.cliente_id)
     _get_technician_or_fail(db, work_order.tecnico_id, require_active=True)
@@ -664,7 +683,7 @@ def sync_work_order_appointment(
             f"Agendamento automatico criado a partir da OS {work_order.numero}.",
             new_status=appointment.status,
         )
-        return appointment
+        return appointment, True
 
     previous_status = appointment.status
     date_changed = appointment.data_agendamento != work_order.data_execucao or appointment.hora_agendamento != work_order.hora_inicio
@@ -700,4 +719,4 @@ def sync_work_order_appointment(
         previous_status,
         appointment.status,
     )
-    return appointment
+    return appointment, False

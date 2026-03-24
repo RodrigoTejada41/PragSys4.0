@@ -21,6 +21,7 @@ from app.interfaces.api.routes import (
     provider_companies,
     technicians,
     users,
+    whatsapp,
     work_orders,
 )
 from app.modules.sefaz_nfe import routes as sefaz_nfe_routes
@@ -66,6 +67,7 @@ app.include_router(sefaz_nfe_routes.router, prefix=settings.api_v1_prefix)
 app.include_router(work_orders.router, prefix=settings.api_v1_prefix)
 app.include_router(appointments.router, prefix=settings.api_v1_prefix)
 app.include_router(google_calendar.router, prefix=settings.api_v1_prefix)
+app.include_router(whatsapp.router, prefix=settings.api_v1_prefix)
 app.include_router(users.router, prefix=settings.api_v1_prefix)
 app.include_router(licenses.router, prefix=settings.api_v1_prefix)
 app.include_router(provider_companies.router, prefix=settings.api_v1_prefix)
