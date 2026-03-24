@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import json
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable, Optional
-from urllib import parse
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session, joinedload
 
@@ -16,6 +12,7 @@ from app.application.schemas import (
     AppointmentStatusUpdate,
     AppointmentUpdate,
 )
+from app.application.google_calendar_service import google_calendar_request
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
 from app.domain.enums import AppointmentSource, AppointmentStatus, GoogleSyncStatus, WorkOrderStatus
@@ -187,8 +184,11 @@ def _log_appointment_history(
 
 def _build_google_event_payload(appointment: Appointment) -> dict:
     settings = get_settings()
-    timezone = ZoneInfo(settings.company_timezone)
-    start_dt = datetime.combine(appointment.data_agendamento, appointment.hora_agendamento, tzinfo=timezone)
+    try:
+        company_timezone = ZoneInfo(settings.company_timezone)
+    except ZoneInfoNotFoundError:
+        company_timezone = timezone.utc
+    start_dt = datetime.combine(appointment.data_agendamento, appointment.hora_agendamento, tzinfo=company_timezone)
     end_dt = start_dt + timedelta(minutes=appointment.duracao_prevista_minutos)
     description_lines = [
         f"Cliente: {appointment.cliente_nome}",
@@ -213,11 +213,11 @@ def _build_google_event_payload(appointment: Appointment) -> dict:
         "description": "\n".join(description_lines),
         "start": {
             "dateTime": start_dt.isoformat(),
-            "timeZone": settings.company_timezone,
+            "timeZone": settings.company_timezone if str(company_timezone) != "UTC" else "UTC",
         },
         "end": {
             "dateTime": end_dt.isoformat(),
-            "timeZone": settings.company_timezone,
+            "timeZone": settings.company_timezone if str(company_timezone) != "UTC" else "UTC",
         },
         "extendedProperties": {
             "private": {
@@ -229,45 +229,17 @@ def _build_google_event_payload(appointment: Appointment) -> dict:
     }
 
 
-def _google_request(method: str, path: str, payload: Optional[dict] = None) -> dict | None:
-    settings = get_settings()
-    if not settings.google_calendar_enabled or not settings.google_calendar_id or not settings.google_calendar_access_token:
-        raise BusinessRuleViolation(
-            "Integracao com Google Agenda nao configurada. Defina GOOGLE_CALENDAR_ENABLED, "
-            "GOOGLE_CALENDAR_ID e GOOGLE_CALENDAR_ACCESS_TOKEN."
-        )
-
-    url = (
-        "https://www.googleapis.com/calendar/v3/calendars/"
-        f"{parse.quote(settings.google_calendar_id, safe='')}/{path}"
-    )
-    headers = {
-        "Authorization": f"Bearer {settings.google_calendar_access_token}",
-        "Content-Type": "application/json",
-    }
-    body = json.dumps(payload).encode("utf-8") if payload is not None else None
-    request_obj = Request(url, data=body, headers=headers, method=method)
-    try:
-        with urlopen(request_obj, timeout=15) as response:
-            raw = response.read().decode("utf-8")
-            return json.loads(raw) if raw else None
-    except HTTPError as exc:
-        message = exc.read().decode("utf-8", errors="ignore") if hasattr(exc, "read") else str(exc)
-        raise BusinessRuleViolation(f"Falha ao sincronizar com Google Agenda: {message or exc.reason}") from exc
-    except (URLError, TimeoutError) as exc:
-        raise BusinessRuleViolation("Falha de comunicacao com Google Agenda.") from exc
-
-
 def _set_google_sync_state(
     appointment: Appointment,
     status: GoogleSyncStatus,
+    calendar_id: Optional[str] = None,
     message: Optional[str] = None,
     event_id: Optional[str] = None,
 ) -> None:
-    settings = get_settings()
     appointment.google_sync_status = status.value
     appointment.google_sync_message = _clean_optional_text(message)
-    appointment.google_calendar_id = settings.google_calendar_id
+    if calendar_id is not None:
+        appointment.google_calendar_id = calendar_id
     if event_id is not None:
         appointment.google_calendar_event_id = event_id
 
@@ -281,33 +253,63 @@ def _sync_google_for_appointment(
     user_id: Optional[int] = None,
 ) -> Appointment:
     if not appointment.sincronizar_google:
-        _set_google_sync_state(appointment, GoogleSyncStatus.DESCONECTADO, "Sincronizacao com Google Agenda desabilitada.")
+        _set_google_sync_state(
+            appointment,
+            GoogleSyncStatus.DESCONECTADO,
+            appointment.google_calendar_id,
+            "Sincronizacao com Google Agenda desabilitada.",
+        )
         db.flush()
         return appointment
 
     try:
+        integration_user_id = user_id or appointment.usuario_ultima_atualizacao_id or appointment.usuario_responsavel_id
         if remove_event and appointment.google_calendar_event_id:
-            _google_request("DELETE", f"events/{appointment.google_calendar_event_id}")
-            _set_google_sync_state(appointment, GoogleSyncStatus.SINCRONIZADO, "Evento removido do Google Agenda.", "")
+            _, calendar_id = google_calendar_request(
+                db,
+                integration_user_id,
+                "DELETE",
+                f"events/{appointment.google_calendar_event_id}",
+            )
+            _set_google_sync_state(
+                appointment,
+                GoogleSyncStatus.SINCRONIZADO,
+                calendar_id,
+                "Evento removido do Google Agenda.",
+                "",
+            )
             _log_appointment_history(db, appointment, user_id, "google_delete", "Evento removido da agenda Google.")
             db.flush()
             return appointment
 
         payload = _build_google_event_payload(_serialize_appointment(appointment))
         if appointment.google_calendar_event_id:
-            response = _google_request("PATCH", f"events/{appointment.google_calendar_event_id}", payload)
+            response, calendar_id = google_calendar_request(
+                db,
+                integration_user_id,
+                "PATCH",
+                f"events/{appointment.google_calendar_event_id}",
+                payload,
+            )
         else:
-            response = _google_request("POST", "events", payload)
+            response, calendar_id = google_calendar_request(
+                db,
+                integration_user_id,
+                "POST",
+                "events",
+                payload,
+            )
         _set_google_sync_state(
             appointment,
             GoogleSyncStatus.SINCRONIZADO,
+            calendar_id,
             "Evento sincronizado com Google Agenda.",
             response.get("id") if response else appointment.google_calendar_event_id,
         )
         _log_appointment_history(db, appointment, user_id, "google_sync", "Agendamento sincronizado com Google Agenda.")
         db.flush()
     except BusinessRuleViolation as exc:
-        _set_google_sync_state(appointment, GoogleSyncStatus.FALHA, exc.message)
+        _set_google_sync_state(appointment, GoogleSyncStatus.FALHA, appointment.google_calendar_id, exc.message)
         _log_appointment_history(db, appointment, user_id, "google_sync_fail", exc.message)
         db.flush()
         if raise_on_error:
@@ -570,6 +572,10 @@ def get_appointment_dashboard(db: Session) -> AppointmentDashboardRead:
 
 def sync_appointment_google_event(db: Session, appointment_id: int, current_user_id: Optional[int] = None) -> Appointment:
     appointment = get_appointment(db, appointment_id)
+    if not appointment.sincronizar_google:
+        raise BusinessRuleViolation(
+            "Ative a sincronizacao com Google Agenda neste agendamento antes de usar a sincronizacao manual."
+        )
     _sync_google_for_appointment(db, appointment, raise_on_error=True, user_id=current_user_id)
     db.commit()
     return get_appointment(db, appointment_id)

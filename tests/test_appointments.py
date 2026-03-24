@@ -1,5 +1,7 @@
 from datetime import date, timedelta
 
+from app.core.config import get_settings
+
 
 def create_customer(client, auth_headers, suffix="01"):
     response = client.post(
@@ -197,6 +199,81 @@ def test_work_order_generates_and_updates_linked_appointment(client, auth_header
     assert updated_appointment["hora_agendamento"] == "13:30:00"
     assert updated_appointment["duracao_prevista_minutos"] == 120
     assert updated_appointment["status"] == "reagendado"
+
+
+def test_manual_google_sync_requires_google_flag_enabled(client, auth_headers):
+    customer = create_customer(client, auth_headers, "250")
+    technician = create_technician(client, auth_headers, "250")
+    target_date = (date.today() + timedelta(days=4)).isoformat()
+
+    created = client.post(
+        "/api/v1/agendamentos",
+        headers=auth_headers,
+        json={
+            "cliente_id": customer["id"],
+            "tecnico_id": technician["id"],
+            "tipo_servico": "Inspecao preventiva",
+            "data_agendamento": target_date,
+            "hora_agendamento": "14:00:00",
+            "duracao_prevista_minutos": 60,
+            "observacoes": "Sem Google ativo",
+            "status": "pendente",
+            "origem": "manual",
+            "sincronizar_google": False,
+        },
+    )
+
+    assert created.status_code == 200
+    appointment_id = created.json()["id"]
+
+    sync_response = client.post(f"/api/v1/agendamentos/{appointment_id}/sync-google", headers=auth_headers)
+
+    assert sync_response.status_code == 400
+    assert "Ative a sincronizacao com Google Agenda" in sync_response.json()["detail"]
+
+
+def test_google_sync_route_requests_oauth_when_account_not_connected(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id-teste")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret-teste")
+    monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "http://testserver/api/v1/google-calendar/oauth/callback")
+    monkeypatch.delenv("GOOGLE_CALENDAR_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("GOOGLE_CALENDAR_ENABLED", raising=False)
+    get_settings.cache_clear()
+
+    customer = create_customer(client, auth_headers, "260")
+    technician = create_technician(client, auth_headers, "260")
+    target_date = (date.today() + timedelta(days=4)).isoformat()
+
+    created = client.post(
+        "/api/v1/agendamentos",
+        headers=auth_headers,
+        json={
+            "cliente_id": customer["id"],
+            "tecnico_id": technician["id"],
+            "tipo_servico": "Inspecao com Google",
+            "data_agendamento": target_date,
+            "hora_agendamento": "15:00:00",
+            "duracao_prevista_minutos": 60,
+            "observacoes": "Fluxo OAuth",
+            "status": "pendente",
+            "origem": "manual",
+            "sincronizar_google": True,
+        },
+    )
+
+    assert created.status_code == 200
+    appointment_id = created.json()["id"]
+
+    sync_response = client.post(
+        f"/api/v1/google-calendar/appointments/{appointment_id}/sync",
+        headers=auth_headers,
+    )
+
+    assert sync_response.status_code == 200
+    payload = sync_response.json()
+    assert payload["mode"] == "oauth_required"
+    assert "accounts.google.com" in payload["authorization_url"]
+    get_settings.cache_clear()
 
 
 def test_completing_appointment_updates_linked_work_order(client, auth_headers):
