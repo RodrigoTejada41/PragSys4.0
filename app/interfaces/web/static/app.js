@@ -10,6 +10,10 @@ const state = {
     workOrders: [],
     appointments: [],
     appointmentDashboard: null,
+    integrations: {
+        whatsapp: null,
+        google: null,
+    },
     finance: [],
     cashLedger: [],
     financeDashboard: null,
@@ -416,6 +420,21 @@ async function loadAllData() {
         apiFetch("/api/v1/os"),
         apiFetch("/api/v1/agendamentos"),
         apiFetch("/api/v1/agendamentos/dashboard"),
+        apiFetch("/api/v1/whatsapp/status").catch(() => ({
+            status: "erro",
+            provider: "custom",
+            instance_name: null,
+            error_message: "Falha ao consultar o status do WhatsApp.",
+            configured: false,
+        })),
+        apiFetch("/api/v1/google-calendar/status").catch(() => ({
+            status: "erro",
+            message: "Falha ao consultar a conexao com Google Agenda.",
+            company_id: 0,
+            company_name: "Nao identificado",
+            account_email: null,
+            calendar_id: null,
+        })),
     ];
     const canAccessFinance = state.user?.role === "master" || state.user?.role === "admin";
     if (canAccessFinance) {
@@ -430,16 +449,16 @@ async function loadAllData() {
         basePromises.push(apiFetch(`/api/v1/fiscal/simples/resumo/${getSelectedSimplesReference().year}/${getSelectedSimplesReference().month}`));
     }
     const results = await Promise.all(basePromises);
-    const [customers, products, pests, technicians, workOrders, appointments, appointmentDashboard] = results;
-    const finance = canAccessFinance ? results[7] : [];
-    const cashLedger = canAccessFinance ? results[8] : [];
-    const financeDashboard = canAccessFinance ? results[9] : null;
-    const receipts = canAccessFinance ? results[10] : [];
-    const nfeInvoices = canAccessFinance ? results[11] : [];
-    const sefazReadiness = canAccessFinance ? results[12] : null;
-    const simplesConfigs = canAccessFinance ? results[13] : [];
-    const cashFlowSummary = canAccessFinance ? results[14] : null;
-    const simplesSummary = canAccessFinance ? results[15] : null;
+    const [customers, products, pests, technicians, workOrders, appointments, appointmentDashboard, whatsappStatus, googleStatus] = results;
+    const finance = canAccessFinance ? results[9] : [];
+    const cashLedger = canAccessFinance ? results[10] : [];
+    const financeDashboard = canAccessFinance ? results[11] : null;
+    const receipts = canAccessFinance ? results[12] : [];
+    const nfeInvoices = canAccessFinance ? results[13] : [];
+    const sefazReadiness = canAccessFinance ? results[14] : null;
+    const simplesConfigs = canAccessFinance ? results[15] : [];
+    const cashFlowSummary = canAccessFinance ? results[16] : null;
+    const simplesSummary = canAccessFinance ? results[17] : null;
 
     state.customers = customers;
     state.products = products;
@@ -448,6 +467,8 @@ async function loadAllData() {
     state.workOrders = workOrders;
     state.appointments = appointments;
     state.appointmentDashboard = appointmentDashboard;
+    state.integrations.whatsapp = whatsappStatus;
+    state.integrations.google = googleStatus;
     state.finance = finance;
     state.cashLedger = cashLedger;
     state.financeDashboard = financeDashboard;
@@ -3939,6 +3960,7 @@ function renderAppointments() {
                 <button type="button" class="btn btn-success" id="appointment-new-button">Novo agendamento</button>
             </div>
         </div>
+        ${renderAppointmentIntegrationCards()}
         <div class="appointments-summary-grid">
             <article class="summary-metric-card"><span>Total</span><strong>${counts.total}</strong></article>
             <article class="summary-metric-card is-pending"><span>Pendentes</span><strong>${counts.pendente}</strong></article>
@@ -4148,6 +4170,88 @@ function renderAppointmentDayLists(appointments, referenceDate) {
     `;
 }
 
+function formatIntegrationStatus(status) {
+    const normalized = String(status || "").toLowerCase();
+    if (normalized === "ativo") {
+        return "🟢 Ativo";
+    }
+    if (normalized === "aguardando_conexao") {
+        return "🟡 Aguardando conexao";
+    }
+    if (normalized === "erro") {
+        return "⚠️ Erro";
+    }
+    return "🔴 Desconectado";
+}
+
+function renderAppointmentIntegrationCards() {
+    const whatsapp = state.integrations.whatsapp || {};
+    const google = state.integrations.google || {};
+    const googleConnected = google.status === "ativo";
+    const googleCanLogout = googleConnected && Number(google.company_id || 0) > 0;
+    const googleEmail = google.account_email || "Nenhuma conta conectada";
+    const googleCompany = google.company_name ? `Empresa: ${escapeHtml(google.company_name)}` : "Empresa nao identificada";
+    const whatsappMeta = whatsapp.instance_name
+        ? `Instancia: ${escapeHtml(whatsapp.instance_name)}`
+        : `Provedor: ${escapeHtml(whatsapp.provider || "-")}`;
+
+    return `
+        <div class="appointments-summary-grid integrations-grid">
+            <article class="summary-metric-card">
+                <span>WhatsApp</span>
+                <strong>${escapeHtml(formatIntegrationStatus(whatsapp.status))}</strong>
+                <p>${whatsappMeta}</p>
+                <p>${escapeHtml(whatsapp.error_message || "Status operacional da conexao usado pela agenda.")}</p>
+                <div class="inline-actions">
+                    <button type="button" class="btn btn-default ghost-button" data-integration-action="refresh-whatsapp">Atualizar status</button>
+                </div>
+            </article>
+            <article class="summary-metric-card">
+                <span>Google Agenda</span>
+                <strong>${escapeHtml(formatIntegrationStatus(google.status))}</strong>
+                <p>${escapeHtml(googleEmail)}</p>
+                <p>${googleConnected ? googleCompany : escapeHtml(google.message || "Conecte uma conta Google para sincronizar.")}</p>
+                <div class="inline-actions">
+                    <button type="button" class="btn btn-success" data-integration-action="google-login">Conectar nova conta</button>
+                    <button type="button" class="btn btn-default ghost-button" data-integration-action="google-logout" ${googleCanLogout ? "" : "disabled"}>Logout</button>
+                </div>
+            </article>
+        </div>
+    `;
+}
+
+
+async function refreshAppointmentIntegrationStatus() {
+    state.integrations.whatsapp = await apiFetch("/api/v1/whatsapp/status");
+    state.integrations.google = await apiFetch("/api/v1/google-calendar/status");
+    renderAppointments();
+}
+
+
+async function loginGoogle() {
+    const result = await apiFetch("/api/v1/google-calendar/login", { method: "POST" });
+    const popup = window.open(
+        result.authorization_url,
+        "syspragas-google-calendar-oauth",
+        "width=640,height=760,menubar=no,toolbar=no,location=yes,resizable=yes,scrollbars=yes,status=no",
+    );
+    if (!popup) {
+        window.location.href = result.authorization_url;
+        return;
+    }
+    popup.focus();
+    toast(result.message || "Abra a autenticacao Google para conectar uma nova conta.");
+}
+
+
+async function logoutGoogle() {
+    const result = await apiFetch("/api/v1/google-calendar/logout", { method: "POST" });
+    state.integrations.google = result;
+    await loadAllData();
+    openAppointmentView("operational");
+    toast(result.message || "Conta Google desconectada com sucesso.");
+}
+
 function renderAppointmentCard(item, options = {}) {
     const compact = options.compact || false;
     const linkedWorkOrder = item.os_id ? getEntityByKind("workOrder", item.os_id) : null;
@@ -4318,6 +4422,30 @@ function bindAppointmentFilters() {
         button.addEventListener("click", () => {
             state.appointmentCalendarView = button.dataset.appointmentView;
             renderAppointments();
+        });
+    });
+    document.querySelectorAll("[data-integration-action]").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", async () => {
+            try {
+                if (button.dataset.integrationAction === "refresh-whatsapp") {
+                    await refreshAppointmentIntegrationStatus();
+                    toast("Status das integracoes atualizado.");
+                    return;
+                }
+                if (button.dataset.integrationAction === "google-login") {
+                    await loginGoogle();
+                    return;
+                }
+                if (button.dataset.integrationAction === "google-logout") {
+                    await logoutGoogle();
+                }
+            } catch (error) {
+                toast(error.message);
+            }
         });
     });
 }
