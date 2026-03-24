@@ -2,6 +2,7 @@
 .pytest_cache/
 __pycache__/
 *.pyc
+.env
 *.db
 .vs/
 tmp/
@@ -13,3 +14,6 @@ dist/
 *.egg-info/
 .venv_backup_*/
 .venv_py39_backup/
+certificado/
+*.pfx
+XSD/
