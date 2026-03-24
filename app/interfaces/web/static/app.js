@@ -3,6 +3,8 @@ const state = {
     user: null,
     customers: [],
     products: [],
+    nfeInvoices: [],
+    simplesConfigs: [],
     pests: [],
     technicians: [],
     workOrders: [],
@@ -11,16 +13,27 @@ const state = {
     finance: [],
     cashLedger: [],
     financeDashboard: null,
+    receipts: [],
+    cashFlowSummary: null,
+    simplesSummary: null,
+    sefazReadiness: null,
     users: [],
     licenses: [],
     providerCompanies: [],
     providerCompanyTab: "dados",
     workOrderScreen: "new",
+    financeScreen: "lancamentos",
+    nfeTab: "issue",
+    appointmentScreen: "operational",
     appointmentCalendarView: "month",
     workOrderWorkflow: {
         lastSavedOrderId: null,
         certificateReady: false,
     },
+    nfeWorkflow: {
+        lastIssuedInvoiceId: null,
+    },
+    receiptPreview: null,
     workOrderPicker: {
         productSearch: "",
         pestSearch: "",
@@ -35,6 +48,8 @@ const state = {
         pest: null,
         technician: null,
         finance: null,
+        receipt: null,
+        nfe: null,
         workOrder: null,
         appointment: null,
         providerCompany: null,
@@ -55,6 +70,17 @@ const state = {
         appointmentTechnician: "",
         appointmentCustomer: "",
         appointmentDate: "",
+        financeSearch: "",
+        financeStatus: "todos",
+        financeCustomer: "",
+        financeStartDate: "",
+        financeEndDate: "",
+        receiptSearch: "",
+        receiptCustomer: "",
+        nfeSearch: "",
+        nfeStatus: "todos",
+        nfeCustomer: "",
+        simplesReferenceMonth: new Date().toISOString().slice(0, 7),
     },
 };
 
@@ -65,8 +91,17 @@ const viewTitles = {
     pragas: "Pragas",
     tecnicos: "Tecnicos",
     ordens: "Ordens de servico",
+    "ordens-nova": "Nova ordem de servico",
+    "ordens-cadastradas": "Ordens de servico cadastradas",
     agenda: "Agenda",
+    "agenda-novo": "Novo agendamento",
+    "agenda-operacional": "Agenda operacional",
     financeiro: "Financeiro",
+    "financeiro-lancamentos": "Lancamentos financeiros",
+    "financeiro-recibos": "Recibos",
+    "financeiro-nfe": "NF-e",
+    "financeiro-caixa": "Fluxo de caixa",
+    "financeiro-relatorios": "Relatorios financeiros",
     empresas: "Cadastrar empresas",
     usuarios: "Usuarios",
     licencas: "Licencas",
@@ -99,6 +134,9 @@ document.addEventListener("DOMContentLoaded", () => {
     buildForms();
     bindNavigation();
     bindWorkOrderModuleNavigation();
+    bindFinanceModuleNavigation();
+    bindNfeTabNavigation();
+    bindGoogleCalendarOAuth();
     bindAuth();
     bindDashboardFilters();
 
@@ -115,6 +153,25 @@ function bindNavigation() {
             event.preventDefault();
             switchView(button.dataset.view);
         });
+    });
+}
+
+function bindGoogleCalendarOAuth() {
+    window.addEventListener("message", async (event) => {
+        if (event.origin !== window.location.origin) {
+            return;
+        }
+        const payload = event.data || {};
+        if (payload.type !== "syspragas-google-calendar-oauth") {
+            return;
+        }
+        if (payload.status === "success") {
+            await loadAllData();
+            openAppointmentView("operational");
+            toast(payload.message || "Conta Google conectada com sucesso.");
+            return;
+        }
+        toast(payload.message || "Nao foi possivel concluir a autenticacao Google.");
     });
 }
 
@@ -151,8 +208,123 @@ function bindWorkOrderModuleNavigation() {
     setWorkOrderWorkspaceView(state.workOrderScreen || "new");
 }
 
+function bindFinanceModuleNavigation() {
+    const buttons = Array.from(document.querySelectorAll("[data-finance-screen-trigger]"));
+    if (!buttons.length) {
+        return;
+    }
+
+    buttons.forEach((button, index) => {
+        button.addEventListener("click", () => setFinanceWorkspaceView(button.dataset.financeScreenTrigger));
+        button.addEventListener("keydown", (event) => {
+            const currentIndex = buttons.indexOf(button);
+            if (event.key === "ArrowRight") {
+                event.preventDefault();
+                buttons[(currentIndex + 1) % buttons.length].focus();
+            } else if (event.key === "ArrowLeft") {
+                event.preventDefault();
+                buttons[(currentIndex - 1 + buttons.length) % buttons.length].focus();
+            } else if (event.key === "Home") {
+                event.preventDefault();
+                buttons[0].focus();
+            } else if (event.key === "End") {
+                event.preventDefault();
+                buttons[buttons.length - 1].focus();
+            } else if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setFinanceWorkspaceView(button.dataset.financeScreenTrigger);
+            }
+        });
+        button.setAttribute("tabindex", index === 0 ? "0" : "-1");
+    });
+
+    setFinanceWorkspaceView(state.financeScreen || "lancamentos");
+}
+
+function bindNfeTabNavigation() {
+    const buttons = Array.from(document.querySelectorAll("[data-nfe-tab-trigger]"));
+    if (!buttons.length) {
+        return;
+    }
+    buttons.forEach((button, index) => {
+        button.addEventListener("click", () => setNfeTabView(button.dataset.nfeTabTrigger));
+        button.addEventListener("keydown", (event) => {
+            const currentIndex = buttons.indexOf(button);
+            if (event.key === "ArrowRight") {
+                event.preventDefault();
+                buttons[(currentIndex + 1) % buttons.length].focus();
+            } else if (event.key === "ArrowLeft") {
+                event.preventDefault();
+                buttons[(currentIndex - 1 + buttons.length) % buttons.length].focus();
+            } else if (event.key === "Home") {
+                event.preventDefault();
+                buttons[0].focus();
+            } else if (event.key === "End") {
+                event.preventDefault();
+                buttons[buttons.length - 1].focus();
+            } else if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setNfeTabView(button.dataset.nfeTabTrigger);
+            }
+        });
+        button.setAttribute("tabindex", index === 0 ? "0" : "-1");
+    });
+    setNfeTabView(state.nfeTab || "issue");
+}
+
+function resolveAppView(view) {
+    const rawView = String(view || "");
+    if (rawView.startsWith("financeiro-")) {
+        return "financeiro";
+    }
+    if (rawView.startsWith("ordens-")) {
+        return "ordens";
+    }
+    if (rawView.startsWith("agenda-")) {
+        return "agenda";
+    }
+    return view;
+}
+
+function resolveFinanceScreenFromView(view) {
+    const rawView = String(view || "");
+    if (!rawView.startsWith("financeiro-")) {
+        return rawView === "financeiro" ? state.financeScreen || "lancamentos" : null;
+    }
+    return rawView.replace("financeiro-", "") || "lancamentos";
+}
+
+function openFinanceView(screen = "lancamentos") {
+    switchView(`financeiro-${screen}`);
+}
+
+function resolveAppointmentScreenFromView(view) {
+    const rawView = String(view || "");
+    if (!rawView.startsWith("agenda-")) {
+        return rawView === "agenda" ? state.appointmentScreen || "operational" : null;
+    }
+    return rawView === "agenda-novo" ? "new" : "operational";
+}
+
+function openAppointmentView(screen = "operational") {
+    switchView(screen === "new" ? "agenda-novo" : "agenda-operacional");
+}
+
+function resolveWorkOrderScreenFromView(view) {
+    const rawView = String(view || "");
+    if (!rawView.startsWith("ordens-")) {
+        return rawView === "ordens" ? state.workOrderScreen || "new" : null;
+    }
+    return rawView === "ordens-cadastradas" ? "registered" : "new";
+}
+
+function openWorkOrderView(screen = "new") {
+    switchView(screen === "registered" ? "ordens-cadastradas" : "ordens-nova");
+}
+
 function bindAuth() {
     document.getElementById("logout-button").addEventListener("click", logout);
+    document.getElementById("sidebar-logout-button").addEventListener("click", logout);
     document.getElementById("login-form").addEventListener("submit", async (event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
@@ -213,14 +385,23 @@ async function bootstrapApp() {
 }
 
 function showLogin() {
+    const loginForm = document.getElementById("login-form");
+    const loginError = document.getElementById("login-error");
     document.getElementById("app-shell").classList.add("hidden");
     document.getElementById("login-screen").classList.remove("hidden");
+    loginError.classList.add("hidden");
+    loginError.textContent = "";
+    if (loginForm) {
+        loginForm.querySelector('[name="password"]').value = "";
+        loginForm.querySelector('[name="username"]')?.focus();
+    }
     setSyncStatus("Sessao local");
 }
 
 function logout() {
     state.token = "";
     state.user = null;
+    state.receiptPreview = null;
     localStorage.removeItem("syspragas_token");
     showLogin();
 }
@@ -241,12 +422,24 @@ async function loadAllData() {
         basePromises.push(apiFetch("/api/v1/financeiro"));
         basePromises.push(apiFetch("/api/v1/financeiro/caixa"));
         basePromises.push(apiFetch("/api/v1/financeiro/dashboard"));
+        basePromises.push(apiFetch("/api/v1/recibos"));
+        basePromises.push(apiFetch("/api/v1/nfe"));
+        basePromises.push(apiFetch("/api/v1/nfe/sefaz/readiness"));
+        basePromises.push(apiFetch("/api/v1/fiscal/simples"));
+        basePromises.push(apiFetch("/api/v1/fiscal/fluxo-caixa/resumo?period=monthly"));
+        basePromises.push(apiFetch(`/api/v1/fiscal/simples/resumo/${getSelectedSimplesReference().year}/${getSelectedSimplesReference().month}`));
     }
     const results = await Promise.all(basePromises);
     const [customers, products, pests, technicians, workOrders, appointments, appointmentDashboard] = results;
     const finance = canAccessFinance ? results[7] : [];
     const cashLedger = canAccessFinance ? results[8] : [];
     const financeDashboard = canAccessFinance ? results[9] : null;
+    const receipts = canAccessFinance ? results[10] : [];
+    const nfeInvoices = canAccessFinance ? results[11] : [];
+    const sefazReadiness = canAccessFinance ? results[12] : null;
+    const simplesConfigs = canAccessFinance ? results[13] : [];
+    const cashFlowSummary = canAccessFinance ? results[14] : null;
+    const simplesSummary = canAccessFinance ? results[15] : null;
 
     state.customers = customers;
     state.products = products;
@@ -258,6 +451,12 @@ async function loadAllData() {
     state.finance = finance;
     state.cashLedger = cashLedger;
     state.financeDashboard = financeDashboard;
+    state.receipts = receipts;
+    state.nfeInvoices = nfeInvoices;
+    state.sefazReadiness = sefazReadiness;
+    state.simplesConfigs = simplesConfigs;
+    state.cashFlowSummary = cashFlowSummary;
+    state.simplesSummary = simplesSummary;
 
     if (state.user?.role === "master") {
         const [users, licenses, providerCompanies] = await Promise.all([
@@ -312,13 +511,26 @@ async function apiFetch(url, options = {}, withAuth = true) {
 }
 
 function switchView(view) {
+    const appView = resolveAppView(view);
+    const financeScreen = resolveFinanceScreenFromView(view);
+    const workOrderScreen = resolveWorkOrderScreenFromView(view);
+    const appointmentScreen = resolveAppointmentScreenFromView(view);
     document.querySelectorAll(".nav-link[data-view]").forEach((button) => {
         button.classList.toggle("active", button.dataset.view === view);
     });
     document.querySelectorAll(".view").forEach((section) => {
-        section.classList.toggle("active", section.id === `view-${view}`);
+        section.classList.toggle("active", section.id === `view-${appView}`);
     });
-    document.getElementById("view-title").textContent = viewTitles[view] || viewTitles.dashboard;
+    if (appView === "ordens") {
+        setWorkOrderWorkspaceView(workOrderScreen || "new");
+    }
+    if (appView === "financeiro") {
+        setFinanceWorkspaceView(financeScreen || "lancamentos");
+    }
+    if (appView === "agenda") {
+        setAppointmentWorkspaceView(appointmentScreen || "operational");
+    }
+    document.getElementById("view-title").textContent = viewTitles[view] || viewTitles[appView] || viewTitles.dashboard;
 }
 
 function setWorkOrderWorkspaceView(view) {
@@ -331,6 +543,49 @@ function setWorkOrderWorkspaceView(view) {
     });
     document.querySelectorAll("[data-work-order-screen-panel]").forEach((panel) => {
         const isActive = panel.dataset.workOrderScreenPanel === state.workOrderScreen;
+        panel.classList.toggle("is-active", isActive);
+        panel.hidden = !isActive;
+    });
+}
+
+function setFinanceWorkspaceView(view) {
+    const allowedViews = new Set(["lancamentos", "recibos", "nfe", "caixa", "relatorios"]);
+    state.financeScreen = allowedViews.has(view) ? view : "lancamentos";
+    document.querySelectorAll("[data-finance-screen-trigger]").forEach((button) => {
+        const isActive = button.dataset.financeScreenTrigger === state.financeScreen;
+        button.classList.toggle("tab-active", isActive);
+        button.setAttribute("aria-selected", isActive ? "true" : "false");
+        button.setAttribute("tabindex", isActive ? "0" : "-1");
+    });
+    document.querySelectorAll("[data-finance-screen-panel]").forEach((panel) => {
+        const isActive = panel.dataset.financeScreenPanel === state.financeScreen;
+        panel.classList.toggle("is-active", isActive);
+        panel.hidden = !isActive;
+    });
+    if (state.financeScreen === "nfe") {
+        setNfeTabView(state.nfeTab || "issue");
+    }
+}
+
+function setNfeTabView(view) {
+    state.nfeTab = view === "issued" ? "issued" : "issue";
+    document.querySelectorAll("[data-nfe-tab-trigger]").forEach((button) => {
+        const isActive = button.dataset.nfeTabTrigger === state.nfeTab;
+        button.classList.toggle("tab-active", isActive);
+        button.setAttribute("aria-selected", isActive ? "true" : "false");
+        button.setAttribute("tabindex", isActive ? "0" : "-1");
+    });
+    document.querySelectorAll("[data-nfe-tab-panel]").forEach((panel) => {
+        const isActive = panel.dataset.nfeTabPanel === state.nfeTab;
+        panel.classList.toggle("tab-content-active", isActive);
+        panel.hidden = !isActive;
+    });
+}
+
+function setAppointmentWorkspaceView(view) {
+    state.appointmentScreen = view === "new" ? "new" : "operational";
+    document.querySelectorAll("[data-appointment-screen-panel]").forEach((panel) => {
+        const isActive = panel.dataset.appointmentScreenPanel === state.appointmentScreen;
         panel.classList.toggle("is-active", isActive);
         panel.hidden = !isActive;
     });
@@ -351,7 +606,12 @@ function renderAll() {
     renderWorkOrderFormHeader();
     renderAppointmentFormHeader();
     renderWorkOrderSaveFeedback();
+    renderNfeEmissionWorkspace();
+    renderNfeEmissionFeedback();
     setWorkOrderWorkspaceView(state.workOrderScreen || "new");
+    setFinanceWorkspaceView(state.financeScreen || "lancamentos");
+    setNfeTabView(state.nfeTab || "issue");
+    setAppointmentWorkspaceView(state.appointmentScreen || "operational");
     switchProviderCompanyTab(state.providerCompanyTab || "dados");
     renderProviderCompanyLicenseWorkspace();
 }
@@ -410,9 +670,40 @@ function buildForms() {
             <label><span>Toxicidade</span><input name="toxicidade" required></label>
             <label><span>Concentracao</span><input name="concentracao" required></label>
             <label><span>Registro MS</span><input name="registro_ms" required></label>
+            <label>
+                <span>NCM</span>
+                <input name="ncm" id="product-ncm-input" list="product-ncm-suggestions" placeholder="Digite codigo ou descricao">
+                <datalist id="product-ncm-suggestions"></datalist>
+                <div id="product-ncm-live-results" class="ncm-live-results hidden"></div>
+            </label>
+            <label class="product-inline-action">
+                <span>Base fiscal</span>
+                <button type="button" class="btn btn-default ghost-button" id="product-ncm-lookup-button">Buscar NCM</button>
+            </label>
+            <label class="full-width"><span>Descricao fiscal</span><input name="ncm_descricao" id="product-ncm-description" readonly></label>
+            <label>
+                <span>Override manual</span>
+                <select name="override_tributacao" id="product-tax-override">
+                    <option value="false">Usar base automatica</option>
+                    <option value="true">Informar aliquotas manualmente</option>
+                </select>
+            </label>
             <label><span>Estoque atual</span><input name="estoque_atual" type="number" min="0" step="0.01" value="0"></label>
             <label><span>Estoque minimo</span><input name="estoque_minimo" type="number" min="0" step="0.01" value="0"></label>
         </div>
+        <section class="tax-profile-card">
+            <div class="section-heading compact">
+                <h4>Tributacao vinculada ao produto</h4>
+                <p>O cadastro usa cache local de NCM e permite ajuste manual quando necessario.</p>
+            </div>
+            <div class="form-grid">
+                <label><span>ICMS (%)</span><input name="aliquota_icms" type="number" min="0" step="0.0001" value="0"></label>
+                <label><span>IPI (%)</span><input name="aliquota_ipi" type="number" min="0" step="0.0001" value="0"></label>
+                <label><span>PIS (%)</span><input name="aliquota_pis" type="number" min="0" step="0.0001" value="0"></label>
+                <label><span>COFINS (%)</span><input name="aliquota_cofins" type="number" min="0" step="0.0001" value="0"></label>
+            </div>
+            <div class="origin-note" id="product-tax-source-note">Sem NCM vinculado. Informe um NCM para preencher automaticamente as aliquotas.</div>
+        </section>
         <div class="section-heading">
             <h3>Importacoes de estoque</h3>
             <p>Use XML da NF-e ou CSV para dar entrada em produtos e registrar a despesa no financeiro.</p>
@@ -500,6 +791,121 @@ function buildForms() {
         </div>
         ${formActionHtml("finance", "Salvar lancamento", "Cancelar edicao")}
     `;
+
+    const receiptForm = document.getElementById("receipt-form");
+    if (receiptForm) {
+        receiptForm.innerHTML = `
+            <div class="form-grid">
+                <label><span>Cliente</span><select name="cliente_id" required><option value="">Selecione o cliente</option></select></label>
+                <label><span>OS vinculada</span><select name="os_id"><option value="">Sem vinculacao</option></select></label>
+                <label><span>Data do recebimento</span><input name="data_recebimento" type="date" required></label>
+                <label><span>Valor recebido</span><input name="valor" type="number" min="0.01" step="0.01" required></label>
+                <label>
+                    <span>Forma de pagamento</span>
+                    <select name="forma_pagamento" required>
+                        <option value="pix">PIX</option>
+                        <option value="dinheiro">Dinheiro</option>
+                        <option value="transferencia">Transferencia bancaria</option>
+                        <option value="cartao_credito">Cartao de credito</option>
+                        <option value="cartao_debito">Cartao de debito</option>
+                        <option value="boleto">Boleto</option>
+                        <option value="cheque">Cheque</option>
+                        <option value="outros">Outros</option>
+                    </select>
+                </label>
+                <label class="full-width"><span>Descricao</span><textarea name="descricao" required placeholder="Descreva claramente o motivo do recebimento."></textarea></label>
+            </div>
+            <div class="inline-actions compact-actions">
+                <button type="button" class="btn btn-default ghost-button" id="receipt-preview-refresh">Atualizar preview</button>
+                <span class="origin-note">O valor por extenso e o texto formal sao gerados automaticamente.</span>
+            </div>
+            <section class="receipt-preview-panel">
+                <div class="section-heading compact">
+                    <h4>Preview do recibo</h4>
+                    <p>Revise o texto formal e os dados finais antes de salvar.</p>
+                </div>
+                <div id="receipt-preview-card" class="receipt-preview-card">
+                    <div class="empty-state">Preencha os dados do recibo para visualizar o documento antes de salvar.</div>
+                </div>
+            </section>
+            ${formActionHtml("receipt", "Salvar recibo", "Cancelar edicao")}
+        `;
+    }
+
+    const nfeForm = document.getElementById("nfe-form");
+    if (nfeForm) {
+        nfeForm.innerHTML = `
+            <div id="nfe-emission-workspace" class="nfe-emission-workspace"></div>
+            <div class="form-grid">
+                <label><span>Numero NF-e</span><input name="numero_nfe" required></label>
+                <label><span>Cliente</span><select name="cliente_id" required><option value="">Selecione o cliente</option></select></label>
+                <label><span>Valor total</span><input name="valor_total" type="number" min="0.01" step="0.01" required></label>
+                <label><span>Data emissao</span><input name="data_emissao" type="date" required></label>
+                <label><span>Data vencimento</span><input name="data_vencimento" type="date" required></label>
+                <label><span>Natureza da operacao</span><input name="natureza_operacao" value="Venda" required></label>
+                <label><span>Referencia externa</span><input name="referencia_externa" placeholder="Ex.: NFE-2026-001"></label>
+                <label><span>Ambiente</span>
+                    <select name="ambiente">
+                        <option value="homologacao">Homologacao</option>
+                        <option value="producao">Producao</option>
+                    </select>
+                </label>
+                <label><span>Status</span>
+                    <select name="status">
+                        <option value="emitida">Emitida</option>
+                        <option value="cancelada">Cancelada</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Gerar financeiro</span>
+                    <select name="gerar_financeiro">
+                        <option value="true">Sim</option>
+                        <option value="false">Nao</option>
+                    </select>
+                </label>
+                <label class="full-width"><span>Observacoes</span><textarea name="observacoes"></textarea></label>
+            </div>
+            <section class="tax-profile-card">
+                <div class="section-heading compact">
+                    <h4>Itens fiscais da NF-e</h4>
+                    <p>Informe ao menos um item com descricao, NCM, quantidade e valor unitario para emitir na SEFAZ.</p>
+                </div>
+                <div id="nfe-items-list" class="product-row-list"></div>
+                <div class="inline-actions">
+                    <button type="button" class="btn btn-default ghost-button" id="add-nfe-item-row">Adicionar item</button>
+                </div>
+                <p class="origin-note nfe-items-note">Ao selecionar um produto, o sistema preenche descricao, NCM e aliquotas automaticamente.</p>
+            </section>
+            ${formActionHtml("nfe", "Salvar NF-e", "Cancelar edicao")}
+            <div id="nfe-save-feedback" class="nfe-save-feedback hidden"></div>
+        `;
+    }
+
+    const simplesConfigForm = document.getElementById("simples-config-form");
+    if (simplesConfigForm) {
+        simplesConfigForm.innerHTML = `
+            <div class="form-grid">
+                <label><span>Faixa inicial</span><input name="faixa_faturamento_inicio" type="number" min="0" step="0.01" value="0" required></label>
+                <label><span>Faixa final</span><input name="faixa_faturamento_fim" type="number" min="0" step="0.01" placeholder="Opcional"></label>
+                <label><span>Aliquota (%)</span><input name="aliquota" type="number" min="0.0001" step="0.0001" required></label>
+                <label><span>Anexo</span><input name="anexo" placeholder="III"></label>
+                <label>
+                    <span>Configuracao vigente</span>
+                    <select name="vigente">
+                        <option value="true">Sim</option>
+                        <option value="false">Nao</option>
+                    </select>
+                </label>
+                <label class="full-width"><span>Observacoes</span><textarea name="observacoes"></textarea></label>
+            </div>
+            <div class="inline-actions">
+                <button type="submit" class="btn btn-success" data-save-button="simplesConfig">Salvar configuracao</button>
+                <button type="button" class="btn btn-default ghost-button" id="simples-config-clear">Limpar formulario</button>
+            </div>
+            <p class="origin-note hidden" id="simples-config-mode-note"></p>
+            <p class="form-error hidden"></p>
+        `;
+    }
 
     document.getElementById("work-order-form").innerHTML = `
         <div class="form-grid">
@@ -849,11 +1255,424 @@ function buildForms() {
     bindProductXmlImport();
     bindProductCsvImport();
     bindCustomerAutoLookup();
+    bindNfeFormHelpers();
+    bindProductFiscalControls();
     bindProviderCompanyWorkspace();
     bindWorkOrderSelectors();
     bindAppointmentWorkspace();
+    bindFinancialModuleWorkspace();
     clearWorkOrderForm();
     clearAppointmentForm();
+    clearReceiptForm();
+}
+
+function bindProductFiscalControls() {
+    const ncmInput = document.getElementById("product-ncm-input");
+    const lookupButton = document.getElementById("product-ncm-lookup-button");
+    const overrideSelect = document.getElementById("product-tax-override");
+    const resultsPanel = document.getElementById("product-ncm-live-results");
+    if (!ncmInput || !lookupButton || !overrideSelect || !resultsPanel) {
+        return;
+    }
+
+    let searchTimer = null;
+    ncmInput.addEventListener("input", () => {
+        window.clearTimeout(searchTimer);
+        searchTimer = window.setTimeout(() => {
+            loadNcmSuggestions(ncmInput.value);
+        }, 220);
+    });
+    ncmInput.addEventListener("focus", () => {
+        if (String(ncmInput.value || "").trim().length >= 2) {
+            loadNcmSuggestions(ncmInput.value);
+        }
+    });
+    ncmInput.addEventListener("change", async () => {
+        await applyNcmProfileToProductForm(ncmInput.value, false);
+    });
+    ncmInput.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            hideNcmLiveResults();
+        }
+    });
+    lookupButton.addEventListener("click", async () => {
+        await applyNcmProfileToProductForm(ncmInput.value, true);
+    });
+    overrideSelect.addEventListener("change", () => {
+        syncProductTaxFields();
+    });
+    if (document.body.dataset.ncmOutsideBound !== "true") {
+        document.body.dataset.ncmOutsideBound = "true";
+        document.addEventListener("click", (event) => {
+            const target = event.target;
+            if (
+                target instanceof HTMLElement
+                && !target.closest("#product-ncm-input")
+                && !target.closest("#product-ncm-live-results")
+                && !target.closest("#product-ncm-lookup-button")
+            ) {
+                hideNcmLiveResults();
+            }
+        });
+    }
+    syncProductTaxFields();
+}
+
+function bindFinancialModuleWorkspace() {
+    bindFinanceFilters();
+    bindReceiptFilters();
+    bindNfeFilters();
+    bindSimplesSummaryRefresh();
+    bindReceiptWorkspace();
+}
+
+function bindFinanceFilters() {
+    const bindings = [
+        ["finance-search-filter", "financeSearch", "input"],
+        ["finance-status-filter", "financeStatus", "change"],
+        ["finance-customer-filter", "financeCustomer", "change"],
+        ["finance-start-date-filter", "financeStartDate", "change"],
+        ["finance-end-date-filter", "financeEndDate", "change"],
+    ];
+    bindings.forEach(([id, key, eventName]) => {
+        const field = document.getElementById(id);
+        if (!field || field.dataset.bound === "true") {
+            return;
+        }
+        field.dataset.bound = "true";
+        field.addEventListener(eventName, () => {
+            state.filters[key] = field.value;
+            renderFinance();
+        });
+    });
+
+    const clearButton = document.getElementById("finance-clear-filters");
+    if (clearButton && clearButton.dataset.bound !== "true") {
+        clearButton.dataset.bound = "true";
+        clearButton.addEventListener("click", () => {
+            state.filters.financeSearch = "";
+            state.filters.financeStatus = "todos";
+            state.filters.financeCustomer = "";
+            state.filters.financeStartDate = "";
+            state.filters.financeEndDate = "";
+            renderFinance();
+        });
+    }
+}
+
+function bindReceiptFilters() {
+    const bindings = [
+        ["receipt-search-filter", "receiptSearch", "input"],
+        ["receipt-customer-filter", "receiptCustomer", "change"],
+    ];
+    bindings.forEach(([id, key, eventName]) => {
+        const field = document.getElementById(id);
+        if (!field || field.dataset.bound === "true") {
+            return;
+        }
+        field.dataset.bound = "true";
+        field.addEventListener(eventName, () => {
+            state.filters[key] = field.value;
+            renderFinance();
+        });
+    });
+
+    const clearButton = document.getElementById("receipt-clear-filters");
+    if (clearButton && clearButton.dataset.bound !== "true") {
+        clearButton.dataset.bound = "true";
+        clearButton.addEventListener("click", () => {
+            state.filters.receiptSearch = "";
+            state.filters.receiptCustomer = "";
+            renderFinance();
+        });
+    }
+}
+
+function bindReceiptWorkspace() {
+    const form = document.getElementById("receipt-form");
+    const previewButton = document.getElementById("receipt-preview-refresh");
+    if (!form || !previewButton) {
+        return;
+    }
+
+    if (previewButton.dataset.bound !== "true") {
+        previewButton.dataset.bound = "true";
+        previewButton.addEventListener("click", async () => {
+            await refreshReceiptPreview(false);
+        });
+    }
+
+    if (form.dataset.previewBound !== "true") {
+        form.dataset.previewBound = "true";
+        const schedulePreview = () => {
+            window.clearTimeout(form._receiptPreviewTimer);
+            form._receiptPreviewTimer = window.setTimeout(() => {
+                refreshReceiptPreview(true);
+            }, 220);
+        };
+        form.addEventListener("input", schedulePreview);
+        form.addEventListener("change", (event) => {
+            if (event.target?.name === "cliente_id") {
+                syncReceiptWorkOrderOptions();
+                applySelectedReceiptWorkOrderDefaults();
+            }
+            if (event.target?.name === "os_id") {
+                applySelectedReceiptWorkOrderDefaults();
+            }
+            schedulePreview();
+        });
+    }
+}
+
+function bindNfeFilters() {
+    const bindings = [
+        ["nfe-search-filter", "nfeSearch", "input"],
+        ["nfe-status-filter", "nfeStatus", "change"],
+        ["nfe-customer-filter", "nfeCustomer", "change"],
+    ];
+    bindings.forEach(([id, key, eventName]) => {
+        const field = document.getElementById(id);
+        if (!field || field.dataset.bound === "true") {
+            return;
+        }
+        field.dataset.bound = "true";
+        field.addEventListener(eventName, () => {
+            state.filters[key] = field.value;
+            renderFinance();
+        });
+    });
+
+    const clearButton = document.getElementById("nfe-clear-filters");
+    if (clearButton && clearButton.dataset.bound !== "true") {
+        clearButton.dataset.bound = "true";
+        clearButton.addEventListener("click", () => {
+            state.filters.nfeSearch = "";
+            state.filters.nfeStatus = "todos";
+            state.filters.nfeCustomer = "";
+            renderFinance();
+        });
+    }
+}
+
+function bindSimplesSummaryRefresh() {
+    const refreshButton = document.getElementById("simples-summary-refresh");
+    if (refreshButton && refreshButton.dataset.bound !== "true") {
+        refreshButton.dataset.bound = "true";
+        refreshButton.addEventListener("click", async () => {
+            try {
+                setSyncStatus("Atualizando resumo fiscal...");
+                state.simplesSummary = await apiFetch(
+                    `/api/v1/fiscal/simples/resumo/${getSelectedSimplesReference().year}/${getSelectedSimplesReference().month}`,
+                );
+                renderFinance();
+                setSyncStatus("Sincronizado");
+            } catch (error) {
+                setSyncStatus("Falha na consulta");
+                toast(error.message);
+            }
+        });
+    }
+
+    const monthField = document.getElementById("simples-reference-month");
+    if (monthField && monthField.dataset.bound !== "true") {
+        monthField.dataset.bound = "true";
+        monthField.addEventListener("change", async () => {
+            state.filters.simplesReferenceMonth = monthField.value || state.filters.simplesReferenceMonth;
+            try {
+                state.simplesSummary = await apiFetch(
+                    `/api/v1/fiscal/simples/resumo/${getSelectedSimplesReference().year}/${getSelectedSimplesReference().month}`,
+                );
+                renderFinance();
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    }
+}
+
+function bindSimplesConfigActions() {
+    const clearButton = document.getElementById("simples-config-clear");
+    if (clearButton && clearButton.dataset.bound !== "true") {
+        clearButton.dataset.bound = "true";
+        clearButton.addEventListener("click", () => clearSimplesConfigForm());
+    }
+}
+
+function syncFinancialReferenceMonth() {
+    const monthField = document.getElementById("simples-reference-month");
+    if (monthField) {
+        monthField.value = state.filters.simplesReferenceMonth || new Date().toISOString().slice(0, 7);
+    }
+}
+
+function getSelectedSimplesReference() {
+    const rawValue = state.filters.simplesReferenceMonth || new Date().toISOString().slice(0, 7);
+    const [yearText, monthText] = rawValue.split("-");
+    const year = Number(yearText) || new Date().getFullYear();
+    const month = Number(monthText) || new Date().getMonth() + 1;
+    return { year, month };
+}
+
+async function loadNcmSuggestions(query) {
+    const datalist = document.getElementById("product-ncm-suggestions");
+    const resultsPanel = document.getElementById("product-ncm-live-results");
+    if (!datalist || !resultsPanel) {
+        return;
+    }
+    const normalizedQuery = String(query || "").trim();
+    if (normalizedQuery.length < 2) {
+        datalist.innerHTML = "";
+        hideNcmLiveResults();
+        return;
+    }
+    try {
+        const results = await apiFetch(`/api/v1/fiscal/ncm?query=${encodeURIComponent(normalizedQuery)}&limit=8`);
+        datalist.innerHTML = results
+            .map((item) => `<option value="${escapeHtml(item.codigo)}">${escapeHtml(`${item.codigo} - ${item.descricao}`)}</option>`)
+            .join("");
+        renderNcmLiveResults(results, normalizedQuery);
+        const exactCode = digitsOnly(normalizedQuery).slice(0, 8);
+        if (exactCode.length === 8 && results.some((item) => item.codigo === exactCode)) {
+            await applyNcmProfileToProductForm(exactCode, false);
+            hideNcmLiveResults();
+        }
+    } catch {
+        datalist.innerHTML = "";
+        hideNcmLiveResults();
+    }
+}
+
+function renderNcmLiveResults(results, query) {
+    const resultsPanel = document.getElementById("product-ncm-live-results");
+    const ncmInput = document.getElementById("product-ncm-input");
+    if (!resultsPanel || !ncmInput) {
+        return;
+    }
+    if (!results.length) {
+        resultsPanel.innerHTML = `<div class="ncm-live-empty">Nenhum NCM encontrado para "${escapeHtml(query)}".</div>`;
+        resultsPanel.classList.remove("hidden");
+        return;
+    }
+
+    resultsPanel.innerHTML = `
+        <div class="ncm-live-header">Resultados da pre-busca</div>
+        <div class="ncm-live-list">
+            ${results.map((item) => `
+                <button type="button" class="ncm-live-option" data-code="${escapeHtml(item.codigo)}">
+                    <strong>${escapeHtml(item.codigo)}</strong>
+                    <span>${escapeHtml(item.descricao)}</span>
+                    <small>ICMS ${escapeHtml(String(item.aliquota_icms || 0))}% | PIS ${escapeHtml(String(item.aliquota_pis || 0))}% | COFINS ${escapeHtml(String(item.aliquota_cofins || 0))}%</small>
+                </button>
+            `).join("")}
+        </div>
+    `;
+    resultsPanel.classList.remove("hidden");
+
+    resultsPanel.querySelectorAll(".ncm-live-option").forEach((button) => {
+        button.addEventListener("click", async () => {
+            ncmInput.value = button.dataset.code || "";
+            hideNcmLiveResults();
+            await applyNcmProfileToProductForm(ncmInput.value, true);
+        });
+    });
+}
+
+function hideNcmLiveResults() {
+    const resultsPanel = document.getElementById("product-ncm-live-results");
+    if (!resultsPanel) {
+        return;
+    }
+    resultsPanel.classList.add("hidden");
+}
+
+async function applyNcmProfileToProductForm(ncmValue, warnOnEmpty = false) {
+    const normalized = digitsOnly(ncmValue || "").slice(0, 8);
+    if (!normalized) {
+        if (warnOnEmpty) {
+            toast("Informe um NCM para consultar a tributacao.");
+        }
+        syncProductTaxFields();
+        return;
+    }
+    try {
+        const profile = await apiFetch(`/api/v1/fiscal/ncm/${normalized}`);
+        const form = document.getElementById("product-form");
+        fillForm(form, {
+            ncm: profile.codigo,
+            ncm_descricao: profile.descricao,
+            aliquota_icms: profile.aliquota_icms,
+            aliquota_ipi: profile.aliquota_ipi,
+            aliquota_pis: profile.aliquota_pis,
+            aliquota_cofins: profile.aliquota_cofins,
+        });
+        syncProductTaxFields();
+        updateProductTaxSourceNote(`Base fiscal carregada de ${profile.fonte_dados}.`);
+    } catch (error) {
+        syncProductTaxFields();
+        updateProductTaxSourceNote("Nao foi possivel localizar o NCM informado na base fiscal.");
+        if (warnOnEmpty) {
+            toast(error.message);
+        }
+    }
+}
+
+function syncProductTaxFields() {
+    const form = document.getElementById("product-form");
+    if (!form) {
+        return;
+    }
+    const manualOverride = form.querySelector('[name="override_tributacao"]')?.value === "true";
+    ["aliquota_icms", "aliquota_ipi", "aliquota_pis", "aliquota_cofins", "ncm_descricao"].forEach((fieldName) => {
+        const field = form.querySelector(`[name="${fieldName}"]`);
+        if (!field) {
+            return;
+        }
+        const isDescription = fieldName === "ncm_descricao";
+        field.readOnly = !manualOverride || isDescription;
+        field.classList.toggle("readonly-field", !manualOverride || isDescription);
+    });
+    updateProductTaxSourceNote(
+        manualOverride
+            ? "Modo manual ativo. As aliquotas informadas serao preservadas no produto."
+            : "Modo automatico ativo. O sistema usa a base local de NCM para preencher as aliquotas.",
+    );
+}
+
+function updateProductTaxSourceNote(message) {
+    const note = document.getElementById("product-tax-source-note");
+    if (note && message) {
+        note.textContent = message;
+    }
+}
+
+function clearSimplesConfigForm() {
+    const form = document.getElementById("simples-config-form");
+    if (!form) {
+        return;
+    }
+    form.reset();
+    form.dataset.editingId = "";
+    form.querySelector(".form-error").classList.add("hidden");
+    const note = document.getElementById("simples-config-mode-note");
+    if (note) {
+        note.classList.add("hidden");
+        note.textContent = "";
+    }
+    syncFinancialReferenceMonth();
+}
+
+function clearReceiptForm() {
+    const form = document.getElementById("receipt-form");
+    if (!form) {
+        return;
+    }
+    form.reset();
+    form.querySelector(".form-error").classList.add("hidden");
+    form.querySelector('[name="data_recebimento"]').value = todayIso();
+    form.querySelector('[name="forma_pagamento"]').value = "pix";
+    state.receiptPreview = null;
+    syncReceiptWorkOrderOptions();
+    renderReceiptPreview(null);
 }
 
 function bindProductXmlImport() {
@@ -1095,9 +1914,9 @@ async function saveProviderCompanyLicense() {
         return;
     }
     try {
-        await apiFetch("/api/v1/licencas", { method: "POST", body: JSON.stringify(payload) });
+        const result = await apiFetch("/api/v1/licencas", { method: "POST", body: JSON.stringify(payload) });
         clearProviderCompanyLicenseForm();
-        await afterMutation("Licenca da empresa salva com sucesso.");
+        await afterMutation("Licenca da empresa salva com sucesso.", { kind: "license", entity: result });
         renderProviderCompanyLicenseWorkspace();
     } catch (error) {
         toast(error.message);
@@ -1188,7 +2007,11 @@ function bindCrudForms() {
     });
 
     bindForm("product-form", "product", async (form) => {
-        await submitCrud("product", "/api/v1/produtos", objectFromForm(form));
+        const payload = objectFromForm(form);
+        payload.override_tributacao = payload.override_tributacao === "true";
+        payload.ncm = digitsOnly(payload.ncm || "").slice(0, 8) || null;
+        payload.ncm_descricao = payload.ncm_descricao || null;
+        await submitCrud("product", "/api/v1/produtos", payload);
     });
 
     bindForm("pest-form", "pest", async (form) => {
@@ -1205,6 +2028,7 @@ function bindCrudForms() {
         const payload = objectFromForm(form);
         payload.cliente_id = payload.cliente_id ? Number(payload.cliente_id) : null;
         payload.os_id = null;
+        payload.nfe_id = null;
         payload.total_parcelas = Number(payload.total_parcelas || 1);
         payload.parcela_atual = 1;
         payload.categoria = payload.categoria || null;
@@ -1214,6 +2038,29 @@ function bindCrudForms() {
         payload.origem = "manual";
         await submitCrud("finance", "/api/v1/financeiro", payload);
     });
+
+    if (document.getElementById("receipt-form")) {
+        bindForm("receipt-form", "receipt", async (form) => {
+            const payload = buildReceiptPayload(form);
+            const result = await submitCrud("receipt", "/api/v1/recibos", payload);
+            state.receiptPreview = result;
+            renderReceiptPreview(result);
+            openFinanceView("recibos");
+        });
+    }
+
+    if (document.getElementById("nfe-form")) {
+        bindForm("nfe-form", "nfe", async (form) => {
+            clearNfeEmissionFeedback();
+            const payload = buildNfePayloadFromForm(form);
+            const result = await submitCrud("nfe", "/api/v1/nfe", payload);
+            state.nfeWorkflow.lastIssuedInvoiceId = result.id;
+            state.nfeTab = "issue";
+            renderNfeEmissionWorkspace();
+            renderNfeEmissionFeedback();
+            openFinanceView("nfe");
+        });
+    }
 
     bindForm("work-order-form", "workOrder", async (form) => {
         await save_order(form);
@@ -1242,7 +2089,10 @@ function bindCrudForms() {
         const note = form.querySelector('[data-mode-note="providerCompany"]');
         note.classList.remove("hidden");
         note.textContent = `Editando registro #${result.id}.`;
-        await afterMutation(id ? "Empresa atualizada com sucesso." : "Empresa salva com sucesso.");
+        await afterMutation(id ? "Empresa atualizada com sucesso." : "Empresa salva com sucesso.", {
+            kind: "providerCompany",
+            entity: result,
+        });
         if (!id) {
             switchProviderCompanyTab("licencas");
         }
@@ -1266,10 +2116,50 @@ function bindCrudForms() {
         payload.empresa_prestadora_id = payload.empresa_prestadora_id ? Number(payload.empresa_prestadora_id) : null;
         await submitCrud("license", "/api/v1/licencas", payload);
     });
+
+    const simplesConfigForm = document.getElementById("simples-config-form");
+    if (simplesConfigForm) {
+        simplesConfigForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const errorBox = form.querySelector(".form-error");
+            const saveButton = form.querySelector('[data-save-button="simplesConfig"]');
+            errorBox.classList.add("hidden");
+            saveButton.disabled = true;
+            saveButton.dataset.originalLabel = saveButton.dataset.originalLabel || saveButton.textContent;
+            saveButton.textContent = "Salvando...";
+            try {
+                const payload = objectFromForm(form);
+                payload.faixa_faturamento_fim = payload.faixa_faturamento_fim || null;
+                payload.anexo = payload.anexo || null;
+                payload.observacoes = payload.observacoes || null;
+                payload.vigente = payload.vigente === "true";
+                const editingId = Number(form.dataset.editingId || 0) || null;
+                const result = await apiFetch(editingId ? `/api/v1/fiscal/simples/${editingId}` : "/api/v1/fiscal/simples", {
+                    method: editingId ? "PUT" : "POST",
+                    body: JSON.stringify(payload),
+                });
+                clearSimplesConfigForm();
+                await afterMutation(editingId ? "Configuracao do Simples atualizada com sucesso." : "Configuracao do Simples salva com sucesso.", {
+                    kind: "simplesConfig",
+                    entity: result,
+                });
+            } catch (error) {
+                errorBox.textContent = error.message;
+                errorBox.classList.remove("hidden");
+                errorBox.scrollIntoView({ behavior: "smooth", block: "center" });
+                toast(error.message || "Nao foi possivel salvar a configuracao.");
+            } finally {
+                saveButton.disabled = false;
+                saveButton.textContent = saveButton.dataset.originalLabel || "Salvar configuracao";
+            }
+        });
+    }
 }
 
 function bindForm(formId, kind, handler) {
     const form = document.getElementById(formId);
+    form.noValidate = true;
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const errorBox = form.querySelector(".form-error");
@@ -1285,6 +2175,8 @@ function bindForm(formId, kind, handler) {
         } catch (error) {
             errorBox.textContent = error.message;
             errorBox.classList.remove("hidden");
+            errorBox.scrollIntoView({ behavior: "smooth", block: "center" });
+            toast(error.message || "Nao foi possivel concluir a operacao.");
         } finally {
             if (saveButton) {
                 saveButton.disabled = false;
@@ -1307,17 +2199,559 @@ async function submitCrud(kind, baseUrl, payload) {
         result = await apiFetch(baseUrl, { method: "POST", body: JSON.stringify(payload) });
     }
     resetFormMode(kind);
-    await afterMutation(id ? "Registro atualizado com sucesso." : "Registro salvo com sucesso.");
+    await afterMutation(id ? "Registro atualizado com sucesso." : "Registro salvo com sucesso.", { kind, entity: result });
     return result;
 }
 
-async function afterMutation(message) {
-    await loadAllData();
-    toast(message);
+function getEntityCollectionByKind(kind) {
+    const sourceMap = {
+        customer: state.customers,
+        product: state.products,
+        pest: state.pests,
+        technician: state.technicians,
+        finance: state.finance,
+        receipt: state.receipts,
+        nfe: state.nfeInvoices,
+        workOrder: state.workOrders,
+        appointment: state.appointments,
+        providerCompany: state.providerCompanies,
+        user: state.users,
+        license: state.licenses,
+        simplesConfig: state.simplesConfigs,
+    };
+    return sourceMap[kind] || null;
+}
+
+function applyLocalMutation(kind, entity) {
+    const collection = getEntityCollectionByKind(kind);
+    if (!collection || !entity || entity.id == null) {
+        return;
+    }
+    const index = collection.findIndex((item) => item.id === entity.id);
+    if (index >= 0) {
+        collection[index] = entity;
+        return;
+    }
+    collection.unshift(entity);
+}
+
+function refreshUiFromLocalState() {
+    hydrateDynamicControls();
+    syncEditingModes();
+    renderAll();
+}
+
+async function afterMutation(message, options = {}) {
+    const { kind = null, entity = null } = options;
+    if (kind && entity) {
+        applyLocalMutation(kind, entity);
+    }
+    try {
+        await loadAllData();
+        toast(message);
+    } catch (error) {
+        refreshUiFromLocalState();
+        setSyncStatus("Atualizacao parcial");
+        toast(`${message} Nao foi possivel atualizar a tela agora: ${error.message}`);
+    }
 }
 
 function objectFromForm(form) {
     return Object.fromEntries(new FormData(form).entries());
+}
+
+function buildReceiptPayload(form) {
+    const raw = objectFromForm(form);
+    const payload = {
+        cliente_id: Number(raw.cliente_id || 0),
+        os_id: raw.os_id ? Number(raw.os_id) : null,
+        valor: raw.valor,
+        forma_pagamento: raw.forma_pagamento,
+        descricao: String(raw.descricao || "").trim(),
+        data_recebimento: raw.data_recebimento,
+    };
+
+    const errors = [];
+    if (!payload.cliente_id) {
+        errors.push("Selecione o cliente do recibo.");
+    }
+    if (!payload.data_recebimento) {
+        errors.push("Informe a data do recebimento.");
+    }
+    if (!(Number(payload.valor) > 0)) {
+        errors.push("Informe um valor maior que zero para o recibo.");
+    }
+    if (!payload.forma_pagamento) {
+        errors.push("Selecione a forma de pagamento.");
+    }
+    if (!payload.descricao || payload.descricao.length < 5) {
+        errors.push("Descreva o recebimento com pelo menos 5 caracteres.");
+    }
+    if (payload.os_id) {
+        const workOrder = getEntityByKind("workOrder", payload.os_id);
+        if (!workOrder) {
+            errors.push("A ordem de servico selecionada nao foi encontrada.");
+        } else if (workOrder.cliente_id !== payload.cliente_id) {
+            errors.push("A OS vinculada deve pertencer ao mesmo cliente informado.");
+        }
+    }
+
+    if (errors.length) {
+        throw new Error([...new Set(errors)].join(" "));
+    }
+    return payload;
+}
+
+function getFilteredReceipts() {
+    const search = (state.filters.receiptSearch || "").trim().toLowerCase();
+    const customerId = state.filters.receiptCustomer || "";
+    return state.receipts.filter((item) => {
+        const customerMatches = !customerId || String(item.cliente_id) === String(customerId);
+        const searchMatches = !search || [
+            item.numero,
+            item.cliente?.razao_social,
+            item.descricao,
+            item.forma_pagamento,
+            item.os_numero,
+        ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(search);
+        return customerMatches && searchMatches;
+    });
+}
+
+function syncReceiptWorkOrderOptions() {
+    const form = document.getElementById("receipt-form");
+    const select = form?.querySelector('[name="os_id"]');
+    if (!select) {
+        return;
+    }
+    const currentValue = select.value;
+    const customerId = Number(form.querySelector('[name="cliente_id"]')?.value || 0);
+    const items = state.workOrders
+        .filter((item) => !customerId || item.cliente_id === customerId)
+        .sort((a, b) => `${b.data_execucao}${b.hora_inicio}`.localeCompare(`${a.data_execucao}${a.hora_inicio}`));
+    select.innerHTML = `
+        <option value="">Sem vinculacao</option>
+        ${items.map((item) => `
+            <option value="${item.id}">
+                ${escapeHtml(`OS ${item.numero} | ${item.cliente?.razao_social || "Cliente"} | ${formatDate(item.data_execucao)}`)}
+            </option>
+        `).join("")}
+    `;
+    if (currentValue && select.querySelector(`option[value="${currentValue}"]`)) {
+        select.value = currentValue;
+    }
+}
+
+function applySelectedReceiptWorkOrderDefaults() {
+    const form = document.getElementById("receipt-form");
+    if (!form) {
+        return;
+    }
+    const workOrder = getEntityByKind("workOrder", Number(form.querySelector('[name="os_id"]').value || 0));
+    if (!workOrder) {
+        return;
+    }
+    if (!form.querySelector('[name="valor"]').value) {
+        form.querySelector('[name="valor"]').value = workOrder.valor_servico || "";
+    }
+    if (!String(form.querySelector('[name="descricao"]').value || "").trim()) {
+        form.querySelector('[name="descricao"]').value = `Recebimento referente a OS ${workOrder.numero}`;
+    }
+}
+
+async function refreshReceiptPreview(silent = true) {
+    const form = document.getElementById("receipt-form");
+    if (!form) {
+        return null;
+    }
+    let payload;
+    try {
+        payload = buildReceiptPayload(form);
+    } catch (error) {
+        if (!silent) {
+            toast(error.message);
+        }
+        if (!silent || !String(form.querySelector('[name="descricao"]').value || "").trim()) {
+            state.receiptPreview = null;
+            renderReceiptPreview(null);
+        }
+        return null;
+    }
+
+    try {
+        const preview = await apiFetch("/api/v1/recibos/preview", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        });
+        state.receiptPreview = preview;
+        renderReceiptPreview(preview);
+        return preview;
+    } catch (error) {
+        state.receiptPreview = null;
+        renderReceiptPreview(null, error.message);
+        if (!silent) {
+            toast(error.message);
+        }
+        return null;
+    }
+}
+
+function renderReceiptPreview(preview, errorMessage = "") {
+    const target = document.getElementById("receipt-preview-card");
+    if (!target) {
+        return;
+    }
+    if (!preview) {
+        target.innerHTML = errorMessage
+            ? `<div class="empty-state">${escapeHtml(errorMessage)}</div>`
+            : `<div class="empty-state">Preencha os dados do recibo para visualizar o documento antes de salvar.</div>`;
+        return;
+    }
+    const customerName = preview.cliente_nome || preview.cliente?.razao_social || "Cliente";
+    const customerDocument = preview.cliente_documento || preview.cliente?.cpf_cnpj || "-";
+    const formattedAmount = preview.valor_formatado || formatCurrency(preview.valor || 0);
+    const amountInWords = preview.valor_por_extenso || "-";
+    const paymentLabel = preview.forma_pagamento_label || String(preview.forma_pagamento || "").replaceAll("_", " ");
+    const formattedDate = preview.data_recebimento_formatada || formatDate(preview.data_recebimento);
+    target.innerHTML = `
+        <div class="receipt-preview-grid">
+            <article class="receipt-preview-metric">
+                <span>Cliente</span>
+                <strong>${escapeHtml(customerName)}</strong>
+                <small>${escapeHtml(customerDocument)}</small>
+            </article>
+            <article class="receipt-preview-metric">
+                <span>Valor</span>
+                <strong>${escapeHtml(formattedAmount)}</strong>
+                <small>${escapeHtml(amountInWords)}</small>
+            </article>
+            <article class="receipt-preview-metric">
+                <span>Pagamento</span>
+                <strong>${escapeHtml(paymentLabel)}</strong>
+                <small>${escapeHtml(formattedDate)}</small>
+            </article>
+            <article class="receipt-preview-metric">
+                <span>OS</span>
+                <strong>${escapeHtml(preview.os_numero || "Sem vinculacao")}</strong>
+                <small>Numero definitivo sera gerado ao salvar.</small>
+            </article>
+        </div>
+        <div class="receipt-preview-text">
+            <strong>Texto formal</strong>
+            <p>${escapeHtml(preview.texto_formal)}</p>
+        </div>
+    `;
+}
+
+function focusReceiptPreview() {
+    const previewCard = document.getElementById("receipt-preview-card");
+    if (!previewCard) {
+        return;
+    }
+    previewCard.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function showReceiptPreview(receiptId) {
+    const receipt = getEntityByKind("receipt", Number(receiptId));
+    if (!receipt) {
+        toast("Recibo nao encontrado para visualizacao.");
+        return;
+    }
+    state.receiptPreview = receipt;
+    renderReceiptPreview(receipt);
+    openFinanceView("recibos");
+    window.setTimeout(() => focusReceiptPreview(), 80);
+}
+
+function bindNfeFormHelpers() {
+    const form = document.getElementById("nfe-form");
+    if (!form) {
+        return;
+    }
+    const addButton = document.getElementById("add-nfe-item-row");
+    if (addButton) {
+        addButton.addEventListener("click", () => addNfeItemRow());
+    }
+    form.addEventListener("input", () => {
+        if (state.nfeWorkflow.lastIssuedInvoiceId) {
+            clearNfeEmissionFeedback();
+        }
+        renderNfeEmissionWorkspace();
+    });
+    form.addEventListener("change", (event) => {
+        if (event.target?.name === "ambiente") {
+            renderNfeEmissionWorkspace();
+        }
+    });
+    ensureNfeItemRows();
+}
+
+function buildNfePayloadFromForm(form) {
+    const raw = objectFromForm(form);
+    const items = getNfeItemsFromForm(form);
+    if (!items.length) {
+        throw new Error("Adicione ao menos um item fiscal para emitir a NF-e.");
+    }
+
+    const totalFromItems = items.reduce(
+        (sum, item) => sum + (Number(item.quantidade || 0) * Number(item.valor_unitario || 0)),
+        0,
+    );
+
+    return {
+        numero_nfe: raw.numero_nfe,
+        cliente_id: Number(raw.cliente_id),
+        valor_total: raw.valor_total || totalFromItems.toFixed(2),
+        data_emissao: raw.data_emissao,
+        data_vencimento: raw.data_vencimento,
+        status: raw.status,
+        gerar_financeiro: raw.gerar_financeiro === "true",
+        observacoes: raw.observacoes || null,
+        natureza_operacao: raw.natureza_operacao || "Venda",
+        ambiente: raw.ambiente || "homologacao",
+        referencia_externa: raw.referencia_externa || null,
+        itens: items,
+    };
+}
+
+function ensureNfeItemRows() {
+    const list = document.getElementById("nfe-items-list");
+    if (!list || list.children.length) {
+        hydrateNfeItemProductOptions();
+        return;
+    }
+    addNfeItemRow();
+}
+
+function addNfeItemRow(item = {}) {
+    const list = document.getElementById("nfe-items-list");
+    if (!list) {
+        return;
+    }
+    const row = document.createElement("div");
+    row.className = "product-item-row nfe-item-row";
+    row.innerHTML = `
+        <label class="product-row-field product-row-product">
+            <span class="product-row-label">Produto</span>
+            <select class="nfe-item-product">
+                <option value="">Produto avulso</option>
+            </select>
+        </label>
+        <label class="product-row-field">
+            <span class="product-row-label">Descricao</span>
+            <input class="nfe-item-description" value="${escapeHtml(item.descricao || "")}" required>
+        </label>
+        <label class="product-row-field">
+            <span class="product-row-label">NCM</span>
+            <input class="nfe-item-ncm" value="${escapeHtml(digitsOnly(item.ncm || "").slice(0, 8))}" maxlength="8" required>
+        </label>
+        <label class="product-row-field">
+            <span class="product-row-label">Quantidade</span>
+            <input class="nfe-item-quantity" type="number" min="0.0001" step="0.0001" value="${escapeHtml(String(item.quantidade || "1"))}" required>
+        </label>
+        <label class="product-row-field">
+            <span class="product-row-label">Valor unitario</span>
+            <input class="nfe-item-unit-price" type="number" min="0.01" step="0.01" value="${escapeHtml(String(item.valor_unitario || ""))}" required>
+        </label>
+        <label class="product-row-field">
+            <span class="product-row-label">CFOP</span>
+            <input class="nfe-item-cfop" value="${escapeHtml(item.cfop || "5102")}">
+        </label>
+        <div class="product-row-actions">
+            <button type="button" class="btn btn-default ghost-button nfe-item-remove">Remover item</button>
+        </div>
+    `;
+    list.appendChild(row);
+    hydrateNfeItemProductOptions(row.querySelector(".nfe-item-product"), item.produto_id || "");
+    bindNfeItemRow(row);
+    if (item.produto_id) {
+        applyProductToNfeItemRow(row, Number(item.produto_id), { preserveProvidedValues: true, item });
+    }
+    recalculateNfeFormTotal();
+}
+
+function bindNfeItemRow(row) {
+    const productSelect = row.querySelector(".nfe-item-product");
+    const removeButton = row.querySelector(".nfe-item-remove");
+    const ncmInput = row.querySelector(".nfe-item-ncm");
+    const valueInputs = row.querySelectorAll(".nfe-item-quantity, .nfe-item-unit-price");
+
+    productSelect?.addEventListener("change", () => {
+        applyProductToNfeItemRow(row, Number(productSelect.value || 0));
+    });
+    removeButton?.addEventListener("click", () => {
+        const list = document.getElementById("nfe-items-list");
+        row.remove();
+        if (list && !list.children.length) {
+            addNfeItemRow();
+        }
+        recalculateNfeFormTotal();
+    });
+    ncmInput?.addEventListener("input", () => {
+        ncmInput.value = digitsOnly(ncmInput.value).slice(0, 8);
+    });
+    valueInputs.forEach((input) => {
+        input.addEventListener("input", () => recalculateNfeFormTotal());
+    });
+}
+
+function hydrateNfeItemProductOptions(selectNode = null, selectedValue = "") {
+    const selects = selectNode ? [selectNode] : Array.from(document.querySelectorAll(".nfe-item-product"));
+    selects.forEach((select) => {
+        if (!select) {
+            return;
+        }
+        const currentValue = String(selectedValue || select.value || "");
+        select.innerHTML = `<option value="">Produto avulso</option>${state.products
+            .map((product) => `<option value="${product.id}">${escapeHtml(product.nome)}</option>`)
+            .join("")}`;
+        if (currentValue) {
+            select.value = currentValue;
+        }
+    });
+}
+
+function applyProductToNfeItemRow(row, productId, options = {}) {
+    const product = state.products.find((item) => item.id === productId);
+    if (!product) {
+        recalculateNfeFormTotal();
+        return;
+    }
+    const descriptionInput = row.querySelector(".nfe-item-description");
+    const ncmInput = row.querySelector(".nfe-item-ncm");
+    const unitPriceInput = row.querySelector(".nfe-item-unit-price");
+    const item = options.item || {};
+
+    descriptionInput.value = options.preserveProvidedValues
+        ? (item.descricao || product.nome || "")
+        : (product.nome || "");
+    ncmInput.value = options.preserveProvidedValues
+        ? digitsOnly(item.ncm || product.ncm || "").slice(0, 8)
+        : digitsOnly(product.ncm || "").slice(0, 8);
+    if (!options.preserveProvidedValues && !unitPriceInput.value) {
+        unitPriceInput.value = Number(product.preco_unitario || 0).toFixed(2);
+    }
+    recalculateNfeFormTotal();
+}
+
+function recalculateNfeFormTotal() {
+    const totalInput = document.querySelector('#nfe-form [name="valor_total"]');
+    if (!totalInput) {
+        return;
+    }
+    const currentValue = Number(totalInput.value || 0);
+    if (currentValue > 0 && document.activeElement === totalInput) {
+        return;
+    }
+    const total = Array.from(document.querySelectorAll("#nfe-items-list .nfe-item-row")).reduce((sum, row) => {
+        const quantity = Number(row.querySelector(".nfe-item-quantity")?.value || 0);
+        const unitPrice = Number(row.querySelector(".nfe-item-unit-price")?.value || 0);
+        return sum + (quantity * unitPrice);
+    }, 0);
+    totalInput.value = total > 0 ? total.toFixed(2) : "";
+}
+
+function getNfeItemsFromForm(form) {
+    return Array.from(form.querySelectorAll(".nfe-item-row"))
+        .map((row) => ({
+            produto_id: row.querySelector(".nfe-item-product").value ? Number(row.querySelector(".nfe-item-product").value) : null,
+            descricao: row.querySelector(".nfe-item-description").value.trim(),
+            ncm: digitsOnly(row.querySelector(".nfe-item-ncm").value || "").slice(0, 8),
+            quantidade: row.querySelector(".nfe-item-quantity").value,
+            valor_unitario: row.querySelector(".nfe-item-unit-price").value,
+            cfop: row.querySelector(".nfe-item-cfop").value.trim() || "5102",
+        }))
+        .filter((item) => item.descricao && item.ncm && item.quantidade && item.valor_unitario);
+}
+
+function renderNfeEmissionWorkspace() {
+    const target = document.getElementById("nfe-emission-workspace");
+    const form = document.getElementById("nfe-form");
+    if (!target || !form) {
+        return;
+    }
+    const readiness = state.sefazReadiness;
+    const currentEnvironment = form.querySelector('[name="ambiente"]')?.value || readiness?.environment || "homologacao";
+    const provider = readiness?.provider || "focus_nfe";
+    const directProvider = provider === "sefaz_direct";
+    const canEmit = directProvider && (currentEnvironment !== "producao" || Boolean(readiness?.xsd_dir));
+    const statusTone = readiness?.ready ? "is-ready" : "is-warning";
+    const notes = Array.isArray(readiness?.notes) ? readiness.notes.slice(0, 3) : [];
+    const currentInvoice = state.editing.nfe ? getEntityByKind("nfe", state.editing.nfe) : null;
+    const saveButton = form.querySelector('[data-save-button="nfe"]');
+
+    if (saveButton) {
+        saveButton.textContent = currentInvoice
+            ? "Salvar alteracoes"
+            : (canEmit ? "Emitir NF-e" : "Salvar NF-e");
+        saveButton.dataset.originalLabel = saveButton.textContent;
+    }
+
+    target.innerHTML = `
+        <section class="nfe-emission-card ${statusTone}">
+            <div class="section-heading compact">
+                <h4>${directProvider ? "Emissao fiscal pronta" : "Emissao em modo integrado"}</h4>
+                <p>${directProvider
+                    ? `Provider ativo: ${escapeHtml(provider)} em ${escapeHtml(currentEnvironment)}.`
+                    : "A tela continua funcional, mas a emissao direta pela SEFAZ nao esta ativa."}</p>
+            </div>
+            <div class="nfe-emission-meta">
+                <span class="orders-stat is-active">${escapeHtml(provider)}</span>
+                <span class="orders-stat">${escapeHtml(currentEnvironment)}</span>
+                <span class="orders-stat">${readiness?.ready ? "Prontidao validada" : "Configuracao parcial"}</span>
+            </div>
+            ${notes.length ? `<div class="nfe-emission-notes">${notes.map((note) => `<p>${escapeHtml(note)}</p>`).join("")}</div>` : ""}
+            ${currentInvoice ? '<p class="origin-note">Edicao local aberta. Os itens fiscais serao reusados do payload salvo quando disponivel.</p>' : ""}
+        </section>
+    `;
+}
+
+function clearNfeEmissionFeedback() {
+    state.nfeWorkflow.lastIssuedInvoiceId = null;
+    renderNfeEmissionFeedback();
+}
+
+function renderNfeEmissionFeedback() {
+    const target = document.getElementById("nfe-save-feedback");
+    if (!target) {
+        return;
+    }
+    const invoice = state.nfeWorkflow.lastIssuedInvoiceId
+        ? getEntityByKind("nfe", state.nfeWorkflow.lastIssuedInvoiceId)
+        : null;
+    if (!invoice) {
+        target.innerHTML = "";
+        target.classList.add("hidden");
+        return;
+    }
+    target.innerHTML = `
+        <section class="work-order-save-card">
+            <div class="section-heading compact">
+                <h4>NF-e emitida com sucesso</h4>
+                <p>Nota ${escapeHtml(invoice.numero_nfe)} vinculada a ${escapeHtml(invoice.cliente?.razao_social || "cliente")}.</p>
+            </div>
+            <div class="work-order-save-meta">
+                <span class="orders-stat is-active">${escapeHtml(invoice.provedor || "nfe")}</span>
+                <span class="orders-stat">${escapeHtml(badgeLabel(invoice.status_processamento || invoice.status))}</span>
+                <span class="orders-stat">${escapeHtml(invoice.finance_entry_id ? `Lancamento #${invoice.finance_entry_id}` : "Sem financeiro")}</span>
+            </div>
+            <div class="work-order-save-actions">
+                <button type="button" class="btn btn-success nfe-sync-status" data-id="${invoice.id}">Consultar status</button>
+                <button type="button" class="btn btn-default ghost-button nfe-download-xml" data-id="${invoice.id}">Baixar XML</button>
+                <button type="button" class="btn btn-default ghost-button nfe-open-pdf" data-id="${invoice.id}">Abrir DANFE</button>
+            </div>
+        </section>
+    `;
+    target.classList.remove("hidden");
+    bindNfeActions();
+}
+
+function badgeLabel(value) {
+    return String(value || "-").replaceAll("_", " ");
 }
 
 function extractPrefixedFields(form, prefix) {
@@ -1344,6 +2778,11 @@ function clearPrefixedFields(form, prefix) {
 
 function hydrateDynamicControls() {
     setSelectOptions(document.querySelector('#finance-form [name="cliente_id"]'), state.customers, "id", "razao_social");
+    setSelectOptions(document.querySelector('#receipt-form [name="cliente_id"]'), state.customers, "id", "razao_social");
+    setSelectOptions(document.querySelector('#nfe-form [name="cliente_id"]'), state.customers, "id", "razao_social");
+    setSelectOptions(document.getElementById("finance-customer-filter"), state.customers, "id", "razao_social");
+    setSelectOptions(document.getElementById("receipt-customer-filter"), state.customers, "id", "razao_social");
+    setSelectOptions(document.getElementById("nfe-customer-filter"), state.customers, "id", "razao_social");
     setSelectOptions(document.querySelector('#work-order-form [name="cliente_id"]'), state.customers, "id", "razao_social");
     setSelectOptions(
         document.querySelector('#work-order-form [name="tecnico_id"]'),
@@ -1358,7 +2797,11 @@ function hydrateDynamicControls() {
         "id",
         "nome",
     );
+    hydrateNfeItemProductOptions();
+    recalculateNfeFormTotal();
+    syncReceiptWorkOrderOptions();
     syncAppointmentWorkOrderOptions();
+    syncFinancialReferenceMonth();
 
     document.querySelectorAll(".product-select").forEach((select) => {
         setSelectOptions(select, state.products, "id", "nome");
@@ -1383,6 +2826,7 @@ function hydrateDynamicControls() {
     );
     syncWorkOrderPickerState();
     renderWorkOrderSelectors();
+    syncProductTaxFields();
 }
 
 function setSelectOptions(select, items, valueKey, labelKey) {
@@ -1567,8 +3011,11 @@ function validate_work_order_form(form) {
 
     const selectedProductIds = new Set();
     const productRows = Array.from(form.querySelectorAll(".product-item-row"));
-    if (!productRows.length) {
-        markNodeInvalid(document.getElementById("products-tab-ordem"), "Adicione pelo menos um produto na ordem.");
+    if (!productRows.length && ["em_execucao", "concluida"].includes(payload.status)) {
+        markNodeInvalid(
+            document.getElementById("products-tab-ordem"),
+            "Adicione pelo menos um produto antes de salvar a OS como em execucao ou concluida.",
+        );
     }
     productRows.forEach((row, index) => {
         const productSelect = row.querySelector(".product-select");
@@ -1615,7 +3062,10 @@ async function save_order(form) {
         },
     );
     resetFormMode("workOrder");
-    await afterMutation("Order saved successfully");
+    await afterMutation(workOrderId ? "OS atualizada com sucesso." : "OS gravada com sucesso.", {
+        kind: "workOrder",
+        entity: result,
+    });
     setWorkOrderWorkspaceView("new");
     state.workOrderWorkflow.lastSavedOrderId = result.id;
     state.workOrderWorkflow.certificateReady = false;
@@ -1762,6 +3212,14 @@ function bindWorkOrderSelectors() {
             }
             if (button.dataset.workOrderAction === "certificate-download") {
                 await generate_certificate(workOrderId, { mode: "download" });
+                return;
+            }
+            if (button.dataset.workOrderAction === "certificate-moldura-preview") {
+                await generate_certificate(workOrderId, { mode: "preview", variant: "moldura" });
+                return;
+            }
+            if (button.dataset.workOrderAction === "certificate-moldura-download") {
+                await generate_certificate(workOrderId, { mode: "download", variant: "moldura" });
             }
         } catch (error) {
             toast(error.message);
@@ -2210,9 +3668,26 @@ async function saveAppointment(form) {
         },
     );
     resetFormMode("appointment");
-    await afterMutation(appointmentId ? "Agendamento atualizado com sucesso." : "Agendamento salvo com sucesso.");
-    switchView("agenda");
+    await afterMutation(buildAppointmentSaveMessage(result, Boolean(appointmentId)), {
+        kind: "appointment",
+        entity: result,
+    });
+    openAppointmentView("operational");
     return result;
+}
+
+function buildAppointmentSaveMessage(appointment, isEditing = false) {
+    const baseMessage = isEditing ? "Agendamento atualizado com sucesso." : "Agendamento salvo com sucesso.";
+    if (isEditing || !appointment) {
+        return baseMessage;
+    }
+    if (appointment.whatsapp_status === "enviado") {
+        return `${baseMessage} WhatsApp enviado ao cliente.`;
+    }
+    if (appointment.whatsapp_status === "falha") {
+        return `${baseMessage} WhatsApp nao enviado: ${appointment.whatsapp_ultimo_erro || "consulte o log do agendamento."}`;
+    }
+    return baseMessage;
 }
 
 function bindAppointmentWorkspace() {
@@ -2677,6 +4152,23 @@ function renderAppointmentCard(item, options = {}) {
     const compact = options.compact || false;
     const linkedWorkOrder = item.os_id ? getEntityByKind("workOrder", item.os_id) : null;
     const isOverdue = item.data_agendamento < todayIso() && ["pendente", "confirmado", "em_deslocamento", "em_atendimento"].includes(item.status);
+    const googleEnabled = Boolean(item.sincronizar_google);
+    const whatsappLogs = Array.isArray(item.whatsapp_logs) ? item.whatsapp_logs : [];
+    const whatsappEnabled = Boolean(item.telefone);
+    const whatsappStatusLabel = item.whatsapp_status ? item.whatsapp_status.replaceAll("_", " ") : "sem envio";
+    const whatsappButtonLabel = whatsappLogs.length ? "Reenviar WhatsApp" : "Enviar WhatsApp";
+    const googleStatusLabel = (item.google_sync_status || "desconectado").replaceAll("_", " ");
+    const googleButtonLabel = googleEnabled
+        ? (item.google_calendar_event_id ? "Atualizar Google" : "Conectar Google")
+        : "Google desativado";
+    const googleMessage = item.google_sync_message
+        ? `<p class="origin-note">${escapeHtml(item.google_sync_message)}</p>`
+        : "";
+    const whatsappMessage = item.whatsapp_ultimo_erro
+        ? `<p class="origin-note">WhatsApp: ${escapeHtml(item.whatsapp_ultimo_erro)}</p>`
+        : (whatsappLogs[0]?.created_at
+            ? `<p class="origin-note">WhatsApp ${escapeHtml(whatsappStatusLabel)} em ${escapeHtml(formatDateTime(whatsappLogs[0].created_at))}.</p>`
+            : "");
     const detailsHtml = linkedWorkOrder
         ? `
             <div class="appointment-linked-assets">
@@ -2700,15 +4192,19 @@ function renderAppointmentCard(item, options = {}) {
                 <div><span class="order-summary-label">Tecnico</span><strong>${escapeHtml(item.tecnico_nome || "Nao definido")}</strong></div>
                 <div><span class="order-summary-label">Duracao</span><strong>${escapeHtml(String(item.duracao_prevista_minutos))} min</strong></div>
                 <div><span class="order-summary-label">Telefone</span><strong>${escapeHtml(item.telefone || "-")}</strong></div>
-                <div><span class="order-summary-label">Google</span><strong>${escapeHtml((item.google_sync_status || "desconectado").replaceAll("_", " "))}</strong></div>
+                <div><span class="order-summary-label">Google</span><strong>${escapeHtml(googleStatusLabel)}</strong></div>
+                <div><span class="order-summary-label">WhatsApp</span><strong>${escapeHtml(whatsappStatusLabel)}</strong></div>
             </div>
             <p class="appointment-card-note">${escapeHtml(item.observacoes || item.observacoes_internas || "Sem observacoes adicionais.")}</p>
+            ${googleMessage}
+            ${whatsappMessage}
             <div class="appointment-status-actions">
                 ${renderAppointmentProgressActions(item)}
             </div>
             <div class="appointment-main-actions">
                 <button type="button" class="btn btn-default ghost-button" data-appointment-action="edit" data-id="${item.id}">Editar / reagendar</button>
-                <button type="button" class="btn btn-default ghost-button" data-appointment-action="sync-google" data-id="${item.id}">Sincronizar Google</button>
+                <button type="button" class="btn btn-default ghost-button" data-appointment-action="send-whatsapp" data-id="${item.id}" ${whatsappEnabled ? "" : "disabled"}>${whatsappButtonLabel}</button>
+                <button type="button" class="btn btn-default ghost-button" data-appointment-action="sync-google" data-id="${item.id}" ${googleEnabled ? "" : "disabled"}>${googleButtonLabel}</button>
                 <button type="button" class="btn btn-default ghost-button" data-appointment-action="open-work-order" data-os-id="${item.os_id || ""}" ${item.os_id ? "" : "disabled"}>Abrir OS</button>
             </div>
             <details class="appointment-details">
@@ -2721,6 +4217,21 @@ function renderAppointmentCard(item, options = {}) {
                         <div><dt>Retorno / revisita</dt><dd>${escapeHtml(item.retorno_revisita || "-")}</dd></div>
                     </dl>
                     ${detailsHtml}
+                    <div class="appointment-history-list">
+                        <div class="section-heading compact">
+                            <h4>Logs de WhatsApp</h4>
+                            <p>Historico de envios automaticos e manuais ao cliente.</p>
+                        </div>
+                        ${whatsappLogs.length
+        ? whatsappLogs.slice().reverse().map((entry) => `
+                            <article class="appointment-history-item">
+                                <strong>${escapeHtml(entry.usuario_nome || (entry.automatico ? "Sistema" : "Usuario"))}</strong>
+                                <span>${formatDateTime(entry.created_at)}</span>
+                                <p>${escapeHtml(`WhatsApp ${entry.status} para ${entry.destino_telefone}${entry.erro ? ` | ${entry.erro}` : ""}`)}</p>
+                            </article>
+                        `).join("")
+        : '<div class="empty-state">Nenhum envio de WhatsApp registrado.</div>'}
+                    </div>
                     <div class="appointment-history-list">
                         ${(item.historico || []).length
         ? item.historico.slice().reverse().map((entry) => `
@@ -2773,7 +4284,7 @@ function renderAppointmentProgressActions(item) {
 function bindAppointmentFilters() {
     document.getElementById("appointment-new-button")?.addEventListener("click", () => {
         resetFormMode("appointment");
-        switchView("agenda");
+        openAppointmentView("new");
     });
     document.getElementById("appointment-search")?.addEventListener("input", (event) => {
         state.filters.appointmentSearch = event.target.value;
@@ -2820,7 +4331,6 @@ function bindAppointmentActions() {
             try {
                 if (action === "edit") {
                     startEditing("appointment", appointmentId);
-                    switchView("agenda");
                     return;
                 }
                 if (action === "open-work-order" && osId) {
@@ -2828,9 +4338,18 @@ function bindAppointmentActions() {
                     return;
                 }
                 if (action === "sync-google") {
-                    await apiFetch(`/api/v1/agendamentos/${appointmentId}/sync-google`, { method: "POST" });
-                    await afterMutation("Agendamento sincronizado com Google Agenda.");
-                    switchView("agenda");
+                    await syncAppointmentWithGoogle(appointmentId);
+                    return;
+                }
+                if (action === "send-whatsapp") {
+                    const result = await apiFetch(`/api/v1/whatsapp/agendamentos/${appointmentId}/enviar`, {
+                        method: "POST",
+                    });
+                    await afterMutation("Mensagem de WhatsApp enviada com sucesso.", {
+                        kind: "appointment",
+                        entity: result,
+                    });
+                    openAppointmentView("operational");
                     return;
                 }
                 if (action === "status") {
@@ -2843,7 +4362,7 @@ function bindAppointmentActions() {
                         }),
                     });
                     await afterMutation("Status do agendamento atualizado.");
-                    switchView("agenda");
+                    openAppointmentView("operational");
                 }
             } catch (error) {
                 toast(error.message);
@@ -2858,6 +4377,26 @@ function bindAppointmentActions() {
             }
         });
     });
+}
+
+async function syncAppointmentWithGoogle(appointmentId) {
+    const result = await apiFetch(`/api/v1/google-calendar/appointments/${appointmentId}/sync`, { method: "POST" });
+    if (result.mode === "oauth_required" && result.authorization_url) {
+        const popup = window.open(
+            result.authorization_url,
+            "syspragas-google-calendar-oauth",
+            "width=640,height=760,menubar=no,toolbar=no,location=yes,resizable=yes,scrollbars=yes,status=no",
+        );
+        if (!popup) {
+            window.location.href = result.authorization_url;
+            return;
+        }
+        popup.focus();
+        toast(result.message || "Conecte sua conta Google para concluir a sincronizacao.");
+        return;
+    }
+    await afterMutation(result.message || "Agendamento sincronizado com Google Agenda.");
+    openAppointmentView("operational");
 }
 
 function openLinkedWorkOrderFromAppointmentForm() {
@@ -2877,6 +4416,7 @@ function duplicateAppointmentAsFollowUp() {
         return;
     }
     resetFormMode("appointment");
+    openAppointmentView("new");
     const form = document.getElementById("appointment-form");
     fillForm(form, {
         cliente_id: String(original.cliente_id),
@@ -2980,17 +4520,18 @@ function renderCustomers() {
 function renderProducts() {
     setTableContent(
         "products-table",
-        ["Produto", "Principio ativo", "Estoque", "Minimo", "Registro", "Acoes"],
+        ["Produto", "NCM", "Tributacao", "Estoque", "Minimo", "Registro", "Acoes"],
         state.products.map((item) => [
-            item.nome,
-            item.principio_ativo,
+            `<div>${escapeHtml(item.nome)}<div class="origin-note">${escapeHtml(item.principio_ativo)}</div></div>`,
+            item.ncm ? `<div>${escapeHtml(item.ncm)}<div class="origin-note">${escapeHtml(item.ncm_descricao || "")}</div></div>` : "-",
+            `<div>ICMS ${escapeHtml(String(item.aliquota_icms || 0))}%<div class="origin-note">IPI ${escapeHtml(String(item.aliquota_ipi || 0))}% | PIS ${escapeHtml(String(item.aliquota_pis || 0))}% | COFINS ${escapeHtml(String(item.aliquota_cofins || 0))}%</div></div>`,
             `${item.estoque_atual}`,
             `${item.estoque_minimo}`,
             item.registro_ms,
             actionButtons("product", item.id),
         ]),
         "Nenhum produto cadastrado.",
-        { nonSortableTargets: [5] },
+        { nonSortableTargets: [6] },
     );
     bindEntityActions("product");
 }
@@ -3269,11 +4810,11 @@ function renderWorkOrderActionPanel(item) {
                         </a>
                         <a href="#" class="subtle-link toolbar-link pdf-link" data-doc="certificado" data-id="${item.id}">
                             <i class="fas fa-shield-alt"></i>
-                            <span>Sanitario</span>
+                            <span>Sanitario padrao</span>
                         </a>
-                        <a href="#" class="subtle-link toolbar-link pdf-link" data-doc="moldura" data-id="${item.id}">
+                        <a href="#" class="subtle-link toolbar-link pdf-link is-featured" data-doc="moldura" data-id="${item.id}">
                             <i class="fas fa-certificate"></i>
-                            <span>Moldura</span>
+                            <span>Moldura recomendada</span>
                         </a>
                     </div>
                 </details>
@@ -3421,8 +4962,8 @@ function renderWorkOrderSaveFeedback() {
     target.innerHTML = `
         <section class="work-order-save-card">
             <div class="section-heading compact">
-                <h4>Order saved successfully</h4>
-                <p>OS ${escapeHtml(workOrder.numero)} pronta para impressao, emissao e download do certificado de dedetizacao.</p>
+                <h4>Ordem salva com sucesso</h4>
+                <p>OS ${escapeHtml(workOrder.numero)} pronta para impressao e para emissao do certificado. A versao de moldura fica em destaque abaixo.</p>
             </div>
             <div class="work-order-save-meta">
                 <span class="orders-stat is-active">${escapeHtml(workOrder.cliente?.razao_social || "Cliente")}</span>
@@ -3430,9 +4971,9 @@ function renderWorkOrderSaveFeedback() {
                 <span class="orders-stat">${state.workOrderWorkflow.certificateReady ? "Certificado pronto" : "Certificado sob demanda"}</span>
             </div>
             <div class="work-order-save-actions">
-                <button type="button" class="btn btn-success" data-work-order-action="print" data-id="${workOrder.id}">Print Order</button>
-                <button type="button" class="btn btn-default ghost-button" data-work-order-action="certificate-preview" data-id="${workOrder.id}">Generate Certificate</button>
-                <button type="button" class="btn btn-default ghost-button" data-work-order-action="certificate-download" data-id="${workOrder.id}">Download Certificate</button>
+                <button type="button" class="btn btn-success" data-work-order-action="print" data-id="${workOrder.id}">Imprimir OS</button>
+                <button type="button" class="btn btn-warning" data-work-order-action="certificate-moldura-preview" data-id="${workOrder.id}">Abrir moldura</button>
+                <button type="button" class="btn btn-default ghost-button" data-work-order-action="certificate-moldura-download" data-id="${workOrder.id}">Baixar moldura</button>
             </div>
         </section>
     `;
@@ -3447,22 +4988,34 @@ async function print_order(workOrderId) {
 
 async function generate_certificate(workOrderId, options = {}) {
     const mode = options.mode || "preview";
-    const blob = await apiFetch(`/api/v1/os/${workOrderId}/certificado-sanitario.pdf`);
+    const variant = options.variant || "standard";
+    const endpoint = variant === "moldura"
+        ? `/api/v1/os/${workOrderId}/certificado-moldura.pdf`
+        : `/api/v1/os/${workOrderId}/certificado-sanitario.pdf`;
+    const blob = await apiFetch(endpoint);
     const workOrder = getEntityByKind("workOrder", workOrderId);
     if (mode === "background") {
         return blob;
     }
     if (mode === "download") {
-        downloadBlob(blob, buildCertificateFilename(workOrder));
+        downloadBlob(blob, buildCertificateFilename(workOrder, variant));
         return blob;
     }
-    openBlobPreview(blob, `Certificado ${workOrder?.numero || workOrderId}`);
+    const titlePrefix = variant === "moldura" ? "Certificado Moldura" : "Certificado";
+    openBlobPreview(blob, `${titlePrefix} ${workOrder?.numero || workOrderId}`);
     return blob;
 }
 
-function buildCertificateFilename(workOrder) {
+function buildCertificateFilename(workOrder, variant = "standard") {
     const customer = sanitizeFilenamePart(workOrder?.cliente?.razao_social || "cliente");
-    return `cert_${workOrder?.id || "os"}_${customer}.pdf`;
+    const suffix = variant === "moldura" ? "moldura" : "padrao";
+    return `cert_${suffix}_${workOrder?.id || "os"}_${customer}.pdf`;
+}
+
+function buildReceiptPdfFilename(receipt) {
+    const receiptNumber = sanitizeFilenamePart(receipt?.numero || receipt?.id || "recibo");
+    const customer = sanitizeFilenamePart(receipt?.cliente?.razao_social || "cliente");
+    return `recibo_${receiptNumber}_${customer}.pdf`;
 }
 
 function sanitizeFilenamePart(value) {
@@ -3530,47 +5083,43 @@ function openBlobPreview(blob, title, options = {}) {
     previewWindow.document.close();
 }
 
+async function openReceiptPdf(receiptId, options = {}) {
+    const receipt = getEntityByKind("receipt", Number(receiptId));
+    const blob = await apiFetch(`/api/v1/recibos/${receiptId}/pdf`);
+    if (options.download) {
+        downloadBlob(blob, buildReceiptPdfFilename(receipt));
+        return;
+    }
+    openBlobPreview(blob, `Recibo ${receipt?.numero || receiptId}`, {
+        printOnLoad: Boolean(options.printOnLoad),
+    });
+}
+
 function renderFinance() {
+    if (!userCanAccessFinance()) {
+        return;
+    }
     renderFinanceSummary();
-    setTableContent(
-        "finance-table",
-        ["Tipo", "Descricao", "Categoria", "Valor", "Pago", "Saldo", "Vencimento", "Status", "Acoes"],
-        state.finance.map((item) => {
-            const payButton = item.status !== "pago" && Number(item.saldo_aberto ?? item.valor) > 0
-                ? actionButton(
-                    "pay-finance",
-                    item.tipo === "receita" ? "Receber" : "Pagar",
-                    `data-id="${item.id}" data-open-balance="${item.saldo_aberto ?? item.valor}"`,
-                )
-                : "";
-            const parcelText = Number(item.total_parcelas || 1) > 1 ? `${item.parcela_atual}/${item.total_parcelas}` : "";
-            const actions = item.os_id
-                ? `<div class="toolbar compact-toolbar">
-                    <div class="toolbar-group">
-                        <span class="origin-note">Gerado pela OS ${item.os_id}</span>
-                        ${parcelText ? `<span class="badge">${escapeHtml(parcelText)}</span>` : ""}
-                    </div>
-                    ${payButton ? `<div class="toolbar-group">${payButton}</div>` : ""}
-                </div>`
-                : actionButtons("finance", item.id, payButton);
-            return [
-                badge(item.tipo, item.tipo === "despesa" ? "warn" : ""),
-                `${escapeHtml(item.descricao)}${parcelText ? `<div class="origin-note">Parcela ${escapeHtml(parcelText)}</div>` : ""}`,
-                item.categoria || item.fornecedor_nome || "-",
-                formatCurrency(item.valor),
-                formatCurrency(item.valor_pago || 0),
-                formatCurrency(item.saldo_aberto ?? item.valor),
-                formatDate(item.vencimento),
-                badge(item.status, item.status === "atrasado" ? "danger" : item.status === "pago" ? "" : "warn"),
-                actions,
-            ];
-        }),
-        "Nenhum lancamento financeiro cadastrado.",
-        { nonSortableTargets: [8], pageLength: 6 },
-    );
+    renderFinanceInsights();
+    renderFinanceEntriesTable();
+    renderReceiptsTable();
+    renderNfeInvoices();
+    renderFinanceReportsIssuedInvoices();
+    renderSimplesNationalPanel();
     renderCashLedger();
     bindEntityActions("finance");
+    bindEntityActions("receipt");
+    bindEntityActions("nfe");
+    bindReceiptActions();
+    bindNfeActions();
     bindQuickActions();
+    bindFinanceFilters();
+    bindReceiptFilters();
+    bindNfeFilters();
+    bindSimplesSummaryRefresh();
+    bindSimplesConfigActions();
+    setFinanceWorkspaceView(state.financeScreen || "lancamentos");
+    setNfeTabView(state.nfeTab || "issue");
 }
 
 function renderFinanceSummary() {
@@ -3604,6 +5153,504 @@ function renderCashLedger() {
         "Nenhuma movimentacao registrada no fluxo de caixa.",
         { pageLength: 6 },
     );
+}
+
+function renderFinanceInsights() {
+    const summary = state.cashFlowSummary || {
+        recebido: 0,
+        pendente: 0,
+        vencido: 0,
+        quantidade_recebida: 0,
+        quantidade_pendente: 0,
+        quantidade_vencida: 0,
+    };
+    const cashSummaryHtml = `
+        <div class="finance-insight-grid">
+            <article class="finance-insight-card">
+                <span>Recebido</span>
+                <strong>${formatCurrency(summary.recebido || 0)}</strong>
+                <small>${summary.quantidade_recebida || 0} titulo(s) com baixa</small>
+            </article>
+            <article class="finance-insight-card">
+                <span>Pendente</span>
+                <strong>${formatCurrency(summary.pendente || 0)}</strong>
+                <small>${summary.quantidade_pendente || 0} titulo(s) em aberto</small>
+            </article>
+            <article class="finance-insight-card is-alert">
+                <span>Vencido</span>
+                <strong>${formatCurrency(summary.vencido || 0)}</strong>
+                <small>${summary.quantidade_vencida || 0} titulo(s) vencido(s)</small>
+            </article>
+        </div>
+    `;
+    ["finance-cashflow-summary", "finance-report-cashflow-summary"].forEach((id) => {
+        const summaryTarget = document.getElementById(id);
+        if (summaryTarget) {
+            summaryTarget.innerHTML = cashSummaryHtml;
+        }
+    });
+
+    const nfeSummaryTarget = document.getElementById("finance-nfe-summary");
+    if (nfeSummaryTarget) {
+        const invoices = state.nfeInvoices || [];
+        const emittedInvoices = invoices.filter((item) => item.status === "emitida");
+        const totalEmitted = emittedInvoices.reduce((total, item) => total + Number(item.valor_total || 0), 0);
+        const generatedTitles = invoices.filter((item) => item.finance_entry_id).length;
+        nfeSummaryTarget.innerHTML = `
+            <div class="finance-insight-grid compact">
+                <article class="finance-insight-card">
+                    <span>NF-e emitidas</span>
+                    <strong>${emittedInvoices.length}</strong>
+                    <small>${formatCurrency(totalEmitted)}</small>
+                </article>
+                <article class="finance-insight-card">
+                    <span>Titulos gerados</span>
+                    <strong>${generatedTitles}</strong>
+                    <small>Integracao financeira automatica</small>
+                </article>
+            </div>
+        `;
+    }
+}
+
+function renderFinanceEntriesTable() {
+    setTableContent(
+        "finance-table",
+        ["Tipo", "Descricao", "Origem", "Valor", "Pago", "Saldo", "Vencimento", "Status", "Acoes"],
+        getFilteredFinanceEntries().map((item) => {
+            const payButton = item.status !== "pago" && Number(item.saldo_aberto ?? item.valor) > 0
+                ? actionButton(
+                    "pay-finance",
+                    item.tipo === "receita" ? "Receber" : "Pagar",
+                    `data-id="${item.id}" data-open-balance="${item.saldo_aberto ?? item.valor}"`,
+                )
+                : "";
+            const parcelText = Number(item.total_parcelas || 1) > 1 ? `${item.parcela_atual}/${item.total_parcelas}` : "";
+            const originLabel = item.nfe_id
+                ? `NF-e ${item.nfe_id}`
+                : item.recibo_id
+                    ? `Recibo ${item.recibo_id}`
+                : item.os_id
+                    ? `OS ${item.os_id}`
+                    : item.origem;
+            const actions = item.os_id || item.nfe_id
+                ? `<div class="toolbar compact-toolbar">
+                    <div class="toolbar-group">
+                        <span class="origin-note">Gerado por ${escapeHtml(originLabel)}</span>
+                        ${parcelText ? `<span class="badge">${escapeHtml(parcelText)}</span>` : ""}
+                    </div>
+                    ${payButton ? `<div class="toolbar-group">${payButton}</div>` : ""}
+                </div>`
+                : item.recibo_id
+                    ? `<div class="toolbar compact-toolbar">
+                        <div class="toolbar-group">
+                            <span class="origin-note">Gerado por ${escapeHtml(originLabel)}</span>
+                        </div>
+                    </div>`
+                : actionButtons("finance", item.id, payButton);
+            return [
+                badge(item.tipo, item.tipo === "despesa" ? "warn" : ""),
+                `<div>${escapeHtml(item.descricao)}${parcelText ? `<div class="origin-note">Parcela ${escapeHtml(parcelText)}</div>` : ""}</div>`,
+                item.nfe_id
+                    ? `<div>${escapeHtml(originLabel)}<div class="origin-note">${escapeHtml(item.categoria || "Conta a receber")}</div></div>`
+                    : item.os_id
+                        ? `<div>${escapeHtml(originLabel)}<div class="origin-note">${escapeHtml(item.categoria || "Servico")}</div></div>`
+                        : item.categoria || item.fornecedor_nome || "-",
+                formatCurrency(item.valor),
+                formatCurrency(item.valor_pago || 0),
+                formatCurrency(item.saldo_aberto ?? item.valor),
+                formatDate(item.vencimento),
+                badge(item.status, item.status === "atrasado" ? "danger" : item.status === "pago" ? "" : "warn"),
+                actions,
+            ];
+        }),
+        "Nenhum lancamento financeiro cadastrado.",
+        { nonSortableTargets: [8], pageLength: 6 },
+    );
+}
+
+function renderReceiptsTable() {
+    setTableContent(
+        "receipts-table",
+        ["Numero", "Cliente", "Data", "Forma", "Valor", "OS", "Financeiro", "Acoes"],
+        getFilteredReceipts().map((item) => [
+            `<div><strong>${escapeHtml(item.numero)}</strong><div class="origin-note">${escapeHtml(item.descricao)}</div></div>`,
+            item.cliente?.razao_social || "-",
+            formatDate(item.data_recebimento),
+            badge(item.forma_pagamento.replaceAll("_", " "), ""),
+            formatCurrency(item.valor),
+            item.os_numero || "-",
+            item.finance_entry_id
+                ? `<div>Lancamento #${item.finance_entry_id}<div class="origin-note">Baixa integrada no caixa</div></div>`
+                : "Nao integrado",
+            renderReceiptActionPanel(item),
+        ]),
+        "Nenhum recibo emitido.",
+        { nonSortableTargets: [7], pageLength: 6 },
+    );
+}
+
+function renderReceiptActionPanel(item) {
+    return `
+        <div class="toolbar compact-toolbar">
+            <div class="toolbar-group">
+                <button type="button" class="btn btn-sm ghost-button receipt-preview-action" data-id="${item.id}">Visualizar</button>
+                <button type="button" class="btn btn-sm ghost-button receipt-print-action" data-id="${item.id}">Imprimir</button>
+                <button type="button" class="btn btn-sm ghost-button receipt-pdf-action" data-id="${item.id}">PDF</button>
+            </div>
+            <div class="toolbar-group">
+                <button type="button" class="btn btn-sm ghost-button action-button secondary edit-entity" data-kind="receipt" data-id="${item.id}">Editar</button>
+                <button type="button" class="btn btn-sm ghost-button action-button danger delete-entity" data-kind="receipt" data-id="${item.id}">Excluir</button>
+            </div>
+        </div>
+    `;
+}
+
+function renderNfeInvoices() {
+    setTableContent(
+        "nfe-table",
+        ["Numero", "Cliente", "Emissao", "Vencimento", "Valor", "Financeiro", "Status", "Acoes"],
+        getFilteredNfeInvoices().map((item) => {
+            const financeInfo = item.finance_entry_id
+                ? `<div>Lancamento #${item.finance_entry_id}<div class="origin-note">Consulta cruzada ativa</div></div>`
+                : "Nao gerado";
+            const fiscalStatus = item.status_processamento || item.status;
+            const statusTone = fiscalStatus === "rejeitado" || item.status === "cancelada"
+                ? "danger"
+                : (fiscalStatus === "autorizado" ? "" : "warn");
+            return [
+                item.numero_nfe,
+                item.cliente?.razao_social || "-",
+                formatDate(item.data_emissao),
+                formatDate(item.data_vencimento),
+                formatCurrency(item.valor_total),
+                financeInfo,
+                `
+                    <div class="nfe-status-stack">
+                        ${badge(item.status, item.status === "cancelada" ? "danger" : "")}
+                        ${badge(fiscalStatus, statusTone)}
+                    </div>
+                `,
+                renderNfeActionPanel(item),
+            ];
+        }),
+        "Nenhuma NF-e registrada.",
+        { nonSortableTargets: [7], pageLength: 6 },
+    );
+}
+
+function renderNfeActionPanel(item) {
+    const canCancel = item.status !== "cancelada";
+    const hasPdf = Boolean(item.pdf_url);
+    const hasXml = Boolean(item.xml_url || item.xml_autorizado || item.xml_enviado);
+    return `
+        <div class="nfe-action-panel">
+            <div class="nfe-action-grid">
+                <button type="button" class="btn btn-sm ghost-button action-button secondary nfe-sync-status" data-id="${item.id}">Consultar</button>
+                <button type="button" class="btn btn-sm ghost-button edit-entity" data-kind="nfe" data-id="${item.id}">Editar</button>
+                <button type="button" class="btn btn-sm ghost-button nfe-download-xml" data-id="${item.id}" ${hasXml ? "" : "disabled"}>XML</button>
+                <button type="button" class="btn btn-sm ghost-button nfe-open-pdf" data-id="${item.id}" ${hasPdf ? "" : "disabled"}>DANFE</button>
+                <button type="button" class="btn btn-sm ghost-button action-button danger nfe-cancel" data-id="${item.id}" ${canCancel ? "" : "disabled"}>Cancelar</button>
+            </div>
+        </div>
+    `;
+}
+
+function renderFinanceReportsIssuedInvoices() {
+    const issuedInvoices = state.nfeInvoices
+        .filter((item) => item.status === "emitida")
+        .sort((left, right) => String(right.data_emissao || "").localeCompare(String(left.data_emissao || "")));
+    setTableContent(
+        "finance-reports-nfe-table",
+        ["Numero", "Cliente", "Emissao", "Valor", "Financeiro", "Status fiscal"],
+        issuedInvoices.map((item) => [
+            item.numero_nfe,
+            item.cliente?.razao_social || "-",
+            formatDate(item.data_emissao),
+            formatCurrency(item.valor_total),
+            item.finance_entry_id
+                ? `<div>Lancamento #${item.finance_entry_id}<div class="origin-note">Integrada ao contas a receber</div></div>`
+                : "Nao gerado",
+            badge(item.status_processamento || item.status, item.status_processamento === "rejeitado" ? "danger" : ""),
+        ]),
+        "Nenhuma NF-e emitida encontrada para relatorio.",
+        { pageLength: 6 },
+    );
+}
+
+function bindReceiptActions() {
+    const tableHost = document.getElementById("receipts-table");
+    if (!tableHost || tableHost.dataset.bound === "true") {
+        return;
+    }
+    tableHost.dataset.bound = "true";
+    tableHost.addEventListener("click", async (event) => {
+        const previewButton = event.target.closest(".receipt-preview-action");
+        if (previewButton) {
+            showReceiptPreview(previewButton.dataset.id);
+            return;
+        }
+
+        const printButton = event.target.closest(".receipt-print-action");
+        if (printButton) {
+            try {
+                await openReceiptPdf(printButton.dataset.id, { printOnLoad: true });
+            } catch (error) {
+                toast(error.message);
+            }
+            return;
+        }
+
+        const pdfButton = event.target.closest(".receipt-pdf-action");
+        if (pdfButton) {
+            try {
+                await openReceiptPdf(pdfButton.dataset.id, { download: true });
+                toast("PDF do recibo gerado com sucesso.");
+            } catch (error) {
+                toast(error.message);
+            }
+        }
+    });
+}
+
+function bindNfeActions() {
+    document.querySelectorAll(".nfe-sync-status").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", async () => {
+            try {
+                const invoice = await apiFetch(`/api/v1/nfe/${button.dataset.id}?sync=true`);
+                await loadAllData();
+                state.nfeWorkflow.lastIssuedInvoiceId = invoice.id;
+                state.nfeTab = "issued";
+                renderNfeEmissionWorkspace();
+                renderNfeEmissionFeedback();
+                toast("Status da NF-e atualizado com sucesso.");
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    });
+
+    document.querySelectorAll(".nfe-cancel").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", async () => {
+            if (button.disabled) {
+                return;
+            }
+            const justification = window.prompt("Informe a justificativa do cancelamento da NF-e:", "Cancelamento solicitado pelo emitente.");
+            if (justification === null) {
+                return;
+            }
+            try {
+                const invoice = await apiFetch(`/api/v1/nfe/${button.dataset.id}`, {
+                    method: "DELETE",
+                    body: JSON.stringify({ justificativa: justification.trim() || null }),
+                });
+                state.nfeWorkflow.lastIssuedInvoiceId = invoice.id;
+                state.nfeTab = "issued";
+                await afterMutation("NF-e cancelada com sucesso.");
+                renderNfeEmissionFeedback();
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    });
+
+    document.querySelectorAll(".nfe-download-xml").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", () => {
+            if (button.disabled) {
+                return;
+            }
+            const invoice = getEntityByKind("nfe", Number(button.dataset.id));
+            if (!invoice) {
+                return;
+            }
+            openNfeXml(invoice);
+        });
+    });
+
+    document.querySelectorAll(".nfe-open-pdf").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", () => {
+            if (button.disabled) {
+                return;
+            }
+            const invoice = getEntityByKind("nfe", Number(button.dataset.id));
+            if (!invoice) {
+                return;
+            }
+            openNfePdf(invoice);
+        });
+    });
+}
+
+function openNfeXml(invoice) {
+    if (invoice.xml_url) {
+        window.open(invoice.xml_url, "_blank", "noopener");
+        return;
+    }
+    const xmlContent = invoice.xml_autorizado || invoice.xml_enviado;
+    if (!xmlContent) {
+        toast("Nenhum XML disponivel para esta NF-e.");
+        return;
+    }
+    const blob = new Blob([xmlContent], { type: "application/xml;charset=utf-8" });
+    downloadBlob(blob, buildNfeXmlFilename(invoice));
+}
+
+function openNfePdf(invoice) {
+    if (!invoice.pdf_url) {
+        toast("Nenhum DANFE disponivel para esta NF-e.");
+        return;
+    }
+    window.open(invoice.pdf_url, "_blank", "noopener");
+}
+
+function buildNfeXmlFilename(invoice) {
+    const customer = sanitizeFilenamePart(invoice?.cliente?.razao_social || "cliente");
+    return `nfe_${invoice?.numero_nfe || invoice?.id || "arquivo"}_${customer}.xml`;
+}
+
+function renderSimplesNationalPanel() {
+    const summaryTarget = document.getElementById("simples-summary-card");
+    if (summaryTarget) {
+        const summary = state.simplesSummary || {
+            referencia: state.filters.simplesReferenceMonth || new Date().toISOString().slice(0, 7),
+            faturamento_bruto: 0,
+            aliquota_aplicada: 0,
+            imposto_estimado: 0,
+            notas_emitidas: 0,
+            anexo: "-",
+        };
+        summaryTarget.innerHTML = `
+            <div class="finance-insight-grid compact">
+                <article class="finance-insight-card">
+                    <span>Referencia</span>
+                    <strong>${escapeHtml(summary.referencia || "-")}</strong>
+                    <small>Anexo ${escapeHtml(summary.anexo || "-")}</small>
+                </article>
+                <article class="finance-insight-card">
+                    <span>Faturamento bruto</span>
+                    <strong>${formatCurrency(summary.faturamento_bruto || 0)}</strong>
+                    <small>${summary.notas_emitidas || 0} NF-e emitida(s)</small>
+                </article>
+                <article class="finance-insight-card">
+                    <span>Aliquota aplicada</span>
+                    <strong>${escapeHtml(String(summary.aliquota_aplicada || 0))}%</strong>
+                    <small>Imposto estimado ${formatCurrency(summary.imposto_estimado || 0)}</small>
+                </article>
+            </div>
+        `;
+    }
+
+    const listTarget = document.getElementById("simples-config-list");
+    if (listTarget) {
+        if (!state.simplesConfigs.length) {
+            listTarget.innerHTML = `<div class="empty-state">Nenhuma configuracao do Simples cadastrada.</div>`;
+            return;
+        }
+        listTarget.innerHTML = state.simplesConfigs.map((item) => `
+            <article class="finance-config-card">
+                <div class="finance-config-card-header">
+                    <strong>${escapeHtml(item.anexo || "Sem anexo")} | ${escapeHtml(String(item.aliquota))}%</strong>
+                    ${badge(item.vigente ? "Vigente" : "Historico", item.vigente ? "" : "warn")}
+                </div>
+                <div class="origin-note">Faixa: ${formatCurrency(item.faixa_faturamento_inicio || 0)} ate ${item.faixa_faturamento_fim ? formatCurrency(item.faixa_faturamento_fim) : "sem limite"}</div>
+                <div class="toolbar compact-toolbar">
+                    <div class="toolbar-group">
+                        <button type="button" class="btn btn-sm ghost-button edit-simples-config" data-id="${item.id}">Editar</button>
+                    </div>
+                </div>
+            </article>
+        `).join("");
+
+        listTarget.querySelectorAll(".edit-simples-config").forEach((button) => {
+            button.addEventListener("click", () => startEditingSimplesConfig(Number(button.dataset.id)));
+        });
+    }
+}
+
+function getFilteredFinanceEntries() {
+    const search = (state.filters.financeSearch || "").trim().toLowerCase();
+    const status = state.filters.financeStatus || "todos";
+    const customerId = state.filters.financeCustomer || "";
+    const startDate = state.filters.financeStartDate || "";
+    const endDate = state.filters.financeEndDate || "";
+    return state.finance.filter((item) => {
+        const customerMatches = !customerId || String(item.cliente_id || "") === String(customerId);
+        const statusMatches = status === "todos" || item.status === status;
+        const dueDate = item.vencimento || "";
+        const startMatches = !startDate || dueDate >= startDate;
+        const endMatches = !endDate || dueDate <= endDate;
+        const searchMatches = !search || [
+            item.descricao,
+            item.referencia,
+            item.categoria,
+            item.fornecedor_nome,
+            item.nfe_id ? `nfe ${item.nfe_id}` : "",
+        ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(search);
+        return customerMatches && statusMatches && startMatches && endMatches && searchMatches;
+    });
+}
+
+function getFilteredNfeInvoices() {
+    const search = (state.filters.nfeSearch || "").trim().toLowerCase();
+    const status = state.filters.nfeStatus || "todos";
+    const customerId = state.filters.nfeCustomer || "";
+    return state.nfeInvoices.filter((item) => {
+        const statusMatches = status === "todos" || item.status === status;
+        const customerMatches = !customerId || String(item.cliente_id || "") === String(customerId);
+        const searchMatches = !search || [
+            item.numero_nfe,
+            item.cliente?.razao_social,
+            item.finance_entry_id ? String(item.finance_entry_id) : "",
+        ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(search);
+        return statusMatches && customerMatches && searchMatches;
+    });
+}
+
+function startEditingSimplesConfig(configId) {
+    const form = document.getElementById("simples-config-form");
+    const config = state.simplesConfigs.find((item) => item.id === configId);
+    if (!form || !config) {
+        return;
+    }
+    openFinanceView("relatorios");
+    fillForm(form, {
+        faixa_faturamento_inicio: config.faixa_faturamento_inicio,
+        faixa_faturamento_fim: config.faixa_faturamento_fim || "",
+        aliquota: config.aliquota,
+        anexo: config.anexo || "",
+        vigente: String(config.vigente),
+        observacoes: config.observacoes || "",
+    });
+    form.dataset.editingId = String(config.id);
+    const note = document.getElementById("simples-config-mode-note");
+    if (note) {
+        note.classList.remove("hidden");
+        note.textContent = `Editando configuracao #${config.id}.`;
+    }
 }
 
 function renderProviderCompanies() {
@@ -3992,19 +6039,8 @@ function bindQuickActions() {
 }
 
 function getEntityByKind(kind, id) {
-    const sourceMap = {
-        customer: state.customers,
-        product: state.products,
-        pest: state.pests,
-        technician: state.technicians,
-        finance: state.finance,
-        workOrder: state.workOrders,
-        appointment: state.appointments,
-        providerCompany: state.providerCompanies,
-        user: state.users,
-        license: state.licenses,
-    };
-    return sourceMap[kind].find((item) => item.id === id) || null;
+    const collection = getEntityCollectionByKind(kind);
+    return collection?.find((item) => item.id === id) || null;
 }
 
 function syncEditingModes() {
@@ -4034,6 +6070,12 @@ function startEditing(kind, id) {
         fillForm(form, { ...item, ativo: String(item.ativo) });
         return;
     }
+    if (kind === "product") {
+        fillForm(form, { ...item, override_tributacao: String(item.override_tributacao) });
+        syncProductTaxFields();
+        hideNcmLiveResults();
+        return;
+    }
     if (kind === "providerCompany") {
         fillForm(form, item);
         Array.from(form.querySelector('[name="usuarios_vinculados_ids"]').options).forEach((option) => {
@@ -4044,6 +6086,7 @@ function startEditing(kind, id) {
         return;
     }
     if (kind === "finance") {
+        openFinanceView("lancamentos");
         fillForm(form, {
             ...item,
             cliente_id: item.cliente_id || "",
@@ -4053,6 +6096,28 @@ function startEditing(kind, id) {
             observacoes: item.observacoes || "",
             total_parcelas: item.total_parcelas || 1,
         });
+        return;
+    }
+    if (kind === "receipt") {
+        openFinanceView("recibos");
+        fillReceiptForm(item);
+        return;
+    }
+    if (kind === "nfe") {
+        clearNfeEmissionFeedback();
+        state.nfeTab = "issue";
+        openFinanceView("nfe");
+        fillForm(form, {
+            ...item,
+            cliente_id: item.cliente_id || "",
+            gerar_financeiro: item.finance_entry_id ? "true" : "false",
+            observacoes: item.observacoes || "",
+            natureza_operacao: "Venda",
+            ambiente: item.ambiente || "homologacao",
+            referencia_externa: item.referencia_externa || "",
+        });
+        fillNfeItemRowsFromInvoice(item);
+        renderNfeEmissionWorkspace();
         return;
     }
     if (kind === "user") {
@@ -4070,14 +6135,13 @@ function startEditing(kind, id) {
         return;
     }
     if (kind === "appointment") {
-        switchView("agenda");
+        openAppointmentView("new");
         fillAppointmentForm(item);
         return;
     }
     if (kind === "workOrder") {
         clearWorkOrderSaveFeedback();
-        switchView("ordens");
-        setWorkOrderWorkspaceView("new");
+        openWorkOrderView("new");
         fillWorkOrderForm(item);
         return;
     }
@@ -4098,11 +6162,29 @@ function resetFormMode(kind) {
     if (kind === "workOrder") {
         clearWorkOrderForm();
         if (wasEditing) {
-            setWorkOrderWorkspaceView("registered");
+            openWorkOrderView("registered");
         }
+    }
+    if (kind === "nfe") {
+        clearNfeEmissionFeedback();
+        const list = document.getElementById("nfe-items-list");
+        if (list) {
+            list.innerHTML = "";
+        }
+        ensureNfeItemRows();
+        renderNfeEmissionWorkspace();
     }
     if (kind === "appointment") {
         clearAppointmentForm();
+        if (wasEditing) {
+            openAppointmentView("operational");
+        }
+    }
+    if (kind === "receipt") {
+        clearReceiptForm();
+        if (wasEditing) {
+            openFinanceView("recibos");
+        }
     }
     if (kind === "providerCompany") {
         state.providerCompanyTab = "dados";
@@ -4116,6 +6198,11 @@ function resetFormMode(kind) {
     if (kind === "user") {
         form.querySelector('[name="password"]').required = true;
     }
+    if (kind === "product") {
+        syncProductTaxFields();
+        updateProductTaxSourceNote("Sem NCM vinculado. Informe um NCM para preencher automaticamente as aliquotas.");
+        hideNcmLiveResults();
+    }
 }
 
 function formIdForKind(kind) {
@@ -4125,6 +6212,8 @@ function formIdForKind(kind) {
         pest: "pest-form",
         technician: "technician-form",
         finance: "finance-form",
+        receipt: "receipt-form",
+        nfe: "nfe-form",
         workOrder: "work-order-form",
         appointment: "appointment-form",
         providerCompany: "provider-company-form",
@@ -4140,6 +6229,8 @@ function saveLabelForKind(kind) {
         pest: "Salvar praga",
         technician: "Salvar tecnico",
         finance: "Salvar lancamento",
+        receipt: "Salvar recibo",
+        nfe: state.sefazReadiness?.provider === "sefaz_direct" ? "Emitir NF-e" : "Salvar NF-e",
         workOrder: "Salvar ordem de servico",
         appointment: "Salvar agendamento",
         providerCompany: "Salvar empresa",
@@ -4202,6 +6293,24 @@ function fillWorkOrderForm(item) {
     renderWorkOrderFormHeader();
 }
 
+function fillReceiptForm(item) {
+    const form = document.getElementById("receipt-form");
+    fillForm(form, {
+        cliente_id: String(item.cliente_id),
+        os_id: item.os_id ? String(item.os_id) : "",
+        data_recebimento: item.data_recebimento,
+        valor: item.valor,
+        forma_pagamento: item.forma_pagamento,
+        descricao: item.descricao || "",
+    });
+    syncReceiptWorkOrderOptions();
+    if (item.os_id) {
+        form.querySelector('[name="os_id"]').value = String(item.os_id);
+    }
+    state.receiptPreview = item;
+    renderReceiptPreview(item);
+}
+
 function fillAppointmentForm(item) {
     const form = document.getElementById("appointment-form");
     fillForm(form, {
@@ -4226,6 +6335,33 @@ function fillAppointmentForm(item) {
     }
     renderAppointmentCustomerSummary();
     renderAppointmentFormHeader();
+}
+
+function fillNfeItemRowsFromInvoice(item) {
+    const list = document.getElementById("nfe-items-list");
+    if (!list) {
+        return;
+    }
+    list.innerHTML = "";
+    let payload = null;
+    try {
+        payload = item?.payload_enviado ? JSON.parse(item.payload_enviado) : null;
+    } catch {
+        payload = null;
+    }
+    const items = Array.isArray(payload?.itens) ? payload.itens : [];
+    if (!items.length) {
+        addNfeItemRow({
+            descricao: item?.observacoes ? `Servico referente a ${item.numero_nfe}` : "",
+            quantidade: "1",
+            valor_unitario: item?.valor_total || "",
+            ncm: "",
+        });
+        renderNfeEmissionWorkspace();
+        return;
+    }
+    items.forEach((entry) => addNfeItemRow(entry));
+    renderNfeEmissionWorkspace();
 }
 
 function renderWorkOrderFormHeader() {
@@ -4275,6 +6411,8 @@ async function deleteEntity(kind, id) {
         pest: "/api/v1/pragas",
         technician: "/api/v1/tecnicos",
         finance: "/api/v1/financeiro",
+        receipt: "/api/v1/recibos",
+        nfe: "/api/v1/nfe",
         workOrder: "/api/v1/os",
         providerCompany: "/api/v1/empresas-prestadoras",
         user: "/api/v1/usuarios",
