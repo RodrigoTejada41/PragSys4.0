@@ -1716,39 +1716,71 @@ def _draw_section_title(pdf: canvas.Canvas, y: float, title: str) -> float:
     return y - 8 * mm
 
 
-def _draw_key_values(pdf: canvas.Canvas, y: float, items: List[tuple]) -> float:
+def _draw_key_values(
+    pdf: canvas.Canvas,
+    y: float,
+    items: List[tuple],
+    *,
+    value_x: float = 58 * mm,
+    font_size: float = 10,
+    row_height: float = 6 * mm,
+    value_width_chars: Optional[int] = None,
+) -> float:
+    import textwrap
+
     pdf.setFillColor(colors.black)
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont("Helvetica", font_size)
     for label, value in items:
-        pdf.setFont("Helvetica-Bold", 10)
+        pdf.setFont("Helvetica-Bold", font_size)
         pdf.drawString(20 * mm, y, f"{label}:")
-        pdf.setFont("Helvetica", 10)
-        pdf.drawString(58 * mm, y, str(value))
-        y -= 6 * mm
+        pdf.setFont("Helvetica", font_size)
+        wrapped_values = textwrap.wrap(str(value), width=value_width_chars) if value_width_chars else [str(value)]
+        wrapped_values = wrapped_values or [""]
+        pdf.drawString(value_x, y, wrapped_values[0])
+        y -= row_height
+        for extra_line in wrapped_values[1:]:
+            pdf.drawString(value_x, y, extra_line)
+            y -= row_height
     return y
 
 
-def _draw_paragraph(pdf: canvas.Canvas, y: float, text: str, width_chars: int = 92) -> float:
+def _draw_paragraph(
+    pdf: canvas.Canvas,
+    y: float,
+    text: str,
+    width_chars: int = 92,
+    *,
+    font_size: float = 10,
+    line_height: float = 5 * mm,
+) -> float:
     import textwrap
 
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont("Helvetica", font_size)
     for line in textwrap.wrap(text or "", width=width_chars):
         pdf.drawString(20 * mm, y, line)
-        y -= 5 * mm
+        y -= line_height
     return y
 
 
-def _draw_bullets(pdf: canvas.Canvas, y: float, items: List[str], width_chars: int = 88) -> float:
+def _draw_bullets(
+    pdf: canvas.Canvas,
+    y: float,
+    items: List[str],
+    width_chars: int = 88,
+    *,
+    font_size: float = 10,
+    line_height: float = 5 * mm,
+) -> float:
     import textwrap
 
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont("Helvetica", font_size)
     for item in items:
         wrapped = textwrap.wrap(item, width=width_chars) or [""]
         pdf.drawString(22 * mm, y, f"- {wrapped[0]}")
-        y -= 5 * mm
+        y -= line_height
         for line in wrapped[1:]:
             pdf.drawString(28 * mm, y, line)
-            y -= 5 * mm
+            y -= line_height
     return y
 
 
@@ -1837,6 +1869,256 @@ def _company_identification_lines() -> List[str]:
         f"Licenca sanitaria: {settings.sanitary_license_number} | validade: {settings.sanitary_license_expiry}",
         f"Licenca ambiental: {settings.environmental_license_number} | validade: {settings.environmental_license_expiry}",
     ]
+
+
+def _company_identification_summary_lines() -> List[str]:
+    settings = get_settings()
+    return [
+        f"Empresa especializada: {settings.company_trade_name} | {settings.company_legal_name}",
+        f"Endereco e contato: {settings.company_address} | Telefone: {settings.company_phone}",
+        f"Licenca sanitaria: {settings.sanitary_license_number} | validade: {settings.sanitary_license_expiry}",
+        f"Licenca ambiental: {settings.environmental_license_number} | validade: {settings.environmental_license_expiry}",
+    ]
+
+
+def _resolve_sanitary_certificate_template_path() -> Optional[Path]:
+    candidate = Path(__file__).resolve().parents[2] / "modelo" / "modelo.png"
+    return candidate if candidate.exists() else None
+
+
+def _split_text_to_width(pdf: canvas.Canvas, text: str, font_name: str, font_size: float, max_width: float) -> List[str]:
+    words = str(text or "").split()
+    if not words:
+        return []
+
+    lines: List[str] = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if pdf.stringWidth(candidate, font_name, font_size) <= max_width:
+            current = candidate
+            continue
+        lines.append(current)
+        current = word
+    lines.append(current)
+    return lines
+
+
+def _draw_centered_text_to_fit(
+    pdf: canvas.Canvas,
+    text: str,
+    *,
+    center_x: float,
+    baseline_y: float,
+    max_width: float,
+    font_name: str,
+    initial_size: float,
+    min_size: float,
+) -> float:
+    size = initial_size
+    while size > min_size and pdf.stringWidth(text, font_name, size) > max_width:
+        size -= 0.5
+    pdf.setFont(font_name, size)
+    pdf.drawCentredString(center_x, baseline_y, text)
+    return size
+
+
+def _draw_centered_paragraph(
+    pdf: canvas.Canvas,
+    text: str,
+    *,
+    center_x: float,
+    top_y: float,
+    max_width: float,
+    font_name: str,
+    font_size: float,
+    leading: float,
+) -> None:
+    lines = _split_text_to_width(pdf, text, font_name, font_size, max_width)
+    if not lines:
+        return
+
+    pdf.setFont(font_name, font_size)
+    current_y = top_y
+    for line in lines:
+        pdf.drawCentredString(center_x, current_y, line)
+        current_y -= leading
+
+
+def _draw_template_certificate_background(pdf: canvas.Canvas, template_path: Path, page_width: float, page_height: float) -> None:
+    pdf.drawImage(ImageReader(str(template_path)), 0, 0, width=page_width, height=page_height, mask="auto")
+
+
+def _classify_food_risk_environment(work_order: WorkOrder) -> str:
+    context_fragments = [
+        str(work_order.local_execucao or ""),
+        str(work_order.observacoes or ""),
+    ]
+    context = " ".join(fragment.lower() for fragment in context_fragments if fragment)
+
+    if any(keyword in context for keyword in ("armaz", "estoq", "deposit", "doca", "exped", "logist")):
+        return "armazenagem e logistica de alimentos, insumos ou embalagens"
+    if any(keyword in context for keyword in ("cozinha", "preparo", "manip", "produc", "refeic", "fracion")):
+        return "manipulacao, preparo ou fracionamento de alimentos"
+    return "potencial de armazenamento, logistica, manipulacao ou circulacao de alimentos"
+
+
+def _short_food_risk_environment_label(risk_environment: str) -> str:
+    if "armazenagem e logistica" in risk_environment:
+        return "armazenagem/logistica de alimentos"
+    if "manipulacao, preparo ou fracionamento" in risk_environment:
+        return "manipulacao/preparo de alimentos"
+    return "ambiente com risco alimentar"
+
+
+def _summarize_certificate_pests(work_order: WorkOrder) -> str:
+    pest_names = [item.praga.nome_comum for item in work_order.pragas if getattr(item, "praga", None) and item.praga.nome_comum]
+    unique_names: List[str] = []
+    for pest_name in pest_names:
+        if pest_name not in unique_names:
+            unique_names.append(pest_name)
+
+    if not unique_names:
+        return "monitoramento preventivo sem praga especifica registrada"
+    if len(unique_names) == 1:
+        return unique_names[0]
+    if len(unique_names) == 2:
+        return f"{unique_names[0]} e {unique_names[1]}"
+    return f"{', '.join(unique_names[:2])} e outros vetores monitorados"
+
+
+def _build_framed_sanitary_certificate_text(work_order: WorkOrder) -> str:
+    risk_environment = _classify_food_risk_environment(work_order)
+    return (
+        "Certificamos, para fins de evidencia sanitaria e rastreabilidade operacional, que o estabelecimento acima "
+        f"identificado, inserido em ambiente com {risk_environment}, recebeu servico especializado de controle de "
+        "vetores e pragas urbanas em conformidade com a RDC 622/2022 e em alinhamento as Boas Praticas Sanitarias "
+        "previstas nas RDC 216/2004 e RDC 275/2002, com foco na seguranca dos alimentos, no controle de contaminacao, "
+        "na minimizacao de riscos a saude e na seguranca ambiental."
+    )
+
+
+def _build_standard_sanitary_certificate_text(work_order: WorkOrder) -> str:
+    risk_environment = _classify_food_risk_environment(work_order)
+    return (
+        f"Certificamos que o estabelecimento de {work_order.cliente.razao_social}, inserido em ambiente com "
+        f"{risk_environment}, recebeu servico tecnico especializado de controle de vetores e pragas urbanas, em "
+        "conformidade com a RDC 622/2022, com foco na seguranca dos alimentos, no controle de contaminacao e na "
+        "minimizacao de riscos a saude."
+    )
+
+
+def _build_standard_sanitary_declaration(work_order: WorkOrder) -> str:
+    return (
+        "Este certificado deve permanecer disponivel para verificacoes internas, auditorias e fiscalizacoes sanitarias, "
+        "como evidencia de rastreabilidade do servico, em alinhamento as boas praticas sanitarias das RDC 216/2004 e "
+        "RDC 275/2002 e as medidas de seguranca ambiental aplicaveis."
+    )
+
+
+def _draw_certificate_corner(pdf: canvas.Canvas, x: float, y: float, *, size: float, mirrored_x: bool = False, mirrored_y: bool = False) -> None:
+    direction_x = -1 if mirrored_x else 1
+    direction_y = -1 if mirrored_y else 1
+    path = pdf.beginPath()
+    path.moveTo(x, y)
+    path.curveTo(
+        x + direction_x * size * 0.18,
+        y + direction_y * size * 0.44,
+        x + direction_x * size * 0.56,
+        y + direction_y * size * 0.58,
+        x + direction_x * size * 0.9,
+        y + direction_y * size * 0.24,
+    )
+    path.moveTo(x + direction_x * size * 0.12, y + direction_y * size * 0.1)
+    path.curveTo(
+        x + direction_x * size * 0.32,
+        y + direction_y * size * 0.02,
+        x + direction_x * size * 0.48,
+        y + direction_y * size * 0.1,
+        x + direction_x * size * 0.5,
+        y + direction_y * size * 0.3,
+    )
+    pdf.drawPath(path)
+    pdf.circle(x + direction_x * size * 0.26, y + direction_y * size * 0.18, size * 0.04, stroke=1, fill=0)
+
+
+def _draw_certificate_flourish(pdf: canvas.Canvas, center_x: float, y: float, span: float) -> None:
+    pdf.line(center_x - span, y, center_x - 20 * mm, y)
+    pdf.line(center_x + 20 * mm, y, center_x + span, y)
+    pdf.circle(center_x, y, 1.4 * mm, stroke=1, fill=0)
+    pdf.circle(center_x - 5 * mm, y, 0.9 * mm, stroke=1, fill=0)
+    pdf.circle(center_x + 5 * mm, y, 0.9 * mm, stroke=1, fill=0)
+    path = pdf.beginPath()
+    path.moveTo(center_x - 14 * mm, y)
+    path.curveTo(center_x - 10 * mm, y + 2 * mm, center_x - 7 * mm, y + 2 * mm, center_x - 4 * mm, y)
+    path.moveTo(center_x + 14 * mm, y)
+    path.curveTo(center_x + 10 * mm, y + 2 * mm, center_x + 7 * mm, y + 2 * mm, center_x + 4 * mm, y)
+    pdf.drawPath(path)
+
+
+def _draw_certificate_info_box(
+    pdf: canvas.Canvas,
+    *,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    title: str,
+    lines: List[str],
+) -> None:
+    pdf.setStrokeColor(colors.HexColor("#c8a75d"))
+    pdf.setFillColor(colors.HexColor("#f8f1e5"))
+    pdf.roundRect(x, y, width, height, 4 * mm, stroke=1, fill=1)
+    pdf.setFillColor(colors.HexColor("#6f5521"))
+    pdf.setFont("Times-Bold", 11)
+    pdf.drawCentredString(x + width / 2, y + height - 7 * mm, title)
+    pdf.setStrokeColor(colors.HexColor("#dcc288"))
+    pdf.line(x + 8 * mm, y + height - 10 * mm, x + width - 8 * mm, y + height - 10 * mm)
+
+    font_name = "Times-Roman"
+    font_size = 9.6
+    leading = 4.2 * mm
+    max_width = width - 16 * mm
+    wrapped_lines: List[str] = []
+    for line in lines:
+        split_lines = _split_text_to_width(pdf, line, font_name, font_size, max_width)
+        wrapped_lines.extend(split_lines or [""])
+
+    max_lines = max(1, int((height - 18 * mm) // leading))
+    if len(wrapped_lines) > max_lines:
+        wrapped_lines = wrapped_lines[:max_lines]
+        last_line = wrapped_lines[-1].rstrip(". ")
+        while last_line and pdf.stringWidth(f"{last_line}...", font_name, font_size) > max_width:
+            last_line = last_line[:-1]
+        wrapped_lines[-1] = f"{last_line.rstrip() or '...'}..."
+
+    text = pdf.beginText(x + 8 * mm, y + height - 15.5 * mm)
+    text.setFont(font_name, font_size)
+    text.setLeading(leading)
+    text.setFillColor(colors.HexColor("#3f3527"))
+    for line in wrapped_lines:
+        text.textLine(line)
+    pdf.drawText(text)
+
+
+def _draw_certificate_badge(pdf: canvas.Canvas, center_x: float, center_y: float, radius: float) -> None:
+    pdf.setFillColor(colors.HexColor("#1f3556"))
+    pdf.setStrokeColor(colors.HexColor("#b3873a"))
+    pdf.setLineWidth(2)
+    pdf.circle(center_x, center_y, radius, stroke=1, fill=1)
+    pdf.setLineWidth(1.2)
+    pdf.setStrokeColor(colors.HexColor("#d7b56b"))
+    pdf.circle(center_x, center_y, radius - 3 * mm, stroke=1, fill=0)
+    pdf.setFillColor(colors.HexColor("#f1d48f"))
+    pdf.setFont("Times-Bold", 8.2)
+    pdf.drawCentredString(center_x, center_y + 4.6 * mm, "VETORES E")
+    pdf.drawCentredString(center_x, center_y + 0.7 * mm, "PRAGAS")
+    pdf.drawCentredString(center_x, center_y - 3.2 * mm, "URBANAS")
+    pdf.setFont("Helvetica-Bold", 5.8)
+    pdf.drawCentredString(center_x, center_y - 8.4 * mm, "RDC 622/2022")
+    pdf.setFillColor(colors.HexColor("#d7b56b"))
+    for offset in (-10 * mm, -5 * mm, 0, 5 * mm, 10 * mm):
+        pdf.circle(center_x + offset, center_y + radius - 7 * mm, 0.8 * mm, stroke=0, fill=1)
 
 
 def generate_work_order_pdf(db: Session, work_order_id: int) -> bytes:
@@ -1974,7 +2256,7 @@ def generate_technical_report_pdf(db: Session, work_order_id: int) -> bytes:
     return buffer.getvalue()
 
 
-def generate_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
+def _generate_standard_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
     work_order = get_work_order(db, work_order_id)
     settings = get_settings()
     buffer = BytesIO()
@@ -1982,18 +2264,15 @@ def generate_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
     y = _draw_document_frame(
         pdf,
         "Certificado Sanitario",
-        "Documento interno emitido conforme requisitos aplicaveis da RDC 622/2022",
+        "Conformidade sanitaria e rastreabilidade operacional",
     )
 
     y = _draw_section_title(pdf, y, "Certificacao")
-    certificate_text = (
-        f"Certificamos que o local atendido para o cliente {work_order.cliente.razao_social} recebeu servico tecnico "
-        f"de controle de pragas urbanas em {work_order.data_execucao.isoformat()}, com acompanhamento do tecnico "
-        f"{work_order.tecnico.nome}, conforme a Ordem de Servico {work_order.numero}."
-    )
-    y = _draw_paragraph(pdf, y, certificate_text)
+    risk_environment = _classify_food_risk_environment(work_order)
+    certificate_text = _build_standard_sanitary_certificate_text(work_order)
+    y = _draw_paragraph(pdf, y, certificate_text, width_chars=108, font_size=9.0, line_height=4.0 * mm)
 
-    y = _draw_section_title(pdf, y - 2 * mm, "Dados do estabelecimento")
+    y = _draw_section_title(pdf, y - 1 * mm, "Dados do estabelecimento")
     y = _draw_key_values(
         pdf,
         y,
@@ -2002,38 +2281,176 @@ def generate_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
             ("CPF/CNPJ", work_order.cliente.cpf_cnpj),
             ("Endereco", f"{work_order.cliente.endereco} - {work_order.cliente.cidade}/{work_order.cliente.estado}"),
             ("Area atendida", work_order.local_execucao),
-            ("Validade tecnica", work_order.garantia_ate.isoformat()),
+            ("Referencia sanitaria", _short_food_risk_environment_label(risk_environment)),
+            ("Data do servico", work_order.data_execucao.strftime("%d/%m/%Y")),
+            ("Validade tecnica", work_order.garantia_ate.strftime("%d/%m/%Y")),
             ("Responsavel tecnico", f"{settings.technical_responsible_name} - {settings.technical_responsible_registry}"),
         ],
+        value_x=55 * mm,
+        font_size=8.8,
+        row_height=4.8 * mm,
+        value_width_chars=48,
     )
 
-    y = _draw_section_title(pdf, y - 2 * mm, "Produtos e pragas cobertas")
+    y = _draw_section_title(pdf, y - 1 * mm, "Escopo e base normativa")
     covered_items = [f"Produto: {item.produto.nome} | Registro MS: {item.produto.registro_ms}" for item in work_order.produtos]
     if work_order.pragas:
         covered_items.extend([f"Praga controlada: {item.praga.nome_comum}" for item in work_order.pragas])
-    y = _draw_bullets(pdf, y, covered_items)
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Declaracao")
-    declaration = (
-        "Este certificado confirma a execucao do servico registrado nesta OS e deve permanecer disponivel "
-        "para fins de controle interno e apresentacao em auditorias ou fiscalizacoes, quando aplicavel."
+    covered_items.extend(
+        [
+            "Escopo sanitario: controle de vetores e pragas urbanas com foco em seguranca alimentar.",
+            "Base normativa: RDC 622/2022, RDC 216/2004 e RDC 275/2002.",
+        ]
     )
-    y = _draw_paragraph(pdf, y, declaration)
+    y = _draw_bullets(pdf, y, covered_items, width_chars=102, font_size=8.9, line_height=4.0 * mm)
 
-    y = _draw_section_title(pdf, y - 2 * mm, "Identificacao da empresa especializada")
-    y = _draw_bullets(pdf, y, _company_identification_lines(), width_chars=84)
+    y = _draw_section_title(pdf, y - 1 * mm, "Declaracao sanitaria")
+    declaration = _build_standard_sanitary_declaration(work_order)
+    y = _draw_paragraph(pdf, y, declaration, width_chars=108, font_size=8.9, line_height=4.0 * mm)
 
-    pdf.setFont("Helvetica-Bold", 12)
+    y = _draw_section_title(pdf, y - 1 * mm, "Empresa especializada")
+    y = _draw_bullets(pdf, y, _company_identification_summary_lines(), width_chars=106, font_size=8.8, line_height=4.0 * mm)
+
+    emission_date = date.today().strftime("%d/%m/%Y")
+    responsible_name = settings.technical_responsible_name
+    if responsible_name == "Responsavel tecnico nao configurado":
+        responsible_name = work_order.tecnico.nome
+
+    pdf.setFillColor(colors.HexColor("#273431"))
+    pdf.setFont("Helvetica-Bold", 10.5)
     pdf.drawCentredString(105 * mm, 38 * mm, "DOCUMENTO EMITIDO PELO SISTEMA SYSPRAGAS")
-    pdf.setFont("Helvetica", 10)
-    pdf.drawString(20 * mm, 24 * mm, "Assinatura do responsavel tecnico: ______________________________")
-    pdf.drawRightString(190 * mm, 24 * mm, "Data de emissao: ______________________________")
+    pdf.setStrokeColor(colors.HexColor("#7f8d86"))
+    pdf.line(26 * mm, 28 * mm, 91 * mm, 28 * mm)
+    pdf.line(119 * mm, 28 * mm, 184 * mm, 28 * mm)
+    pdf.setFillColor(colors.black)
+    _draw_centered_text_to_fit(
+        pdf,
+        responsible_name,
+        center_x=58.5 * mm,
+        baseline_y=21.5 * mm,
+        max_width=60 * mm,
+        font_name="Helvetica",
+        initial_size=8.6,
+        min_size=7.0,
+    )
+    pdf.setFont("Helvetica", 8.6)
+    pdf.drawCentredString(151.5 * mm, 21.5 * mm, emission_date)
+    pdf.setFont("Helvetica-Oblique", 8.1)
+    pdf.drawCentredString(58.5 * mm, 15.2 * mm, "Responsavel tecnico")
+    pdf.drawCentredString(151.5 * mm, 15.2 * mm, "Data de emissao")
     pdf.showPage()
     pdf.save()
     return buffer.getvalue()
 
 
-def generate_framed_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
+def _generate_template_sanitary_certificate_pdf(db: Session, work_order_id: int, template_path: Path) -> bytes:
+    work_order = get_work_order(db, work_order_id)
+    settings = get_settings()
+    buffer = BytesIO()
+    page_width, page_height = landscape(A4)
+    pdf = canvas.Canvas(buffer, pagesize=(page_width, page_height))
+    pdf.setTitle("Certificado Sanitario")
+
+    _draw_template_certificate_background(pdf, template_path, page_width, page_height)
+
+    overlay_color = colors.HexColor("#f7f1e6")
+    overlay_boxes = [
+        (44 * mm, 118 * mm, 210 * mm, 18 * mm),
+        (44 * mm, 79 * mm, 210 * mm, 38 * mm),
+        (72 * mm, 55 * mm, 74 * mm, 31 * mm),
+        (146 * mm, 55 * mm, 10 * mm, 31 * mm),
+        (160 * mm, 55 * mm, 92 * mm, 31 * mm),
+        (84 * mm, 13 * mm, 54 * mm, 14 * mm),
+        (186 * mm, 13 * mm, 66 * mm, 14 * mm),
+    ]
+    pdf.setFillColor(overlay_color)
+    for x, y, width, height in overlay_boxes:
+        pdf.roundRect(x, y, width, height, 2 * mm, stroke=0, fill=1)
+
+    client_name = str(work_order.cliente.razao_social or "").upper()
+    pdf.setFillColor(colors.HexColor("#3e3732"))
+    _draw_centered_text_to_fit(
+        pdf,
+        client_name,
+        center_x=page_width / 2,
+        baseline_y=126.5 * mm,
+        max_width=200 * mm,
+        font_name="Times-Bold",
+        initial_size=18,
+        min_size=11,
+    )
+
+    certificate_text = (
+        "Certificamos que o estabelecimento acima identificado recebeu servico tecnico "
+        "especializado de controle de pragas urbanas, executado em conformidade com os "
+        "requisitos sanitarios aplicaveis, conforme registro da ordem de servico emitida."
+    )
+    _draw_centered_paragraph(
+        pdf,
+        certificate_text,
+        center_x=page_width / 2,
+        top_y=103 * mm,
+        max_width=180 * mm,
+        font_name="Times-Roman",
+        font_size=11.5,
+        leading=5.2 * mm,
+    )
+
+    left_info_lines = [
+        f"CNPJ/CPF: {work_order.cliente.cpf_cnpj}",
+        f"Endereco: {work_order.cliente.endereco}",
+        f"{work_order.cliente.cidade}/{work_order.cliente.estado}",
+    ]
+    right_info_lines = [
+        f"Data do servico: {work_order.data_execucao.strftime('%d/%m/%Y')}",
+        f"Validade tecnica: {work_order.garantia_ate.strftime('%d/%m/%Y')}",
+        f"Ordem de Servico: {work_order.numero}",
+    ]
+
+    pdf.setFillColor(colors.HexColor("#4b433d"))
+    left_text = pdf.beginText(81 * mm, 67.5 * mm)
+    left_text.setFont("Times-Roman", 10.6)
+    left_text.setLeading(4.7 * mm)
+    for line in left_info_lines:
+        left_text.textLine(line)
+    pdf.drawText(left_text)
+
+    right_text = pdf.beginText(171 * mm, 67.5 * mm)
+    right_text.setFont("Times-Roman", 10.6)
+    right_text.setLeading(4.7 * mm)
+    for line in right_info_lines:
+        right_text.textLine(line)
+    pdf.drawText(right_text)
+
+    emission_date = date.today().strftime("%d/%m/%Y")
+    responsible_name = settings.technical_responsible_name
+    if responsible_name == "Responsavel tecnico nao configurado":
+        responsible_name = work_order.tecnico.nome
+
+    pdf.setFillColor(colors.HexColor("#3e3732"))
+    pdf.setFont("Times-Roman", 11)
+    pdf.drawCentredString(111 * mm, 18.5 * mm, emission_date)
+    _draw_centered_text_to_fit(
+        pdf,
+        responsible_name,
+        center_x=219 * mm,
+        baseline_y=18.5 * mm,
+        max_width=58 * mm,
+        font_name="Times-Roman",
+        initial_size=11,
+        min_size=8,
+    )
+
+    pdf.showPage()
+    pdf.save()
+    return buffer.getvalue()
+
+
+def generate_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
+    return _generate_standard_sanitary_certificate_pdf(db, work_order_id)
+
+
+def _generate_ornamental_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
     work_order = get_work_order(db, work_order_id)
     settings = get_settings()
     buffer = BytesIO()
@@ -2108,3 +2525,173 @@ def generate_framed_sanitary_certificate_pdf(db: Session, work_order_id: int) ->
     pdf.showPage()
     pdf.save()
     return buffer.getvalue()
+
+
+def _generate_premium_framed_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
+    work_order = get_work_order(db, work_order_id)
+    settings = get_settings()
+    buffer = BytesIO()
+    width, height = landscape(A4)
+    pdf = canvas.Canvas(buffer, pagesize=(width, height))
+    pdf.setTitle("Certificado Sanitario para Moldura")
+
+    paper = colors.HexColor("#f6efe1")
+    gold = colors.HexColor("#a97821")
+    gold_soft = colors.HexColor("#d7b15d")
+    ink = colors.HexColor("#3a2d22")
+    accent = colors.HexColor("#8a6420")
+
+    pdf.setFillColor(paper)
+    pdf.rect(0, 0, width, height, stroke=0, fill=1)
+
+    pdf.setStrokeColor(gold)
+    pdf.setLineWidth(3)
+    pdf.rect(8 * mm, 8 * mm, width - 16 * mm, height - 16 * mm, stroke=1, fill=0)
+    pdf.setLineWidth(1.2)
+    pdf.rect(13 * mm, 13 * mm, width - 26 * mm, height - 26 * mm, stroke=1, fill=0)
+    pdf.setLineWidth(0.8)
+    pdf.rect(18 * mm, 18 * mm, width - 36 * mm, height - 36 * mm, stroke=1, fill=0)
+
+    pdf.setStrokeColor(gold)
+    _draw_certificate_corner(pdf, 24 * mm, height - 24 * mm, size=20 * mm)
+    _draw_certificate_corner(pdf, width - 24 * mm, height - 24 * mm, size=20 * mm, mirrored_x=True)
+    _draw_certificate_corner(pdf, 24 * mm, 24 * mm, size=20 * mm, mirrored_y=True)
+    _draw_certificate_corner(pdf, width - 24 * mm, 24 * mm, size=20 * mm, mirrored_x=True, mirrored_y=True)
+
+    pdf.setStrokeColor(gold_soft)
+    _draw_certificate_flourish(pdf, width / 2, height - 27 * mm, 78 * mm)
+    _draw_certificate_flourish(pdf, width / 2, 27 * mm, 78 * mm)
+
+    company_name = (settings.company_name or settings.company_trade_name or settings.company_legal_name).upper()
+    pdf.setFillColor(accent)
+    pdf.setFont("Times-Bold", 16)
+    pdf.drawCentredString(width / 2, height - 38 * mm, company_name[:48])
+
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Bold", 30)
+    pdf.drawCentredString(width / 2, height - 55 * mm, "CERTIFICADO SANITARIO")
+    pdf.setFillColor(gold)
+    pdf.setFont("Times-Italic", 14)
+    pdf.drawCentredString(width / 2, height - 66 * mm, "Certificado de Conformidade Sanitaria")
+
+    pdf.setStrokeColor(gold_soft)
+    pdf.line(66 * mm, height - 73 * mm, width - 66 * mm, height - 73 * mm)
+
+    pdf.setFillColor(colors.HexColor("#fbf7ee"))
+    pdf.setStrokeColor(colors.HexColor("#ead3a4"))
+    pdf.roundRect(41 * mm, height - 101 * mm, width - 82 * mm, 15 * mm, 3 * mm, stroke=1, fill=1)
+    pdf.setFillColor(ink)
+    _draw_centered_text_to_fit(
+        pdf,
+        str(work_order.cliente.razao_social or "").upper(),
+        center_x=width / 2,
+        baseline_y=height - 94 * mm,
+        max_width=width - 96 * mm,
+        font_name="Times-Bold",
+        initial_size=20,
+        min_size=12,
+    )
+
+    risk_environment = _classify_food_risk_environment(work_order)
+    certificate_text = _build_framed_sanitary_certificate_text(work_order)
+    pdf.setFillColor(ink)
+    _draw_centered_paragraph(
+        pdf,
+        certificate_text,
+        center_x=width / 2,
+        top_y=height - 109 * mm,
+        max_width=181 * mm,
+        font_name="Times-Roman",
+        font_size=10.4,
+        leading=4.7 * mm,
+    )
+
+    _draw_certificate_badge(pdf, 47 * mm, 58 * mm, 15.8 * mm)
+
+    left_lines = [
+        f"CNPJ/CPF: {work_order.cliente.cpf_cnpj}",
+        f"Endereco: {work_order.cliente.endereco}, {work_order.cliente.cidade}/{work_order.cliente.estado}",
+        f"Area atendida: {work_order.local_execucao}",
+        f"Ambiente critico: {risk_environment}",
+    ]
+    right_lines = [
+        "Escopo: controle de vetores e pragas urbanas",
+        f"Alvos monitorados: {_summarize_certificate_pests(work_order)}",
+        "Base legal: RDC 622/2022, RDC 216/2004 e RDC 275/2002",
+        f"Execucao: {work_order.data_execucao.strftime('%d/%m/%Y')} | OS: {work_order.numero}",
+        f"Tecnico executor: {work_order.tecnico.nome}",
+        f"Validade tecnica: {work_order.garantia_ate.strftime('%d/%m/%Y')}",
+    ]
+
+    _draw_certificate_info_box(
+        pdf,
+        x=74 * mm,
+        y=40 * mm,
+        width=82 * mm,
+        height=42 * mm,
+        title="Enquadramento Sanitario",
+        lines=left_lines,
+    )
+    _draw_certificate_info_box(
+        pdf,
+        x=163 * mm,
+        y=40 * mm,
+        width=87 * mm,
+        height=42 * mm,
+        title="Rastreabilidade Tecnica",
+        lines=right_lines,
+    )
+
+    pdf.setStrokeColor(gold_soft)
+    pdf.line(74 * mm, 40 * mm, width - 31 * mm, 40 * mm)
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Italic", 9.6)
+    pdf.drawCentredString(
+        width / 2,
+        35 * mm,
+        "Seguranca dos alimentos, controle de contaminacao, minimizacao de riscos a saude e seguranca ambiental.",
+    )
+    pdf.setFont("Times-Roman", 8.9)
+    pdf.drawCentredString(
+        width / 2,
+        29 * mm,
+        (
+            f"Licenca sanitaria: {settings.sanitary_license_number} | "
+            f"Licenca ambiental: {settings.environmental_license_number} | "
+            "Documento tecnico sem implicar endosso oficial."
+        ),
+    )
+
+    emission_date = date.today().strftime("%d/%m/%Y")
+    responsible_name = settings.technical_responsible_name
+    if responsible_name == "Responsavel tecnico nao configurado":
+        responsible_name = work_order.tecnico.nome
+
+    pdf.setStrokeColor(colors.HexColor("#8f7650"))
+    pdf.line(84 * mm, 31 * mm, 132 * mm, 31 * mm)
+    pdf.line(width - 116 * mm, 31 * mm, width - 56 * mm, 31 * mm)
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Roman", 10)
+    pdf.drawCentredString(108 * mm, 24 * mm, emission_date)
+    pdf.setFont("Times-Italic", 9.6)
+    pdf.drawCentredString(108 * mm, 10.5 * mm, "Data de emissao")
+    _draw_centered_text_to_fit(
+        pdf,
+        responsible_name,
+        center_x=width - 86 * mm,
+        baseline_y=24 * mm,
+        max_width=52 * mm,
+        font_name="Times-Roman",
+        initial_size=10.5,
+        min_size=8,
+    )
+    pdf.setFont("Times-Italic", 9.6)
+    pdf.drawCentredString(width - 86 * mm, 10.5 * mm, "Responsavel tecnico")
+
+    pdf.showPage()
+    pdf.save()
+    return buffer.getvalue()
+
+
+def generate_framed_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
+    return _generate_premium_framed_sanitary_certificate_pdf(db, work_order_id)
