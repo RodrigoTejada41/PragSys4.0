@@ -172,6 +172,113 @@ def test_create_work_order_requires_stock(client, auth_headers):
     assert "Estoque insuficiente" in os_response.json()["detail"]
 
 
+def test_create_open_work_order_allows_empty_products(client, auth_headers):
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Sem Produto",
+            "cpf_cnpj": "88888888000100",
+            "endereco": "Rua Sem Produto, 10",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11955550000",
+            "contato": "Patricia",
+        },
+    ).json()
+
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Cadastro Inicial",
+            "registro": "TEC-SEM-PROD",
+            "telefone": "11944440000",
+            "ativo": True,
+        },
+    ).json()
+
+    os_response = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "numero": "OS-SEM-PRODUTO",
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": "2026-03-20",
+            "hora_inicio": "10:00:00",
+            "local_execucao": "Area externa",
+            "garantia_ate": "2026-04-20",
+            "status": "aberta",
+            "valor_servico": "120.00",
+            "produtos": [],
+            "pragas_ids": [],
+            "gerar_financeiro": True,
+            "gerar_agendamento": False,
+        },
+    )
+
+    assert os_response.status_code == 200
+    data = os_response.json()
+    assert data["numero"] == "OS-SEM-PRODUTO"
+    assert data["produtos"] == []
+
+    financeiro_response = client.get("/api/v1/financeiro", headers=auth_headers)
+    assert financeiro_response.status_code == 200
+    assert len(financeiro_response.json()) == 1
+    assert Decimal(financeiro_response.json()[0]["valor"]) == Decimal("120.00")
+
+
+def test_create_in_progress_work_order_requires_products(client, auth_headers):
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Status Sem Produto",
+            "cpf_cnpj": "77777777000100",
+            "endereco": "Rua Status, 20",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11933330000",
+            "contato": "Marcos",
+        },
+    ).json()
+
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Status",
+            "registro": "TEC-STATUS",
+            "telefone": "11922220000",
+            "ativo": True,
+        },
+    ).json()
+
+    os_response = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "numero": "OS-STATUS-SEM-PROD",
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": "2026-03-20",
+            "hora_inicio": "11:00:00",
+            "local_execucao": "Area tecnica",
+            "garantia_ate": "2026-04-20",
+            "status": "em_execucao",
+            "valor_servico": "120.00",
+            "produtos": [],
+            "pragas_ids": [],
+            "gerar_financeiro": False,
+            "gerar_agendamento": False,
+        },
+    )
+
+    assert os_response.status_code == 400
+    assert "ao menos um produto" in os_response.json()["detail"].lower()
+
+
 def test_create_work_order_rejects_duplicate_products(client, auth_headers):
     cliente = client.post(
         "/api/v1/clientes",

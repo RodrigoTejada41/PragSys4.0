@@ -1327,8 +1327,11 @@ def _validate_work_order_payload(
     customer = _get_customer_or_fail(db, payload.cliente_id)
     _get_technician_or_fail(db, payload.tecnico_id, require_active=True)
 
-    if not payload.produtos:
-        raise BusinessRuleViolation("A OS deve possuir ao menos um produto utilizado.")
+    target_status = _enum_value(payload.status)
+    if not payload.produtos and target_status in {"em_execucao", "concluida"}:
+        raise BusinessRuleViolation(
+            "A OS precisa possuir ao menos um produto antes de ser marcada como em execucao ou concluida."
+        )
 
     seen_product_ids = set()
     for item in payload.produtos:
