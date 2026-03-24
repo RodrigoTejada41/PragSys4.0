@@ -18,6 +18,17 @@ class FinanceStatus(str, Enum):
     ATRASADO = "atrasado"
 
 
+class ReceiptPaymentMethod(str, Enum):
+    DINHEIRO = "dinheiro"
+    PIX = "pix"
+    TRANSFERENCIA = "transferencia"
+    CARTAO_CREDITO = "cartao_credito"
+    CARTAO_DEBITO = "cartao_debito"
+    BOLETO = "boleto"
+    CHEQUE = "cheque"
+    OUTROS = "outros"
+
+
 class CashFlowType(str, Enum):
     ENTRADA = "entrada"
     SAIDA = "saida"
@@ -57,3 +68,27 @@ class GoogleSyncStatus(str, Enum):
     SINCRONIZADO = "sincronizado"
     FALHA = "falha"
     DESCONECTADO = "desconectado"
+
+
+class WhatsAppDeliveryStatus(str, Enum):
+    ENVIADO = "enviado"
+    FALHA = "falha"
+
+
+class NfeStatus(str, Enum):
+    EMITIDA = "emitida"
+    CANCELADA = "cancelada"
+
+
+class NfeEnvironment(str, Enum):
+    HOMOLOGACAO = "homologacao"
+    PRODUCAO = "producao"
+
+
+class NfeProcessingStatus(str, Enum):
+    PENDENTE_ENVIO = "pendente_envio"
+    PROCESSANDO = "processando"
+    AUTORIZADO = "autorizado"
+    REJEITADO = "rejeitado"
+    CANCELADO = "cancelado"
+    ERRO_INTEGRACAO = "erro_integracao"

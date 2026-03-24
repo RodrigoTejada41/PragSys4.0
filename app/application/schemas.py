@@ -1,6 +1,6 @@
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,8 +11,13 @@ from app.domain.enums import (
     FinanceStatus,
     FinanceType,
     GoogleSyncStatus,
+    NfeEnvironment,
+    NfeProcessingStatus,
     LicenseStatus,
+    NfeStatus,
+    ReceiptPaymentMethod,
     UserRole,
+    WhatsAppDeliveryStatus,
     WorkOrderStatus,
 )
 
@@ -66,6 +71,9 @@ class ProviderCompanyRead(ProviderCompanyBase):
     id: int
     usuarios_vinculados_ids: List[int] = Field(default_factory=list)
     usuarios_vinculados_nomes: List[str] = Field(default_factory=list)
+    google_calendar_id: Optional[str] = None
+    google_account_email: Optional[str] = None
+    google_connected: bool = False
 
 
 class UserCreate(BaseModel):
@@ -171,6 +179,13 @@ class ProductBase(BaseModel):
     toxicidade: str
     concentracao: str
     registro_ms: str
+    ncm: Optional[str] = None
+    ncm_descricao: Optional[str] = None
+    aliquota_icms: Decimal = Field(default=Decimal("0.0000"), ge=0)
+    aliquota_ipi: Decimal = Field(default=Decimal("0.0000"), ge=0)
+    aliquota_pis: Decimal = Field(default=Decimal("0.0000"), ge=0)
+    aliquota_cofins: Decimal = Field(default=Decimal("0.0000"), ge=0)
+    override_tributacao: bool = False
     estoque_atual: Decimal = Field(default=Decimal("0.00"), ge=0)
     estoque_minimo: Decimal = Field(default=Decimal("0.00"), ge=0)
 
@@ -187,6 +202,24 @@ class ProductRead(ProductBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+
+
+class NcmTaxProfileRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    codigo: str
+    descricao: str
+    aliquota_icms: Decimal
+    aliquota_ipi: Decimal
+    aliquota_pis: Decimal
+    aliquota_cofins: Decimal
+    fonte_dados: str
+    updated_at: datetime
+
+
+class NcmAutocompleteRead(BaseModel):
+    codigo: str
+    descricao: str
 
 
 class ProductXmlImportItemRead(BaseModel):
@@ -290,6 +323,7 @@ class FinanceEntryBase(BaseModel):
     observacoes: Optional[str] = None
     cliente_id: Optional[int] = None
     os_id: Optional[int] = None
+    nfe_id: Optional[int] = None
 
 
 class FinanceEntryCreate(FinanceEntryBase):
@@ -307,6 +341,208 @@ class FinanceEntryRead(FinanceEntryBase):
     valor_pago: Decimal
     saldo_aberto: Decimal
     data_pagamento: Optional[date] = None
+    recibo_id: Optional[int] = None
+
+
+class ReceiptHistoryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    usuario_id: Optional[int] = None
+    usuario_nome: Optional[str] = None
+    acao: str
+    detalhes: Optional[str] = None
+    created_at: datetime
+
+
+class ReceiptBase(BaseModel):
+    cliente_id: int
+    os_id: Optional[int] = None
+    valor: Decimal = Field(gt=0)
+    forma_pagamento: ReceiptPaymentMethod
+    descricao: str = Field(min_length=5, max_length=2000)
+    data_recebimento: date
+
+
+class ReceiptCreate(ReceiptBase):
+    pass
+
+
+class ReceiptUpdate(ReceiptBase):
+    pass
+
+
+class ReceiptPreviewRead(BaseModel):
+    cliente_id: int
+    cliente_nome: str
+    cliente_documento: str
+    os_id: Optional[int] = None
+    os_numero: Optional[str] = None
+    valor: Decimal
+    valor_formatado: str
+    valor_por_extenso: str
+    forma_pagamento: ReceiptPaymentMethod
+    forma_pagamento_label: str
+    descricao: str
+    data_recebimento: date
+    data_recebimento_formatada: str
+    texto_formal: str
+
+
+class ReceiptRead(ReceiptBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    numero: str
+    valor_por_extenso: str
+    texto_formal: str
+    cliente: CustomerRead
+    os_numero: Optional[str] = None
+    finance_entry_id: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+    historico: List[ReceiptHistoryRead] = Field(default_factory=list)
+
+
+class FinanceCashFlowSummaryRead(BaseModel):
+    periodo: str
+    recebido: Decimal
+    pendente: Decimal
+    vencido: Decimal
+    quantidade_recebida: int
+    quantidade_pendente: int
+    quantidade_vencida: int
+
+
+class SimplesNationalConfigBase(BaseModel):
+    faixa_faturamento_inicio: Decimal = Field(default=Decimal("0.00"), ge=0)
+    faixa_faturamento_fim: Optional[Decimal] = Field(default=None, ge=0)
+    aliquota: Decimal = Field(gt=0)
+    anexo: Optional[str] = None
+    vigente: bool = True
+    observacoes: Optional[str] = None
+
+
+class SimplesNationalConfigCreate(SimplesNationalConfigBase):
+    pass
+
+
+class SimplesNationalConfigUpdate(SimplesNationalConfigBase):
+    pass
+
+
+class SimplesNationalConfigRead(SimplesNationalConfigBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class SimplesNationalMonthlySummaryRead(BaseModel):
+    referencia: str
+    faturamento_bruto: Decimal
+    aliquota_aplicada: Decimal
+    anexo: Optional[str] = None
+    imposto_estimado: Decimal
+    notas_emitidas: int
+
+
+class NfeInvoiceBase(BaseModel):
+    numero_nfe: str
+    cliente_id: int
+    valor_total: Decimal = Field(gt=0)
+    data_emissao: date
+    data_vencimento: date
+    status: NfeStatus = NfeStatus.EMITIDA
+    observacoes: Optional[str] = None
+
+
+class NfeItemPayload(BaseModel):
+    descricao: str
+    ncm: str
+    quantidade: Decimal = Field(gt=0)
+    valor_unitario: Decimal = Field(gt=0)
+    produto_id: Optional[int] = None
+    cfop: Optional[str] = None
+    unidade_comercial: Optional[str] = None
+    aliquota_icms: Optional[Decimal] = Field(default=None, ge=0)
+    aliquota_ipi: Optional[Decimal] = Field(default=None, ge=0)
+    aliquota_pis: Optional[Decimal] = Field(default=None, ge=0)
+    aliquota_cofins: Optional[Decimal] = Field(default=None, ge=0)
+
+
+class NfeInvoiceCreate(NfeInvoiceBase):
+    gerar_financeiro: bool = True
+    natureza_operacao: str = "Venda"
+    ambiente: NfeEnvironment = NfeEnvironment.HOMOLOGACAO
+    referencia_externa: Optional[str] = None
+    webhook_url: Optional[str] = None
+    nome_emitente: Optional[str] = None
+    cnpj_emitente: Optional[str] = None
+    nome_destinatario: Optional[str] = None
+    cpf_destinatario: Optional[str] = None
+    cnpj_destinatario: Optional[str] = None
+    itens: List[NfeItemPayload] = Field(default_factory=list)
+    payload_externo: Optional[dict[str, Any]] = None
+
+
+class NfeInvoiceUpdate(NfeInvoiceBase):
+    webhook_url: Optional[str] = None
+    referencia_externa: Optional[str] = None
+    ambiente: NfeEnvironment = NfeEnvironment.HOMOLOGACAO
+
+
+class NfeCancelRequest(BaseModel):
+    justificativa: Optional[str] = None
+
+
+class NfeWebhookEvent(BaseModel):
+    referencia: str
+    status: Optional[str] = None
+    chave_nfe: Optional[str] = None
+    caminho_xml_nota_fiscal: Optional[str] = None
+    caminho_danfe: Optional[str] = None
+    mensagem_sefaz: Optional[str] = None
+    payload: Optional[dict[str, Any]] = None
+
+
+class NfeInvoiceRead(NfeInvoiceBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    cliente: CustomerRead
+    finance_entry_id: Optional[int] = None
+    referencia_externa: Optional[str] = None
+    ambiente: Optional[NfeEnvironment] = None
+    provedor: Optional[str] = None
+    status_processamento: NfeProcessingStatus
+    status_externo: Optional[str] = None
+    mensagem_retorno: Optional[str] = None
+    chave_nfe: Optional[str] = None
+    protocolo_autorizacao: Optional[str] = None
+    recibo_lote: Optional[str] = None
+    lote_id: Optional[str] = None
+    xml_url: Optional[str] = None
+    pdf_url: Optional[str] = None
+    payload_enviado: Optional[str] = None
+    xml_enviado: Optional[str] = None
+    xml_autorizado: Optional[str] = None
+    webhook_url: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SefazDirectReadinessRead(BaseModel):
+    ready: bool
+    provider: str
+    environment: str
+    uf: Optional[str] = None
+    certificate_path: Optional[str] = None
+    xsd_dir: Optional[str] = None
+    required_items: List[str] = Field(default_factory=list)
+    missing_items: List[str] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
 
 
 class FinancePaymentRequest(BaseModel):
@@ -430,6 +666,23 @@ class AppointmentHistoryRead(BaseModel):
     created_at: datetime
 
 
+class AppointmentWhatsAppLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    usuario_id: Optional[int] = None
+    usuario_nome: Optional[str] = None
+    provider: str
+    status: WhatsAppDeliveryStatus
+    destino_telefone: str
+    mensagem: str
+    automatico: bool
+    erro: Optional[str] = None
+    external_message_id: Optional[str] = None
+    resposta_externa: Optional[str] = None
+    created_at: datetime
+
+
 class AppointmentBase(BaseModel):
     cliente_id: int
     os_id: Optional[int] = None
@@ -491,10 +744,14 @@ class AppointmentRead(BaseModel):
     google_calendar_id: Optional[str] = None
     google_sync_status: GoogleSyncStatus
     google_sync_message: Optional[str] = None
+    whatsapp_status: Optional[WhatsAppDeliveryStatus] = None
+    whatsapp_ultimo_erro: Optional[str] = None
+    whatsapp_ultimo_envio_em: Optional[datetime] = None
     agendamento_pai_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     historico: List[AppointmentHistoryRead] = Field(default_factory=list)
+    whatsapp_logs: List[AppointmentWhatsAppLogRead] = Field(default_factory=list)
 
 
 class AppointmentDashboardRead(BaseModel):
@@ -507,6 +764,27 @@ class AppointmentDashboardRead(BaseModel):
     reagendado: int
     cancelado: int
     nao_realizado: int
+
+
+class WhatsAppConfigStatusRead(BaseModel):
+    enabled: bool
+    provider: str
+    configured: bool
+    api_base_url: Optional[str] = None
+    sender_id_configured: bool
+    auth_configured: bool
+
+
+class GoogleCalendarOAuthStartRead(BaseModel):
+    authorization_url: str
+    message: str
+
+
+class GoogleCalendarAppointmentSyncRead(BaseModel):
+    mode: str
+    message: str
+    authorization_url: Optional[str] = None
+    appointment: Optional[AppointmentRead] = None
 
 
 UserCreate.model_rebuild()

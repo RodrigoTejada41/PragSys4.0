@@ -8,6 +8,9 @@ os.environ["DATABASE_URL"] = "sqlite:///./test_syspragas.db"
 os.environ["JWT_SECRET"] = "test-secret"
 os.environ["DEFAULT_ADMIN_USERNAME"] = "admin"
 os.environ["DEFAULT_ADMIN_PASSWORD"] = "syspragas123"
+os.environ["NFE_PROVIDER"] = "focus_nfe"
+os.environ["FOCUS_NFE_API_BASE_URL"] = ""
+os.environ["FOCUS_NFE_API_KEY"] = ""
 
 from app.core.config import get_settings
 from app.infrastructure.db import Base, get_engine, init_db, reset_engine
