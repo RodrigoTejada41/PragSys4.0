@@ -38,7 +38,6 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, version="3.2.5", lifespan=lifespan)
-init_db()
 
 
 @app.exception_handler(BusinessRuleViolation)

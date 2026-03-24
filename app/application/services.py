@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -153,6 +153,9 @@ def _serialize_license(license_entry: License) -> License:
 def _serialize_provider_company(provider_company: ProviderCompany) -> ProviderCompany:
     provider_company.usuarios_vinculados_ids = [user.id for user in provider_company.usuarios]
     provider_company.usuarios_vinculados_nomes = [user.nome for user in provider_company.usuarios]
+    provider_company.google_connected = bool(
+        provider_company.google_refresh_token or provider_company.google_access_token
+    )
     return provider_company
 
 
