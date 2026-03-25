@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.0.0] - 2026-03-25
+
+- Inicio formal da remodelacao arquitetural do produto como release maior.
+- Versionamento elevado para 4.0.0 em `pyproject.toml` e metadados da aplicacao.
+- Runtime local e runtime em rede documentados e suportados por scripts dedicados.
+- Docker rebaixado para opcao complementar, nao mais como requisito principal de operacao.
+- Mecanismo de migracao de schema reorganizado com rastreio em `schema_migrations`.
+- Fundacao de multempresa introduzida no schema com `empresa_prestadora_id` nas entidades operacionais centrais.
+- Logging basico centralizado e payload de autenticacao preparado para transportar contexto de empresa.
+- Base documental expandida para arquitetura alvo, operacao local/rede, publicacao no GitHub e relatorio tecnico da release.
+- Nova pasta de release criada sem sobrescrever a base anterior: `release/SysPragas-4.0.0`.
+
 ## [3.1.0] - 2026-03-21
 
 - Reestruturacao da interface administrativa da Ordem de Servico, com separacao entre cadastro e ordens registradas.

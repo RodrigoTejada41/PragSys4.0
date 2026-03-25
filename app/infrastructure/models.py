@@ -103,6 +103,11 @@ class Customer(Base):
     estado: Mapped[str] = mapped_column(String(2), nullable=False)
     telefone: Mapped[str] = mapped_column(String(30), nullable=False)
     contato: Mapped[str] = mapped_column(String(120), nullable=False)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+        index=True,
+    )
 
     ordens_servico: Mapped[List["WorkOrder"]] = relationship(back_populates="cliente")
     financeiros: Mapped[List["FinanceEntry"]] = relationship(back_populates="cliente")
@@ -146,6 +151,11 @@ class Product(Base):
     override_tributacao: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     estoque_atual: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     estoque_minimo: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+        index=True,
+    )
 
     perfil_ncm: Mapped[Optional["NcmTaxProfile"]] = relationship(back_populates="produtos")
     itens_ordem_servico: Mapped[List["WorkOrderProduct"]] = relationship(back_populates="produto")
@@ -158,6 +168,11 @@ class Pest(Base):
     nome_comum: Mapped[str] = mapped_column(String(120), nullable=False)
     nome_cientifico: Mapped[str] = mapped_column(String(120), nullable=False)
     descricao: Mapped[str] = mapped_column(Text, nullable=False)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+        index=True,
+    )
 
     ordens_servico: Mapped[List["WorkOrderPest"]] = relationship(back_populates="praga")
 
@@ -170,6 +185,11 @@ class Technician(Base):
     registro: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     telefone: Mapped[str] = mapped_column(String(30), nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+        index=True,
+    )
 
     ordens_servico: Mapped[List["WorkOrder"]] = relationship(back_populates="tecnico")
     agendamentos: Mapped[List["Appointment"]] = relationship(back_populates="tecnico")
@@ -191,6 +211,11 @@ class WorkOrder(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="aberta")
     valor_servico: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+        index=True,
+    )
 
     cliente: Mapped["Customer"] = relationship(back_populates="ordens_servico")
     tecnico: Mapped["Technician"] = relationship(back_populates="ordens_servico")
@@ -240,6 +265,11 @@ class Appointment(Base):
     google_sync_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+        index=True,
+    )
 
     cliente: Mapped["Customer"] = relationship(back_populates="agendamentos")
     ordem_servico: Mapped[Optional["WorkOrder"]] = relationship(back_populates="agendamentos")
@@ -378,6 +408,11 @@ class FinanceEntry(Base):
     os_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ordens_servico.id"), nullable=True)
     nfe_id: Mapped[Optional[int]] = mapped_column(ForeignKey("notas_fiscais.id"), nullable=True, index=True)
     recibo_id: Mapped[Optional[int]] = mapped_column(ForeignKey("recibos.id"), nullable=True, index=True)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+        index=True,
+    )
 
     cliente: Mapped[Optional["Customer"]] = relationship(back_populates="financeiros")
     ordem_servico: Mapped[Optional["WorkOrder"]] = relationship(back_populates="financeiros")
@@ -425,6 +460,11 @@ class Receipt(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
     deleted_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+        index=True,
+    )
 
     cliente: Mapped["Customer"] = relationship(back_populates="recibos")
     ordem_servico: Mapped[Optional["WorkOrder"]] = relationship(back_populates="recibos")
@@ -488,6 +528,11 @@ class NfeInvoice(Base):
     observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+        index=True,
+    )
 
     cliente: Mapped["Customer"] = relationship(back_populates="notas_fiscais")
     financeiro: Mapped[Optional["FinanceEntry"]] = relationship(back_populates="nota_fiscal", uselist=False)

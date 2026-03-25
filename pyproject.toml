@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "syspragas"
-version = "3.2.6"
+version = "4.0.0"
 description = "MVP do sistema SysPragas com FastAPI, JWT e controle operacional"
 requires-python = ">=3.9"
 dependencies = [

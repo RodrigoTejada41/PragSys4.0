@@ -930,10 +930,10 @@ function buildForms() {
 
     document.getElementById("work-order-form").innerHTML = `
         <div class="form-grid">
-            <div class="form-field-static">
-                <span>Numero</span>
+            <div class="work-order-number-banner full-width">
+                <p class="eyebrow">Identificacao da OS</p>
                 <strong id="work-order-number-display">Sera gerado automaticamente ao salvar</strong>
-                <small>Numero sequencial gerado automaticamente pelo sistema.</small>
+                <small>O sistema gera o numero definitivo em sequencia e ele nao pode ser editado manualmente.</small>
             </div>
             <label><span>Cliente</span><select name="cliente_id" required></select></label>
             <label><span>Tecnico</span><select name="tecnico_id" required></select></label>

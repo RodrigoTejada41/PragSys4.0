@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
+from app.core.logging import configure_logging
 from app.infrastructure.db import init_db
 from app.interfaces.api.routes import (
     appointments,
@@ -29,6 +30,7 @@ from app.modules.sefaz_nfe import routes as sefaz_nfe_routes
 from app.interfaces.web.routes import STATIC_DIR, router as web_router
 
 settings = get_settings()
+configure_logging()
 
 
 @asynccontextmanager
@@ -37,7 +39,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="3.2.6", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
 
 @app.exception_handler(BusinessRuleViolation)

@@ -9,6 +9,7 @@ import tkinter as tk
 import webbrowser
 from pathlib import Path
 from tkinter import messagebox
+from typing import Optional
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -57,8 +58,8 @@ def is_port_busy() -> bool:
 
 class LauncherApp:
     def __init__(self) -> None:
-        self.server_thread: threading.Thread | None = None
-        self.server_instance: uvicorn.Server | None = None
+        self.server_thread: Optional[threading.Thread] = None
+        self.server_instance: Optional[uvicorn.Server] = None
         self.root = tk.Tk()
         self.root.title("SysPragas 3.1 - Teste")
         self.root.geometry("460x280")

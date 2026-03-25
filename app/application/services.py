@@ -113,6 +113,35 @@ def _normalize_customer_payload(payload) -> dict:
     return data
 
 
+def _is_master_user(current_user: Optional[User]) -> bool:
+    return bool(current_user and current_user.role == "master")
+
+
+def _require_company_scope(current_user: Optional[User]) -> int:
+    if current_user is None or _is_master_user(current_user):
+        raise BusinessRuleViolation("Contexto de empresa nao disponivel para esta operacao.")
+    if current_user.empresa_prestadora_id is None:
+        raise BusinessRuleViolation("Usuario sem empresa prestadora vinculada.")
+    return current_user.empresa_prestadora_id
+
+
+def _apply_company_scope(query, model, current_user: Optional[User]):
+    if current_user is None or _is_master_user(current_user):
+        return query
+    company_id = _require_company_scope(current_user)
+    return query.filter(model.empresa_prestadora_id == company_id)
+
+
+def _get_new_record_company_id(current_user: Optional[User], fallback_company_id: Optional[int] = None) -> Optional[int]:
+    if fallback_company_id is not None:
+        return fallback_company_id
+    if current_user is None:
+        return None
+    if _is_master_user(current_user):
+        return current_user.empresa_prestadora_id
+    return _require_company_scope(current_user)
+
+
 def _fetch_json(url: str) -> dict:
     request = Request(url, headers={"User-Agent": "SysPragas/3.1"})
     try:
@@ -262,11 +291,12 @@ def _validate_finance_payload(
     db: Session,
     payload: FinanceEntryCreate,
     current_entry: Optional[FinanceEntry] = None,
+    current_user: Optional[User] = None,
 ) -> None:
     if payload.cliente_id:
-        _get_customer_or_fail(db, payload.cliente_id)
+        _get_customer_or_fail(db, payload.cliente_id, current_user=current_user)
     if payload.os_id:
-        _get_work_order_or_fail(db, payload.os_id)
+        _get_work_order_or_fail(db, payload.os_id, current_user=current_user)
         if _enum_value(payload.tipo) != "receita":
             raise BusinessRuleViolation("Lancamentos vinculados a OS devem ser do tipo receita.")
     if payload.nfe_id:
@@ -288,7 +318,7 @@ def authenticate_user(db: Session, username: str, password: str) -> str:
     if not user or not verify_password(password, user.password_hash):
         raise BusinessRuleViolation("Credenciais invalidas.")
     ensure_license_allows_access(db, user)
-    return create_access_token(subject=str(user.id), role=user.role)
+    return create_access_token(subject=str(user.id), role=user.role, company_id=user.empresa_prestadora_id)
 
 
 def get_user_by_id(db: Session, user_id: int) -> User:
@@ -332,15 +362,15 @@ def ensure_license_allows_access(db: Session, user: User) -> None:
         raise BusinessRuleViolation("Licenca do sistema inativa, suspensa ou expirada.")
 
 
-def _get_customer_or_fail(db: Session, customer_id: int) -> Customer:
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+def _get_customer_or_fail(db: Session, customer_id: int, current_user: Optional[User] = None) -> Customer:
+    customer = _apply_company_scope(db.query(Customer), Customer, current_user).filter(Customer.id == customer_id).first()
     if not customer:
         raise BusinessRuleViolation("Cliente informado nao existe.")
     return customer
 
 
-def _get_product_or_fail(db: Session, product_id: int) -> Product:
-    product = db.query(Product).filter(Product.id == product_id).first()
+def _get_product_or_fail(db: Session, product_id: int, current_user: Optional[User] = None) -> Product:
+    product = _apply_company_scope(db.query(Product), Product, current_user).filter(Product.id == product_id).first()
     if not product:
         raise BusinessRuleViolation(f"Produto {product_id} nao encontrado.")
     return product
@@ -514,15 +544,20 @@ def _find_product_for_import(db: Session, registro_ms: str, nome: str) -> Option
     return product
 
 
-def _get_pest_or_fail(db: Session, pest_id: int) -> Pest:
-    pest = db.query(Pest).filter(Pest.id == pest_id).first()
+def _get_pest_or_fail(db: Session, pest_id: int, current_user: Optional[User] = None) -> Pest:
+    pest = _apply_company_scope(db.query(Pest), Pest, current_user).filter(Pest.id == pest_id).first()
     if not pest:
         raise BusinessRuleViolation(f"Praga {pest_id} nao encontrada.")
     return pest
 
 
-def _get_technician_or_fail(db: Session, technician_id: int, require_active: bool = False) -> Technician:
-    query = db.query(Technician).filter(Technician.id == technician_id)
+def _get_technician_or_fail(
+    db: Session,
+    technician_id: int,
+    require_active: bool = False,
+    current_user: Optional[User] = None,
+) -> Technician:
+    query = _apply_company_scope(db.query(Technician), Technician, current_user).filter(Technician.id == technician_id)
     if require_active:
         query = query.filter(Technician.ativo.is_(True))
     technician = query.first()
@@ -531,8 +566,8 @@ def _get_technician_or_fail(db: Session, technician_id: int, require_active: boo
     return technician
 
 
-def _get_finance_entry_or_fail(db: Session, finance_entry_id: int) -> FinanceEntry:
-    entry = db.query(FinanceEntry).filter(FinanceEntry.id == finance_entry_id).first()
+def _get_finance_entry_or_fail(db: Session, finance_entry_id: int, current_user: Optional[User] = None) -> FinanceEntry:
+    entry = _apply_company_scope(db.query(FinanceEntry), FinanceEntry, current_user).filter(FinanceEntry.id == finance_entry_id).first()
     if not entry:
         raise BusinessRuleViolation("Lancamento financeiro nao encontrado.")
     _sync_finance_status(entry)
@@ -672,11 +707,12 @@ def lookup_address_by_cep(cep: str) -> AddressLookupRead:
     )
 
 
-def create_customer(db: Session, payload: CustomerCreate) -> Customer:
+def create_customer(db: Session, payload: CustomerCreate, current_user: Optional[User] = None) -> Customer:
     data = _normalize_customer_payload(payload)
     duplicate = db.query(Customer).filter(Customer.cpf_cnpj == data["cpf_cnpj"]).first()
     if duplicate:
         raise BusinessRuleViolation("Ja existe cliente com este CPF/CNPJ.")
+    data["empresa_prestadora_id"] = _get_new_record_company_id(current_user)
     customer = Customer(**data)
     db.add(customer)
     db.commit()
@@ -684,8 +720,11 @@ def create_customer(db: Session, payload: CustomerCreate) -> Customer:
     return customer
 
 
-def list_users(db: Session) -> List[User]:
-    return [_serialize_user(item) for item in db.query(User).order_by(User.created_at.desc(), User.nome.asc()).all()]
+def list_users(db: Session, current_user: Optional[User] = None) -> List[User]:
+    query = db.query(User)
+    if current_user and not _is_master_user(current_user):
+        query = query.filter(User.empresa_prestadora_id == _require_company_scope(current_user))
+    return [_serialize_user(item) for item in query.order_by(User.created_at.desc(), User.nome.asc()).all()]
 
 
 def create_user(db: Session, payload: UserCreate) -> User:
@@ -819,12 +858,12 @@ def delete_license(db: Session, license_id: int) -> None:
     db.commit()
 
 
-def list_customers(db: Session) -> List[Customer]:
-    return db.query(Customer).order_by(Customer.razao_social.asc()).all()
+def list_customers(db: Session, current_user: Optional[User] = None) -> List[Customer]:
+    return _apply_company_scope(db.query(Customer), Customer, current_user).order_by(Customer.razao_social.asc()).all()
 
 
-def update_customer(db: Session, customer_id: int, payload: CustomerUpdate) -> Customer:
-    customer = _get_customer_or_fail(db, customer_id)
+def update_customer(db: Session, customer_id: int, payload: CustomerUpdate, current_user: Optional[User] = None) -> Customer:
+    customer = _get_customer_or_fail(db, customer_id, current_user=current_user)
     data = _normalize_customer_payload(payload)
     duplicate = (
         db.query(Customer)
@@ -840,18 +879,18 @@ def update_customer(db: Session, customer_id: int, payload: CustomerUpdate) -> C
     return customer
 
 
-def delete_customer(db: Session, customer_id: int) -> None:
-    customer = _get_customer_or_fail(db, customer_id)
+def delete_customer(db: Session, customer_id: int, current_user: Optional[User] = None) -> None:
+    customer = _get_customer_or_fail(db, customer_id, current_user=current_user)
     if customer.ordens_servico or customer.financeiros:
         raise BusinessRuleViolation("Nao e possivel excluir cliente com movimentacao vinculada.")
     db.delete(customer)
     db.commit()
 
 
-def create_product(db: Session, payload: ProductCreate) -> Product:
+def create_product(db: Session, payload: ProductCreate, current_user: Optional[User] = None) -> Product:
     from app.application.fiscal_services import apply_tax_profile_to_product
 
-    product = Product(**payload.model_dump())
+    product = Product(**payload.model_dump(), empresa_prestadora_id=_get_new_record_company_id(current_user))
     apply_tax_profile_to_product(
         db,
         product,
@@ -865,14 +904,14 @@ def create_product(db: Session, payload: ProductCreate) -> Product:
     return product
 
 
-def list_products(db: Session) -> List[Product]:
-    return db.query(Product).order_by(Product.nome.asc()).all()
+def list_products(db: Session, current_user: Optional[User] = None) -> List[Product]:
+    return _apply_company_scope(db.query(Product), Product, current_user).order_by(Product.nome.asc()).all()
 
 
-def update_product(db: Session, product_id: int, payload: ProductUpdate) -> Product:
+def update_product(db: Session, product_id: int, payload: ProductUpdate, current_user: Optional[User] = None) -> Product:
     from app.application.fiscal_services import apply_tax_profile_to_product
 
-    product = _get_product_or_fail(db, product_id)
+    product = _get_product_or_fail(db, product_id, current_user=current_user)
     for field, value in payload.model_dump().items():
         setattr(product, field, value)
     apply_tax_profile_to_product(
@@ -887,8 +926,8 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate) -> Prod
     return product
 
 
-def delete_product(db: Session, product_id: int) -> None:
-    product = _get_product_or_fail(db, product_id)
+def delete_product(db: Session, product_id: int, current_user: Optional[User] = None) -> None:
+    product = _get_product_or_fail(db, product_id, current_user=current_user)
     if product.itens_ordem_servico:
         raise BusinessRuleViolation("Nao e possivel excluir produto ja utilizado em OS.")
     db.delete(product)
@@ -899,6 +938,7 @@ def import_products_from_invoice_xml(
     db: Session,
     xml_content: bytes,
     create_finance_entry: bool = True,
+    current_user: Optional[User] = None,
 ) -> ProductXmlImportResult:
     invoice_data = _parse_invoice_xml(xml_content)
     reference = invoice_data["chave_acesso"] or f"NFE-{invoice_data['nota_numero']}"
@@ -912,10 +952,11 @@ def import_products_from_invoice_xml(
 
     for index, item in enumerate(invoice_data["items"], start=1):
         product = None
+        product_query = _apply_company_scope(db.query(Product), Product, current_user)
         if item["codigo"]:
-            product = db.query(Product).filter(Product.registro_ms == item["codigo"]).first()
+            product = product_query.filter(Product.registro_ms == item["codigo"]).first()
         if product is None:
-            product = db.query(Product).filter(Product.nome == item["nome"]).first()
+            product = product_query.filter(Product.nome == item["nome"]).first()
 
         action = "atualizado"
         if product is None:
@@ -929,6 +970,7 @@ def import_products_from_invoice_xml(
                 ncm=item["ncm"] or None,
                 estoque_atual=Decimal("0.00"),
                 estoque_minimo=Decimal("0.00"),
+                empresa_prestadora_id=_get_new_record_company_id(current_user),
             )
             db.add(product)
             db.flush()
@@ -973,6 +1015,7 @@ def import_products_from_invoice_xml(
             total_parcelas=1,
             parcela_atual=1,
             observacoes=f"Importado automaticamente do XML da NF {invoice_data['nota_numero']}.",
+            empresa_prestadora_id=_get_new_record_company_id(current_user),
         )
         db.add(finance_entry)
         db.flush()
@@ -1000,6 +1043,7 @@ def import_products_from_csv(
     db: Session,
     csv_content: bytes,
     create_finance_entry: bool = True,
+    current_user: Optional[User] = None,
 ) -> ProductCsvImportResult:
     parsed = _parse_products_csv(csv_content)
     created_count = 0
@@ -1025,6 +1069,9 @@ def import_products_from_csv(
         observacoes = row.get("observacoes") or None
 
         product = _find_product_for_import(db, registro_ms, nome)
+        if product and current_user and not _is_master_user(current_user):
+            if product.empresa_prestadora_id != _require_company_scope(current_user):
+                product = None
         action = "atualizado"
         if product is None:
             product = Product(
@@ -1037,6 +1084,7 @@ def import_products_from_csv(
                 ncm=row.get("ncm") or None,
                 estoque_atual=Decimal("0.00"),
                 estoque_minimo=estoque_minimo,
+                empresa_prestadora_id=_get_new_record_company_id(current_user),
             )
             db.add(product)
             db.flush()
@@ -1080,6 +1128,7 @@ def import_products_from_csv(
                 total_parcelas=1,
                 parcela_atual=1,
                 observacoes=observacoes or f"Importado por CSV na linha {line_number}.",
+                empresa_prestadora_id=_get_new_record_company_id(current_user),
             )
             db.add(finance_entry)
             db.flush()
@@ -1119,20 +1168,20 @@ def import_products_from_csv(
     )
 
 
-def create_pest(db: Session, payload: PestCreate) -> Pest:
-    pest = Pest(**payload.model_dump())
+def create_pest(db: Session, payload: PestCreate, current_user: Optional[User] = None) -> Pest:
+    pest = Pest(**payload.model_dump(), empresa_prestadora_id=_get_new_record_company_id(current_user))
     db.add(pest)
     db.commit()
     db.refresh(pest)
     return pest
 
 
-def list_pests(db: Session) -> List[Pest]:
-    return db.query(Pest).order_by(Pest.nome_comum.asc()).all()
+def list_pests(db: Session, current_user: Optional[User] = None) -> List[Pest]:
+    return _apply_company_scope(db.query(Pest), Pest, current_user).order_by(Pest.nome_comum.asc()).all()
 
 
-def update_pest(db: Session, pest_id: int, payload: PestUpdate) -> Pest:
-    pest = _get_pest_or_fail(db, pest_id)
+def update_pest(db: Session, pest_id: int, payload: PestUpdate, current_user: Optional[User] = None) -> Pest:
+    pest = _get_pest_or_fail(db, pest_id, current_user=current_user)
     for field, value in payload.model_dump().items():
         setattr(pest, field, value)
     db.commit()
@@ -1140,33 +1189,33 @@ def update_pest(db: Session, pest_id: int, payload: PestUpdate) -> Pest:
     return pest
 
 
-def delete_pest(db: Session, pest_id: int) -> None:
-    pest = _get_pest_or_fail(db, pest_id)
+def delete_pest(db: Session, pest_id: int, current_user: Optional[User] = None) -> None:
+    pest = _get_pest_or_fail(db, pest_id, current_user=current_user)
     if pest.ordens_servico:
         raise BusinessRuleViolation("Nao e possivel excluir praga vinculada a OS.")
     db.delete(pest)
     db.commit()
 
 
-def create_technician(db: Session, payload: TechnicianCreate) -> Technician:
-    duplicate = db.query(Technician).filter(Technician.registro == payload.registro).first()
+def create_technician(db: Session, payload: TechnicianCreate, current_user: Optional[User] = None) -> Technician:
+    duplicate = _apply_company_scope(db.query(Technician), Technician, current_user).filter(Technician.registro == payload.registro).first()
     if duplicate:
         raise BusinessRuleViolation("Ja existe tecnico com este registro.")
-    technician = Technician(**payload.model_dump())
+    technician = Technician(**payload.model_dump(), empresa_prestadora_id=_get_new_record_company_id(current_user))
     db.add(technician)
     db.commit()
     db.refresh(technician)
     return technician
 
 
-def list_technicians(db: Session) -> List[Technician]:
-    return db.query(Technician).order_by(Technician.nome.asc()).all()
+def list_technicians(db: Session, current_user: Optional[User] = None) -> List[Technician]:
+    return _apply_company_scope(db.query(Technician), Technician, current_user).order_by(Technician.nome.asc()).all()
 
 
-def update_technician(db: Session, technician_id: int, payload: TechnicianUpdate) -> Technician:
-    technician = _get_technician_or_fail(db, technician_id)
+def update_technician(db: Session, technician_id: int, payload: TechnicianUpdate, current_user: Optional[User] = None) -> Technician:
+    technician = _get_technician_or_fail(db, technician_id, current_user=current_user)
     duplicate = (
-        db.query(Technician)
+        _apply_company_scope(db.query(Technician), Technician, current_user)
         .filter(Technician.registro == payload.registro, Technician.id != technician_id)
         .first()
     )
@@ -1179,16 +1228,16 @@ def update_technician(db: Session, technician_id: int, payload: TechnicianUpdate
     return technician
 
 
-def delete_technician(db: Session, technician_id: int) -> None:
-    technician = _get_technician_or_fail(db, technician_id)
+def delete_technician(db: Session, technician_id: int, current_user: Optional[User] = None) -> None:
+    technician = _get_technician_or_fail(db, technician_id, current_user=current_user)
     if technician.ordens_servico:
         raise BusinessRuleViolation("Nao e possivel excluir tecnico com OS vinculada.")
     db.delete(technician)
     db.commit()
 
 
-def create_finance_entry(db: Session, payload: FinanceEntryCreate) -> FinanceEntry:
-    _validate_finance_payload(db, payload)
+def create_finance_entry(db: Session, payload: FinanceEntryCreate, current_user: Optional[User] = None) -> FinanceEntry:
+    _validate_finance_payload(db, payload, current_user=current_user)
     reference = payload.referencia or f"FIN-{int(datetime.now(timezone.utc).timestamp())}"
     installments = _split_installments(payload.valor, payload.total_parcelas)
     created_entries: List[FinanceEntry] = []
@@ -1211,6 +1260,7 @@ def create_finance_entry(db: Session, payload: FinanceEntryCreate) -> FinanceEnt
             cliente_id=payload.cliente_id,
             os_id=payload.os_id,
             nfe_id=payload.nfe_id,
+            empresa_prestadora_id=_get_new_record_company_id(current_user),
         )
         db.add(entry)
         created_entries.append(entry)
@@ -1227,6 +1277,7 @@ def create_finance_entry(db: Session, payload: FinanceEntryCreate) -> FinanceEnt
 
 def list_finance_entries(
     db: Session,
+    current_user: Optional[User] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     cliente_id: Optional[int] = None,
@@ -1234,7 +1285,7 @@ def list_finance_entries(
     tipo: Optional[str] = None,
     search: Optional[str] = None,
 ) -> List[FinanceEntry]:
-    query = db.query(FinanceEntry)
+    query = _apply_company_scope(db.query(FinanceEntry), FinanceEntry, current_user)
     if start_date:
         query = query.filter(FinanceEntry.vencimento >= start_date)
     if end_date:
@@ -1257,15 +1308,20 @@ def list_finance_entries(
     return entries
 
 
-def update_finance_entry(db: Session, finance_entry_id: int, payload: FinanceEntryUpdate) -> FinanceEntry:
-    entry = _get_finance_entry_or_fail(db, finance_entry_id)
+def update_finance_entry(
+    db: Session,
+    finance_entry_id: int,
+    payload: FinanceEntryUpdate,
+    current_user: Optional[User] = None,
+) -> FinanceEntry:
+    entry = _get_finance_entry_or_fail(db, finance_entry_id, current_user=current_user)
     if entry.recibo_id:
         raise BusinessRuleViolation("Lancamentos gerados por recibo devem ser alterados pelo proprio recibo.")
     if entry.os_id:
         raise BusinessRuleViolation("Lancamentos gerados por OS devem ser alterados pela propria ordem de servico.")
     if entry.nfe_id:
         raise BusinessRuleViolation("Lancamentos gerados por NF-e devem ser alterados pela propria nota fiscal.")
-    _validate_finance_payload(db, payload, current_entry=entry)
+    _validate_finance_payload(db, payload, current_entry=entry, current_user=current_user)
     requested_status = _enum_value(payload.status)
     for field, value in payload.model_dump().items():
         setattr(entry, field, _enum_value(value))
@@ -1282,8 +1338,9 @@ def mark_finance_entry_as_paid(
     db: Session,
     finance_entry_id: int,
     payload: Optional[FinancePaymentRequest] = None,
+    current_user: Optional[User] = None,
 ) -> FinanceEntry:
-    entry = _get_finance_entry_or_fail(db, finance_entry_id)
+    entry = _get_finance_entry_or_fail(db, finance_entry_id, current_user=current_user)
     payment_payload = payload or FinancePaymentRequest()
     _apply_finance_payment(db, entry, payment_payload.valor, payment_payload.data_pagamento)
     db.commit()
@@ -1291,8 +1348,8 @@ def mark_finance_entry_as_paid(
     return entry
 
 
-def delete_finance_entry(db: Session, finance_entry_id: int) -> None:
-    entry = _get_finance_entry_or_fail(db, finance_entry_id)
+def delete_finance_entry(db: Session, finance_entry_id: int, current_user: Optional[User] = None) -> None:
+    entry = _get_finance_entry_or_fail(db, finance_entry_id, current_user=current_user)
     if entry.recibo_id:
         raise BusinessRuleViolation("Lancamentos gerados por recibo devem ser excluidos pelo proprio recibo.")
     if entry.os_id:
@@ -1305,14 +1362,17 @@ def delete_finance_entry(db: Session, finance_entry_id: int) -> None:
     db.commit()
 
 
-def list_cash_ledger_entries(db: Session) -> List[CashLedgerEntry]:
-    return db.query(CashLedgerEntry).order_by(CashLedgerEntry.data_movimento.desc(), CashLedgerEntry.id.desc()).all()
+def list_cash_ledger_entries(db: Session, current_user: Optional[User] = None) -> List[CashLedgerEntry]:
+    query = db.query(CashLedgerEntry).join(FinanceEntry, FinanceEntry.id == CashLedgerEntry.finance_entry_id)
+    if current_user and not _is_master_user(current_user):
+        query = query.filter(FinanceEntry.empresa_prestadora_id == _require_company_scope(current_user))
+    return query.order_by(CashLedgerEntry.data_movimento.desc(), CashLedgerEntry.id.desc()).all()
 
 
-def get_finance_dashboard(db: Session) -> dict:
-    entries = db.query(FinanceEntry).order_by(FinanceEntry.id.asc()).all()
+def get_finance_dashboard(db: Session, current_user: Optional[User] = None) -> dict:
+    entries = _apply_company_scope(db.query(FinanceEntry), FinanceEntry, current_user).order_by(FinanceEntry.id.asc()).all()
     _sync_finance_statuses(db, entries)
-    ledger_entries = list_cash_ledger_entries(db)
+    ledger_entries = list_cash_ledger_entries(db, current_user=current_user)
 
     total_a_receber = sum(
         (_money(Decimal(entry.valor) - Decimal(entry.valor_pago)) for entry in entries if entry.tipo == "receita"),
@@ -1339,8 +1399,8 @@ def get_finance_dashboard(db: Session) -> dict:
     }
 
 
-def _work_order_query(db: Session):
-    return db.query(WorkOrder).options(
+def _work_order_query(db: Session, current_user: Optional[User] = None):
+    query = db.query(WorkOrder).options(
         joinedload(WorkOrder.cliente),
         joinedload(WorkOrder.tecnico),
         joinedload(WorkOrder.produtos).joinedload(WorkOrderProduct.produto),
@@ -1348,10 +1408,11 @@ def _work_order_query(db: Session):
         joinedload(WorkOrder.fotos),
         joinedload(WorkOrder.financeiros),
     )
+    return _apply_company_scope(query, WorkOrder, current_user)
 
 
-def _get_work_order_or_fail(db: Session, work_order_id: int) -> WorkOrder:
-    work_order = _work_order_query(db).filter(WorkOrder.id == work_order_id).first()
+def _get_work_order_or_fail(db: Session, work_order_id: int, current_user: Optional[User] = None) -> WorkOrder:
+    work_order = _work_order_query(db, current_user=current_user).filter(WorkOrder.id == work_order_id).first()
     if not work_order:
         raise BusinessRuleViolation("Ordem de servico nao encontrada.")
     return work_order
@@ -1360,6 +1421,7 @@ def _get_work_order_or_fail(db: Session, work_order_id: int) -> WorkOrder:
 def _validate_work_order_payload(
     db: Session,
     payload: WorkOrderCreate,
+    current_user: Optional[User] = None,
     current_work_order_id: Optional[int] = None,
 ) -> tuple[Customer, dict]:
     normalized_location = _clean_required_text(payload.local_execucao, "Informe o local de execucao da ordem de servico.")
@@ -1370,8 +1432,8 @@ def _validate_work_order_payload(
     if payload.hora_fim and payload.hora_fim <= payload.hora_inicio:
         raise BusinessRuleViolation("A hora final deve ser posterior a hora inicial.")
 
-    customer = _get_customer_or_fail(db, payload.cliente_id)
-    _get_technician_or_fail(db, payload.tecnico_id, require_active=True)
+    customer = _get_customer_or_fail(db, payload.cliente_id, current_user=current_user)
+    _get_technician_or_fail(db, payload.tecnico_id, require_active=True, current_user=current_user)
 
     target_status = _enum_value(payload.status)
     if not payload.produtos and target_status in {"em_execucao", "concluida"}:
@@ -1391,7 +1453,7 @@ def _validate_work_order_payload(
         if pest_id in seen_pest_ids:
             raise BusinessRuleViolation("A mesma praga nao pode ser selecionada mais de uma vez.")
         seen_pest_ids.add(pest_id)
-        _get_pest_or_fail(db, pest_id)
+        _get_pest_or_fail(db, pest_id, current_user=current_user)
 
     return customer, {
         "local_execucao": normalized_location,
@@ -1431,9 +1493,10 @@ def _apply_work_order_products(
     db: Session,
     work_order: WorkOrder,
     product_items: Iterable,
+    current_user: Optional[User] = None,
 ) -> None:
     for item in product_items:
-        product = _get_product_or_fail(db, item.produto_id)
+        product = _get_product_or_fail(db, item.produto_id, current_user=current_user)
         if Decimal(product.estoque_atual) < item.quantidade:
             raise BusinessRuleViolation(f"Estoque insuficiente para o produto '{product.nome}'.")
         product.estoque_atual = Decimal(product.estoque_atual) - item.quantidade
@@ -1447,12 +1510,12 @@ def _apply_work_order_products(
         )
 
 
-def _sync_work_order_pests(db: Session, work_order: WorkOrder, pest_ids: List[int]) -> None:
+def _sync_work_order_pests(db: Session, work_order: WorkOrder, pest_ids: List[int], current_user: Optional[User] = None) -> None:
     for item in list(work_order.pragas):
         db.delete(item)
     db.flush()
     for pest_id in pest_ids:
-        _get_pest_or_fail(db, pest_id)
+        _get_pest_or_fail(db, pest_id, current_user=current_user)
         db.add(WorkOrderPest(os_id=work_order.id, praga_id=pest_id))
 
 
@@ -1478,6 +1541,7 @@ def _sync_work_order_finance(
         entry.referencia = f"OS-{work_order.numero}"
         entry.cliente_id = customer.id
         entry.os_id = work_order.id
+        entry.empresa_prestadora_id = work_order.empresa_prestadora_id
         _sync_finance_status(entry)
         db.add(entry)
         for extra in linked_entries[1:]:
@@ -1496,7 +1560,8 @@ def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Op
     from app.domain.enums import AppointmentStatus
     from app.modules.whatsapp.service import send_appointment_whatsapp_message
 
-    customer, normalized = _validate_work_order_payload(db, payload)
+    current_user = _get_user_record_or_fail(db, current_user_id) if current_user_id else None
+    customer, normalized = _validate_work_order_payload(db, payload, current_user=current_user)
 
     work_order = WorkOrder(
         numero=_generate_work_order_number(db),
@@ -1510,12 +1575,13 @@ def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Op
         garantia_ate=payload.garantia_ate,
         status=payload.status.value,
         valor_servico=payload.valor_servico,
+        empresa_prestadora_id=customer.empresa_prestadora_id,
     )
     db.add(work_order)
     db.flush()
 
-    _apply_work_order_products(db, work_order, payload.produtos)
-    _sync_work_order_pests(db, work_order, payload.pragas_ids)
+    _apply_work_order_products(db, work_order, payload.produtos, current_user=current_user)
+    _sync_work_order_pests(db, work_order, payload.pragas_ids, current_user=current_user)
     _sync_work_order_finance(db, work_order, customer, payload.gerar_financeiro, payload.valor_servico)
     appointment, appointment_created = sync_work_order_appointment(
         db,
@@ -1547,15 +1613,15 @@ def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Op
             user_id=current_user_id,
         )
         db.commit()
-    return get_work_order(db, work_order.id)
+    return get_work_order(db, work_order.id, current_user=current_user)
 
 
-def list_work_orders(db: Session) -> List[WorkOrder]:
-    return _work_order_query(db).order_by(WorkOrder.data_execucao.desc(), WorkOrder.numero.desc()).all()
+def list_work_orders(db: Session, current_user: Optional[User] = None) -> List[WorkOrder]:
+    return _work_order_query(db, current_user=current_user).order_by(WorkOrder.data_execucao.desc(), WorkOrder.numero.desc()).all()
 
 
-def get_work_order(db: Session, work_order_id: int) -> WorkOrder:
-    return _get_work_order_or_fail(db, work_order_id)
+def get_work_order(db: Session, work_order_id: int, current_user: Optional[User] = None) -> WorkOrder:
+    return _get_work_order_or_fail(db, work_order_id, current_user=current_user)
 
 
 def update_work_order(
@@ -1568,8 +1634,9 @@ def update_work_order(
     from app.domain.enums import AppointmentStatus
     from app.modules.whatsapp.service import send_appointment_whatsapp_message
 
-    work_order = _get_work_order_or_fail(db, work_order_id)
-    customer, normalized = _validate_work_order_payload(db, payload, current_work_order_id=work_order_id)
+    current_user = _get_user_record_or_fail(db, current_user_id) if current_user_id else None
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
+    customer, normalized = _validate_work_order_payload(db, payload, current_user=current_user, current_work_order_id=work_order_id)
 
     _restore_stock(work_order)
     for item in list(work_order.produtos):
@@ -1586,9 +1653,10 @@ def update_work_order(
     work_order.garantia_ate = payload.garantia_ate
     work_order.status = payload.status.value
     work_order.valor_servico = payload.valor_servico
+    work_order.empresa_prestadora_id = customer.empresa_prestadora_id
 
-    _apply_work_order_products(db, work_order, payload.produtos)
-    _sync_work_order_pests(db, work_order, payload.pragas_ids)
+    _apply_work_order_products(db, work_order, payload.produtos, current_user=current_user)
+    _sync_work_order_pests(db, work_order, payload.pragas_ids, current_user=current_user)
     _sync_work_order_finance(db, work_order, customer, payload.gerar_financeiro, payload.valor_servico)
     appointment, appointment_created = sync_work_order_appointment(
         db,
@@ -1620,11 +1688,11 @@ def update_work_order(
             user_id=current_user_id,
         )
         db.commit()
-    return get_work_order(db, work_order.id)
+    return get_work_order(db, work_order.id, current_user=current_user)
 
 
-def delete_work_order(db: Session, work_order_id: int) -> None:
-    work_order = _get_work_order_or_fail(db, work_order_id)
+def delete_work_order(db: Session, work_order_id: int, current_user: Optional[User] = None) -> None:
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
     _restore_stock(work_order)
     for entry in list(work_order.financeiros):
         if Decimal(entry.valor_pago) > 0:
@@ -1640,7 +1708,8 @@ def mark_work_order_as_completed(db: Session, work_order_id: int, current_user_i
     from app.domain.enums import AppointmentSource, AppointmentStatus
     from app.infrastructure.models import Appointment
 
-    work_order = _get_work_order_or_fail(db, work_order_id)
+    current_user = _get_user_record_or_fail(db, current_user_id) if current_user_id else None
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
     if work_order.status == "cancelada":
         raise BusinessRuleViolation("Nao e possivel efetuar uma OS cancelada.")
     work_order.status = "concluida"
@@ -1665,7 +1734,7 @@ def mark_work_order_as_completed(db: Session, work_order_id: int, current_user_i
             ),
             current_user_id=current_user_id,
         )
-    return get_work_order(db, work_order.id)
+    return get_work_order(db, work_order.id, current_user=current_user)
 
 
 def settle_work_order(db: Session, work_order_id: int, current_user_id: Optional[int] = None) -> WorkOrder:
@@ -1674,7 +1743,8 @@ def settle_work_order(db: Session, work_order_id: int, current_user_id: Optional
     from app.domain.enums import AppointmentSource, AppointmentStatus
     from app.infrastructure.models import Appointment
 
-    work_order = _get_work_order_or_fail(db, work_order_id)
+    current_user = _get_user_record_or_fail(db, current_user_id) if current_user_id else None
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
     if work_order.status == "cancelada":
         raise BusinessRuleViolation("Nao e possivel dar baixa em uma OS cancelada.")
     work_order.status = "concluida"
@@ -1702,18 +1772,26 @@ def settle_work_order(db: Session, work_order_id: int, current_user_id: Optional
             ),
             current_user_id=current_user_id,
         )
-    return get_work_order(db, work_order.id)
+    return get_work_order(db, work_order.id, current_user=current_user)
 
 
-def _get_work_order_photo_or_fail(db: Session, photo_id: int) -> WorkOrderPhoto:
-    photo = db.query(WorkOrderPhoto).filter(WorkOrderPhoto.id == photo_id).first()
+def _get_work_order_photo_or_fail(db: Session, photo_id: int, current_user: Optional[User] = None) -> WorkOrderPhoto:
+    query = db.query(WorkOrderPhoto).join(WorkOrder, WorkOrder.id == WorkOrderPhoto.os_id)
+    if current_user and not _is_master_user(current_user):
+        query = query.filter(WorkOrder.empresa_prestadora_id == _require_company_scope(current_user))
+    photo = query.filter(WorkOrderPhoto.id == photo_id).first()
     if not photo:
         raise BusinessRuleViolation("Foto da ordem de servico nao encontrada.")
     return photo
 
 
-def add_work_order_photos(db: Session, work_order_id: int, files: Iterable[tuple[str, str, bytes]]) -> WorkOrder:
-    work_order = _get_work_order_or_fail(db, work_order_id)
+def add_work_order_photos(
+    db: Session,
+    work_order_id: int,
+    files: Iterable[tuple[str, str, bytes]],
+    current_user: Optional[User] = None,
+) -> WorkOrder:
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
     prepared_files = list(files)
     if not prepared_files:
         raise BusinessRuleViolation("Selecione pelo menos uma foto para anexar na ordem de servico.")
@@ -1741,22 +1819,22 @@ def add_work_order_photos(db: Session, work_order_id: int, files: Iterable[tuple
 
     db.commit()
     db.expire_all()
-    return get_work_order(db, work_order.id)
+    return get_work_order(db, work_order.id, current_user=current_user)
 
 
-def delete_work_order_photo(db: Session, work_order_id: int, photo_id: int) -> WorkOrder:
-    work_order = _get_work_order_or_fail(db, work_order_id)
-    photo = _get_work_order_photo_or_fail(db, photo_id)
+def delete_work_order_photo(db: Session, work_order_id: int, photo_id: int, current_user: Optional[User] = None) -> WorkOrder:
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
+    photo = _get_work_order_photo_or_fail(db, photo_id, current_user=current_user)
     if photo.os_id != work_order.id:
         raise BusinessRuleViolation("A foto informada nao pertence a esta ordem de servico.")
     db.delete(photo)
     db.commit()
     db.expire_all()
-    return get_work_order(db, work_order.id)
+    return get_work_order(db, work_order.id, current_user=current_user)
 
 
-def get_work_order_photo_content(db: Session, photo_id: int) -> tuple[str, str, bytes]:
-    photo = _get_work_order_photo_or_fail(db, photo_id)
+def get_work_order_photo_content(db: Session, photo_id: int, current_user: Optional[User] = None) -> tuple[str, str, bytes]:
+    photo = _get_work_order_photo_or_fail(db, photo_id, current_user=current_user)
     return photo.filename, photo.content_type, photo.image_data
 
 
@@ -2237,8 +2315,8 @@ def _draw_certificate_badge(pdf: canvas.Canvas, center_x: float, center_y: float
         pdf.circle(center_x + offset, center_y + radius - 7 * mm, 0.8 * mm, stroke=0, fill=1)
 
 
-def generate_work_order_pdf(db: Session, work_order_id: int) -> bytes:
-    work_order = get_work_order(db, work_order_id)
+def generate_work_order_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
+    work_order = get_work_order(db, work_order_id, current_user=current_user)
     settings = get_settings()
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -2301,8 +2379,8 @@ def generate_work_order_pdf(db: Session, work_order_id: int) -> bytes:
     return buffer.getvalue()
 
 
-def generate_technical_report_pdf(db: Session, work_order_id: int) -> bytes:
-    work_order = get_work_order(db, work_order_id)
+def generate_technical_report_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
+    work_order = get_work_order(db, work_order_id, current_user=current_user)
     settings = get_settings()
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -2567,8 +2645,9 @@ def _generate_official_sanitary_certificate_pdf(
     work_order_id: int,
     *,
     framed: bool,
+    current_user: Optional[User] = None,
 ) -> bytes:
-    work_order = get_work_order(db, work_order_id)
+    work_order = get_work_order(db, work_order_id, current_user=current_user)
     settings = get_settings()
     signature_path = require_technical_signature_path(work_order.tecnico)
     template_path = require_certificate_model_path()
@@ -2706,8 +2785,8 @@ def _generate_official_sanitary_certificate_pdf(
     return buffer.getvalue()
 
 
-def generate_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
-    return _generate_official_sanitary_certificate_pdf(db, work_order_id, framed=False)
+def generate_sanitary_certificate_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
+    return _generate_official_sanitary_certificate_pdf(db, work_order_id, framed=False, current_user=current_user)
 
 
 def _generate_ornamental_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
@@ -2953,5 +3032,5 @@ def _generate_premium_framed_sanitary_certificate_pdf(db: Session, work_order_id
     return buffer.getvalue()
 
 
-def generate_framed_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
-    return _generate_official_sanitary_certificate_pdf(db, work_order_id, framed=True)
+def generate_framed_sanitary_certificate_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
+    return _generate_official_sanitary_certificate_pdf(db, work_order_id, framed=True, current_user=current_user)

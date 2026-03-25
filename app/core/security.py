@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import jwt
 
@@ -35,7 +35,7 @@ def verify_password(password: str, hashed_password: str) -> bool:
     return hmac.compare_digest(digest, expected_hash)
 
 
-def create_access_token(subject: str, role: str) -> str:
+def create_access_token(subject: str, role: str, company_id: Optional[int] = None) -> str:
     settings = get_settings()
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=settings.access_token_expire_minutes
@@ -45,6 +45,8 @@ def create_access_token(subject: str, role: str) -> str:
         "role": role,
         "exp": expire,
     }
+    if company_id is not None:
+        payload["company_id"] = company_id
     return jwt.encode(
         payload,
         settings.jwt_secret,

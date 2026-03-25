@@ -2,9 +2,14 @@
 .pytest_cache/
 __pycache__/
 *.pyc
+.coverage
+.coverage.*
 .env
 *.db
 .vs/
+.idea/
+.mypy_cache/
+.ruff_cache/
 tmp/
 output/
 *.log
@@ -19,3 +24,4 @@ certificado/
 XSD/
 assinaturas_tecnicas/*
 !assinaturas_tecnicas/.gitkeep
+release/**/*.zip

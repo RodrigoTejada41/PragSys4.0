@@ -7,8 +7,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "SysPragas API"
+    app_version: str = "4.0.0"
     api_v1_prefix: str = "/api/v1"
     database_url: str = "sqlite:///./syspragas.db"
+    app_host: str = "127.0.0.1"
+    app_port: int = 8000
+    app_reload: bool = False
+    allow_remote_access: bool = False
+    log_level: str = "INFO"
     jwt_secret: str = "<SECRET>"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
@@ -109,6 +115,12 @@ class Settings(BaseSettings):
     @property
     def legacy_certificate_models_path(self) -> Optional[Path]:
         return self.resolve_project_path(self.legacy_certificate_models_dir, default="modelo")
+
+    @property
+    def effective_host(self) -> str:
+        if self.allow_remote_access and self.app_host == "127.0.0.1":
+            return "0.0.0.0"
+        return self.app_host
 
 
 @lru_cache

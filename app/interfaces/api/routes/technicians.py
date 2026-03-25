@@ -11,6 +11,7 @@ from app.application.services import (
     update_technician,
 )
 from app.infrastructure.db import get_db
+from app.infrastructure.models import User
 from app.interfaces.api.deps import require_roles
 
 router = APIRouter(prefix="/tecnicos", tags=["tecnicos"])
@@ -21,38 +22,47 @@ router = APIRouter(prefix="/tecnicos", tags=["tecnicos"])
     response_model=List[TechnicianRead],
     dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
 )
-def get_technicians(db: Session = Depends(get_db)) -> List[TechnicianRead]:
-    return list_technicians(db)
+def get_technicians(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> List[TechnicianRead]:
+    return list_technicians(db, current_user=current_user)
 
 
 @router.post(
     "",
     response_model=TechnicianRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_roles(["master", "admin"]))],
 )
-def post_technician(payload: TechnicianCreate, db: Session = Depends(get_db)) -> TechnicianRead:
-    return create_technician(db, payload)
+def post_technician(
+    payload: TechnicianCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin"])),
+) -> TechnicianRead:
+    return create_technician(db, payload, current_user=current_user)
 
 
 @router.put(
     "/{technician_id}",
     response_model=TechnicianRead,
-    dependencies=[Depends(require_roles(["master", "admin"]))],
 )
 def put_technician(
     technician_id: int,
     payload: TechnicianUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin"])),
 ) -> TechnicianRead:
-    return update_technician(db, technician_id, payload)
+    return update_technician(db, technician_id, payload, current_user=current_user)
 
 
 @router.delete(
     "/{technician_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_roles(["master", "admin"]))],
 )
-def remove_technician(technician_id: int, db: Session = Depends(get_db)) -> Response:
-    delete_technician(db, technician_id)
+def remove_technician(
+    technician_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin"])),
+) -> Response:
+    delete_technician(db, technician_id, current_user=current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

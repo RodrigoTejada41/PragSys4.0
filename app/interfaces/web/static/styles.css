@@ -713,6 +713,29 @@ textarea {
     background: rgba(246, 248, 242, 0.72);
 }
 
+.work-order-number-banner {
+    display: grid;
+    gap: 6px;
+    padding: 16px 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(45, 106, 79, 0.14);
+    background: linear-gradient(180deg, rgba(217, 240, 216, 0.42), rgba(255, 255, 255, 0.96));
+}
+
+.work-order-number-banner .eyebrow {
+    margin: 0;
+}
+
+.work-order-number-banner strong {
+    font-size: 1.1rem;
+    color: var(--sys-primary-strong);
+}
+
+.work-order-number-banner small {
+    color: var(--sys-muted);
+    line-height: 1.5;
+}
+
 .product-inline-action {
     align-self: end;
 }
