@@ -24,8 +24,6 @@ class WhatsAppIntegrationConfig:
 
     @property
     def is_ready(self) -> bool:
-        if not self.enabled:
-            return False
         provider = self.provider.strip().lower()
         if provider == "twilio":
             return bool(self.api_key and self.auth_token and self.sender_id)

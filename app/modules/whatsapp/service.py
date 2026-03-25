@@ -282,7 +282,7 @@ def _append_history(
 
 def get_whatsapp_configuration_status(db: Session) -> dict:
     config = load_whatsapp_config()
-    enabled = config.enabled and get_boolean_setting(db, "whatsapp_enabled", fallback=config.enabled)
+    enabled = get_boolean_setting(db, "whatsapp_enabled", fallback=config.enabled)
     return {
         "enabled": enabled,
         "provider": config.provider,
@@ -311,7 +311,7 @@ def _normalize_connection_status(payload: Optional[dict], config: WhatsAppIntegr
         instance_payload.get("instanceName")
         or instance_payload.get("instance")
         or payload.get("instance_name")
-        or payload.get("instance")
+        or (payload.get("instance") if isinstance(payload.get("instance"), str) else None)
         or payload.get("name")
         or config.instance_name
         or config.sender_id
@@ -358,11 +358,12 @@ def _normalize_connection_status(payload: Optional[dict], config: WhatsAppIntegr
 
 class WhatsAppService:
     @staticmethod
-    def get_status() -> WhatsAppConnectionStatus:
+    def get_status(*, enabled_override: Optional[bool] = None) -> WhatsAppConnectionStatus:
         config = load_whatsapp_config()
         instance_name = config.instance_name or config.sender_id
+        effective_enabled = config.enabled if enabled_override is None else enabled_override
 
-        if not config.enabled:
+        if not effective_enabled:
             return WhatsAppConnectionStatus(
                 status="desconectado",
                 provider=config.provider,
@@ -442,8 +443,9 @@ def enviar_mensagem_whatsapp(numero: str, mensagem: str) -> WhatsAppSendResult:
 
 
 def get_whatsapp_connection_status(db: Session) -> dict:
-    status = WhatsAppService.get_status().__dict__
-    if not get_boolean_setting(db, "whatsapp_enabled", fallback=load_whatsapp_config().enabled):
+    enabled = get_boolean_setting(db, "whatsapp_enabled", fallback=load_whatsapp_config().enabled)
+    status = WhatsAppService.get_status(enabled_override=enabled).__dict__
+    if not enabled:
         status["status"] = "desconectado"
         status["configured"] = False
         status["error_message"] = "Integracao WhatsApp desabilitada nas configuracoes do sistema."
@@ -633,3 +635,5 @@ def send_appointment_whatsapp_message(
     from app.application.scheduling_services import get_appointment
 
     return get_appointment(db, appointment.id)
+
+

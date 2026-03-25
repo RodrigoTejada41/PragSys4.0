@@ -17,6 +17,9 @@ build/
 dist/
 *.spec
 *.egg-info/
+node_modules/
+services/**/node_modules/
+services/whatsapp-bridge/sessions/
 .venv_backup_*/
 .venv_py39_backup/
 certificado/

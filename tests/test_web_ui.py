@@ -27,4 +27,5 @@ def test_static_app_js_includes_appointment_availability_feedback(client):
     assert "Enviar WhatsApp ao salvar este agendamento" in response.text
     assert "WhatsApp indisponivel" in response.text
     assert "Conectar via QR" in response.text
+    assert "Conectar WhatsApp" in response.text
     assert "Autenticacao por QR Code" in response.text

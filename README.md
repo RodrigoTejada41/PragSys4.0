@@ -71,12 +71,29 @@ Acesse de outra maquina da rede:
 - [Instalacao local](docs/installation-local.md)
 - [Execucao em rede](docs/installation-network.md)
 - [Arquitetura multempresa](docs/multitenancy-architecture.md)
+- [Bridge QR do WhatsApp](docs/whatsapp-qr-bridge.md)
 - [Publicacao no GitHub](docs/github-publishing.md)
 - [Relatorio tecnico da release](docs/technical-report-4.0.0.md)
 
 ## Docker
 
 O projeto continua com `Dockerfile` e `docker-compose.yml`, mas a release 4.0.0 deixa claro que o modo principal de operacao e instalacao direta. Container passa a ser opcional para homologacao, empacotamento ou infraestrutura futura.
+
+## WhatsApp com QR Code
+
+O projeto agora inclui um bridge opcional com `Baileys` para autenticacao via QR Code e envio de mensagens sem dependencia obrigatoria de API paga.
+
+Execucao local:
+
+```powershell
+.\scripts\run_whatsapp_bridge.ps1
+```
+
+Execucao via Docker:
+
+```powershell
+docker compose --profile whatsapp-bridge up --build -d
+```
 
 ## Testes
 

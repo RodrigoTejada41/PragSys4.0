@@ -263,22 +263,11 @@ function bindSettingsActions() {
                 return;
             }
             if (action === "whatsapp-connect-qr") {
-                state.integrations.whatsappQr = await apiFetch("/api/v1/whatsapp/sessao/qr", {
-                    method: "POST",
-                });
-                await refreshAppointmentIntegrationStatus();
-                renderSettings();
-                toast(state.integrations.whatsappQr.message || "Leia o QR Code do WhatsApp para conectar a sessao.");
+                await connectWhatsAppQr();
                 return;
             }
             if (action === "whatsapp-logout") {
-                state.integrations.whatsapp = await apiFetch("/api/v1/whatsapp/sessao/logout", {
-                    method: "POST",
-                });
-                state.integrations.whatsappQr = null;
-                renderSettings();
-                renderAppointments();
-                toast(state.integrations.whatsapp.error_message || "Sessao WhatsApp desconectada.");
+                await logoutWhatsApp();
                 return;
             }
         } catch (error) {
@@ -779,6 +768,7 @@ function renderSettings() {
     const notificationsLabel = settingsState.system.notifications_enabled ? "Ativas" : "Desativadas";
     const googleLabel = formatIntegrationStatus(google.status || "desconectado");
     const whatsappLabel = formatIntegrationStatus(whatsapp.status || "desconectado");
+    const whatsappEnabledInSettings = Boolean(settingsState.integrations.whatsapp_enabled);
     const googleMeta = google.account_email || google.message || "Conta nao conectada";
     const whatsappMeta = whatsapp.instance_name || whatsapp.error_message || "Nenhum numero vinculado detectado";
 
@@ -871,7 +861,7 @@ function renderSettings() {
             </div>
             <p class="origin-note">${escapeHtml(whatsapp.error_message || "Use esta area para validar a integracao antes de disparos automaticos.")}</p>
             <div class="inline-actions">
-                <button type="button" class="btn btn-success" data-settings-action="whatsapp-connect-qr" ${(whatsapp.supports_qr && settingsState.integrations.whatsapp_enabled) ? "" : "disabled"}>Conectar via QR</button>
+                <button type="button" class="btn btn-success" data-settings-action="whatsapp-connect-qr" ${whatsappEnabledInSettings ? "" : "disabled"}>Conectar via QR</button>
                 <button type="button" class="btn btn-default ghost-button" data-settings-action="whatsapp-logout" ${whatsapp.supports_qr ? "" : "disabled"}>Desconectar sessao</button>
                 <button type="button" class="btn btn-default ghost-button" data-integration-action="refresh-whatsapp">Atualizar status</button>
             </div>
@@ -4694,8 +4684,11 @@ function formatIntegrationStatus(status) {
 function renderAppointmentIntegrationCards() {
     const whatsapp = state.integrations.whatsapp || {};
     const google = state.integrations.google || {};
+    const whatsappEnabledInSettings = Boolean(state.settings?.integrations?.whatsapp_enabled);
     const googleConnected = google.status === "ativo";
     const googleCanLogout = googleConnected && Number(google.company_id || 0) > 0;
+    const whatsappConnected = whatsapp.status === "ativo";
+    const whatsappCanConnect = whatsappEnabledInSettings;
     const googleEmail = google.account_email || "Nenhuma conta conectada";
     const googleCompany = google.company_name ? `Empresa: ${escapeHtml(google.company_name)}` : "Empresa nao identificada";
     const whatsappMeta = whatsapp.instance_name
@@ -4710,6 +4703,8 @@ function renderAppointmentIntegrationCards() {
                 <p>${whatsappMeta}</p>
                 <p>${escapeHtml(whatsapp.error_message || "Status operacional da conexao usado pela agenda.")}</p>
                 <div class="inline-actions">
+                    <button type="button" class="btn btn-success" data-integration-action="whatsapp-connect-qr" ${whatsappCanConnect ? "" : "disabled"}>Conectar WhatsApp</button>
+                    <button type="button" class="btn btn-default ghost-button" data-integration-action="whatsapp-logout" ${whatsappConnected ? "" : "disabled"}>Logout</button>
                     <button type="button" class="btn btn-default ghost-button" data-integration-action="refresh-whatsapp">Atualizar status</button>
                 </div>
             </article>
@@ -4733,6 +4728,27 @@ async function refreshAppointmentIntegrationStatus() {
     state.integrations.google = await apiFetch("/api/v1/google-calendar/status");
     renderAppointments();
     renderSettings();
+}
+
+
+async function connectWhatsAppQr() {
+    state.integrations.whatsappQr = await apiFetch("/api/v1/whatsapp/sessao/qr", {
+        method: "POST",
+    });
+    await refreshAppointmentIntegrationStatus();
+    switchView("configuracoes");
+    toast(state.integrations.whatsappQr.message || "Leia o QR Code do WhatsApp para conectar a sessao.");
+}
+
+
+async function logoutWhatsApp() {
+    state.integrations.whatsapp = await apiFetch("/api/v1/whatsapp/sessao/logout", {
+        method: "POST",
+    });
+    state.integrations.whatsappQr = null;
+    renderSettings();
+    renderAppointments();
+    toast(state.integrations.whatsapp.error_message || "Sessao WhatsApp desconectada.");
 }
 
 
@@ -4964,6 +4980,14 @@ function bindAppointmentFilters() {
                 if (button.dataset.integrationAction === "refresh-whatsapp") {
                     await refreshAppointmentIntegrationStatus();
                     toast("Status das integracoes atualizado.");
+                    return;
+                }
+                if (button.dataset.integrationAction === "whatsapp-connect-qr") {
+                    await connectWhatsAppQr();
+                    return;
+                }
+                if (button.dataset.integrationAction === "whatsapp-logout") {
+                    await logoutWhatsApp();
                     return;
                 }
                 if (button.dataset.integrationAction === "google-login") {

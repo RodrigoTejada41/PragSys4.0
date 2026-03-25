@@ -109,6 +109,52 @@ def test_whatsapp_status_endpoint_reports_error_on_timeout(client, auth_headers,
     assert "Timeout" in payload["error_message"]
 
 
+def test_whatsapp_status_respects_persisted_system_toggle_over_env_default(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("WHATSAPP_ENABLED", "false")
+    monkeypatch.setenv("WHATSAPP_PROVIDER", "evolution")
+    monkeypatch.setenv("WHATSAPP_API_BASE_URL", "https://whatsapp.example.test")
+    monkeypatch.setenv("WHATSAPP_API_KEY", "api-key-teste")
+    monkeypatch.setenv("WHATSAPP_INSTANCE_NAME", "instancia-qr")
+    monkeypatch.delenv("WHATSAPP_STATUS_API_URL", raising=False)
+    get_settings.cache_clear()
+
+    settings_response = client.put(
+        "/api/v1/settings",
+        headers=auth_headers,
+        json={
+            "integrations": {
+                "whatsapp_enabled": True,
+            }
+        },
+    )
+    assert settings_response.status_code == 200
+
+    class FakeResponse:
+        status_code = 200
+        content = b'{"instance":{"instanceName":"instancia-qr","state":"connecting"}}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "instance": {
+                    "instanceName": "instancia-qr",
+                    "state": "connecting",
+                }
+            }
+
+    monkeypatch.setattr("app.modules.whatsapp.service.httpx.get", lambda *args, **kwargs: FakeResponse())
+
+    response = client.get("/api/v1/whatsapp/status", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "aguardando_conexao"
+    assert payload["supports_qr"] is True
+    assert payload["configured"] is True
+
+
 def test_whatsapp_status_endpoint_reports_qr_connector_details(client, auth_headers, monkeypatch):
     configure_whatsapp_qr(monkeypatch)
 

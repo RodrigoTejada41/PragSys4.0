@@ -22,6 +22,8 @@
 - Eventos enviados ao Google Agenda passaram a incluir endereco, telefone, tecnico, horario detalhado e duracao prevista.
 - Titulo do evento do Google Agenda passou a usar o padrao `Cliente | Tecnico | Hora`.
 - Cards de agendamento passaram a expor botao explicito de sincronizacao/reenvio com Google e mensagens operacionais mais claras em caso de falha.
+- Modulo de WhatsApp evoluido para suportar sessao por QR Code, status persistente da conexao e botao dedicado de conexao na agenda e nas configuracoes.
+- Bridge opcional de WhatsApp via `Baileys` adicionada ao repositorio para execucao local, em rede interna ou via Docker profile.
 
 ## [3.1.0] - 2026-03-21
 
