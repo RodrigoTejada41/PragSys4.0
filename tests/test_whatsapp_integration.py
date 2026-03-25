@@ -96,7 +96,9 @@ def test_create_appointment_sends_whatsapp_automatically(client, auth_headers, m
     class FakeClient:
         def send_message(self, destination_phone, message):
             assert destination_phone.startswith("55")
-            assert "Tecnico responsavel" in message
+            assert "Ola Cliente WhatsApp 501, tudo bem?" in message
+            assert "Tecnico: Tecnico WhatsApp 501" in message
+            assert "Servico: Controle preventivo" in message
             return WhatsAppSendResult(
                 provider="custom",
                 external_message_id="msg-001",
@@ -214,3 +216,68 @@ def test_manual_whatsapp_resend_creates_new_log_entry(client, auth_headers, monk
     assert len(payload["whatsapp_logs"]) == 2
     assert payload["whatsapp_logs"][0]["automatico"] is False
     assert payload["whatsapp_logs"][0]["external_message_id"] == "msg-2"
+
+
+def test_update_appointment_sends_whatsapp_automatically(client, auth_headers, monkeypatch):
+    configure_whatsapp(monkeypatch)
+    sent_messages = []
+
+    class FakeClient:
+        def send_message(self, destination_phone, message):
+            sent_messages.append((destination_phone, message))
+            return WhatsAppSendResult(
+                provider="custom",
+                external_message_id=f"msg-{len(sent_messages)}",
+                raw_response={"message_id": f"msg-{len(sent_messages)}"},
+            )
+
+    monkeypatch.setattr("app.modules.whatsapp.service._build_client", lambda config: FakeClient())
+
+    customer = create_customer(client, auth_headers, "504")
+    technician = create_technician(client, auth_headers, "504")
+    target_date = (date.today() + timedelta(days=5)).isoformat()
+
+    created = client.post(
+        "/api/v1/agendamentos",
+        headers=auth_headers,
+        json={
+            "cliente_id": customer["id"],
+            "tecnico_id": technician["id"],
+            "tipo_servico": "Controle inicial",
+            "data_agendamento": target_date,
+            "hora_agendamento": "13:00:00",
+            "duracao_prevista_minutos": 60,
+            "status": "pendente",
+            "origem": "manual",
+            "sincronizar_google": False,
+            "enviar_whatsapp": False,
+        },
+    )
+
+    assert created.status_code == 200
+    assert len(sent_messages) == 0
+
+    updated = client.put(
+        f"/api/v1/agendamentos/{created.json()['id']}",
+        headers=auth_headers,
+        json={
+            "cliente_id": customer["id"],
+            "tecnico_id": technician["id"],
+            "tipo_servico": "Controle inicial revisado",
+            "data_agendamento": target_date,
+            "hora_agendamento": "14:15:00",
+            "duracao_prevista_minutos": 90,
+            "status": "confirmado",
+            "origem": "manual",
+            "sincronizar_google": False,
+            "enviar_whatsapp": True,
+        },
+    )
+
+    assert updated.status_code == 200
+    payload = updated.json()
+    assert payload["whatsapp_status"] == "enviado"
+    assert len(payload["whatsapp_logs"]) == 1
+    assert payload["whatsapp_logs"][0]["automatico"] is True
+    assert "Hora: 14:15" in sent_messages[0][1]
+    assert "Servico: Controle inicial revisado" in sent_messages[0][1]

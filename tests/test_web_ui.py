@@ -24,3 +24,4 @@ def test_static_app_js_includes_appointment_availability_feedback(client):
     assert "Disponibilidade" in response.text
     assert "Nenhum conflito encontrado para este tecnico." in response.text
     assert "Tentar sincronizar no Google" in response.text
+    assert "Enviar WhatsApp ao salvar este agendamento" in response.text

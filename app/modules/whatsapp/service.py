@@ -8,12 +8,17 @@ from typing import Optional, Protocol, Union
 import httpx
 from sqlalchemy.orm import Session, joinedload
 
-from app.application.settings_service import get_boolean_setting
+from app.application.settings_service import get_boolean_setting, get_setting_value
 from app.core.exceptions import BusinessRuleViolation
 from app.infrastructure.models import Appointment, AppointmentHistory
 from app.modules.whatsapp.config import WhatsAppIntegrationConfig, load_whatsapp_config
 from app.modules.whatsapp.repository import create_appointment_whatsapp_log
-from app.modules.whatsapp.utils import build_appointment_whatsapp_message, compact_error_message, normalize_whatsapp_phone
+from app.modules.whatsapp.utils import (
+    DEFAULT_APPOINTMENT_WHATSAPP_TEMPLATE,
+    build_appointment_whatsapp_message,
+    compact_error_message,
+    normalize_whatsapp_phone,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +302,16 @@ class WhatsAppService:
             )
 
 
+def send_whatsapp_message(destination_phone: str, message: str) -> WhatsAppSendResult:
+    config = load_whatsapp_config()
+    client = _build_client(config)
+    return client.send_message(destination_phone, message)
+
+
+def enviar_mensagem_whatsapp(numero: str, mensagem: str) -> WhatsAppSendResult:
+    return send_whatsapp_message(numero, mensagem)
+
+
 def get_whatsapp_connection_status(db: Session) -> dict:
     status = WhatsAppService.get_status().__dict__
     if not get_boolean_setting(db, "whatsapp_enabled", fallback=load_whatsapp_config().enabled):
@@ -319,8 +334,23 @@ def send_appointment_whatsapp_message(
     destination_phone = appointment.telefone or ""
     rendered_message = ""
 
+    def _resolve_error_message(exc: Exception) -> str:
+        if isinstance(exc, BusinessRuleViolation):
+            return exc.message
+        if isinstance(exc, httpx.TimeoutException):
+            return "API do WhatsApp indisponivel por timeout."
+        if isinstance(exc, httpx.ConnectError):
+            return "Erro de conexao com a API do WhatsApp."
+        if isinstance(exc, httpx.HTTPStatusError):
+            response_text = exc.response.text if exc.response is not None else str(exc)
+            return f"Falha da API do WhatsApp: {response_text}"
+        if isinstance(exc, httpx.RequestError):
+            return "Falha de comunicacao com a API do WhatsApp."
+        return str(exc)
+
     try:
-        rendered_message = build_appointment_whatsapp_message(appointment)
+        template = str(get_setting_value(db, "whatsapp_default_message", DEFAULT_APPOINTMENT_WHATSAPP_TEMPLATE) or "").strip()
+        rendered_message = build_appointment_whatsapp_message(appointment, template=template)
         normalized_phone = normalize_whatsapp_phone(destination_phone)
         if not get_boolean_setting(db, "whatsapp_enabled", fallback=config.enabled):
             raise BusinessRuleViolation("Integracao WhatsApp desabilitada nas configuracoes do sistema.")
@@ -328,8 +358,7 @@ def send_appointment_whatsapp_message(
             raise BusinessRuleViolation("Integracao WhatsApp desabilitada nas configuracoes do sistema.")
         if not config.is_ready:
             raise BusinessRuleViolation("Configuracao da integracao WhatsApp incompleta.")
-        client = _build_client(config)
-        result = client.send_message(normalized_phone, rendered_message)
+        result = send_whatsapp_message(normalized_phone, rendered_message)
         create_appointment_whatsapp_log(
             db,
             appointment_id=appointment.id,
@@ -351,7 +380,7 @@ def send_appointment_whatsapp_message(
         )
         db.commit()
     except (BusinessRuleViolation, httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
-        error_message = exc.message if isinstance(exc, BusinessRuleViolation) else str(exc)
+        error_message = _resolve_error_message(exc)
         normalized_phone = "".join(char for char in destination_phone if char.isdigit()) or destination_phone or "-"
         create_appointment_whatsapp_log(
             db,

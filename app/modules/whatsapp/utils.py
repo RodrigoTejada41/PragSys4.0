@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from string import Formatter
 from typing import Optional
 
 from app.core.exceptions import BusinessRuleViolation
@@ -31,25 +32,47 @@ def format_brazilian_time(value) -> str:
     return str(value or "")[:5]
 
 
-def build_appointment_whatsapp_message(appointment) -> str:
+DEFAULT_APPOINTMENT_WHATSAPP_TEMPLATE = """Ola {nome_cliente}, tudo bem?
+
+Seu agendamento foi confirmado com sucesso!
+
+Data: {data}
+Hora: {hora}
+Tecnico: {tecnico}
+Servico: {servico}
+
+Qualquer duvida estamos a disposicao."""
+
+
+def _safe_format_template(template: str, values: dict[str, str]) -> str:
+    formatter = Formatter()
+    parts: list[str] = []
+    for literal_text, field_name, format_spec, conversion in formatter.parse(template):
+        parts.append(literal_text)
+        if field_name is None:
+            continue
+        replacement = values.get(field_name, "{" + field_name + "}")
+        parts.append(replacement)
+    return "".join(parts)
+
+
+def build_appointment_whatsapp_message(appointment, template: Optional[str] = None) -> str:
     customer_name = getattr(appointment, "cliente_nome", None) or appointment.cliente.razao_social
     technician_name = getattr(appointment, "tecnico_nome", None) or (appointment.tecnico.nome if appointment.tecnico else None)
     if not technician_name:
         raise BusinessRuleViolation("Defina o tecnico responsavel antes de enviar WhatsApp para este agendamento.")
     service_type = str(appointment.tipo_servico or "").strip()
-    message_lines = [
-        f"Ola, {customer_name}.",
-        "Seu agendamento foi confirmado com sucesso.",
-        f"Data: {format_brazilian_date(appointment.data_agendamento)}",
-        f"Horario: {format_brazilian_time(appointment.hora_agendamento)}",
-        f"Tecnico responsavel: {technician_name}",
-    ]
-    if service_type:
-        message_lines.append(f"Servico: {service_type}")
-    if getattr(appointment, "os_numero", None):
-        message_lines.append(f"OS vinculada: {appointment.os_numero}")
-    message_lines.append("Em caso de duvidas, responda esta mensagem ou entre em contato com a equipe.")
-    return "\n".join(message_lines)
+    selected_template = str(template or DEFAULT_APPOINTMENT_WHATSAPP_TEMPLATE).strip() or DEFAULT_APPOINTMENT_WHATSAPP_TEMPLATE
+    values = {
+        "nome_cliente": customer_name,
+        "data": format_brazilian_date(appointment.data_agendamento),
+        "hora": format_brazilian_time(appointment.hora_agendamento),
+        "tecnico": technician_name,
+        "servico": service_type or "-",
+        "telefone": digits_only(getattr(appointment, "telefone", None)),
+        "os_numero": getattr(appointment, "os_numero", None) or "",
+    }
+    return _safe_format_template(selected_template, values)
 
 
 def compact_error_message(value: Optional[str]) -> Optional[str]:

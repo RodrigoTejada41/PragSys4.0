@@ -480,6 +480,8 @@ def create_appointment(
     db.commit()
     appointment = get_appointment(db, appointment.id)
     if (
+        payload.enviar_whatsapp
+        and
         get_boolean_setting(db, "whatsapp_enabled", fallback=get_settings().whatsapp_enabled)
         and get_boolean_setting(db, "whatsapp_auto_send", fallback=True)
         and appointment.status not in {AppointmentStatus.CANCELADO.value, AppointmentStatus.NAO_REALIZADO.value}
@@ -565,6 +567,20 @@ def update_appointment(
         )
         db.commit()
         appointment = get_appointment(db, appointment.id)
+    if (
+        payload.enviar_whatsapp
+        and get_boolean_setting(db, "whatsapp_enabled", fallback=get_settings().whatsapp_enabled)
+        and get_boolean_setting(db, "whatsapp_auto_send", fallback=True)
+        and appointment.status not in {AppointmentStatus.CANCELADO.value, AppointmentStatus.NAO_REALIZADO.value}
+    ):
+        from app.modules.whatsapp.service import send_appointment_whatsapp_message
+
+        appointment = send_appointment_whatsapp_message(
+            db,
+            appointment.id,
+            current_user_id=current_user_id,
+            automatic=True,
+        )
     return appointment
 
 

@@ -4,6 +4,13 @@ from collections.abc import Callable
 
 from sqlalchemy import Engine, inspect, text
 
+LEGACY_WHATSAPP_TEMPLATE = '"Seu agendamento foi confirmado com sucesso."'
+UPDATED_WHATSAPP_TEMPLATE = (
+    '"Ola {nome_cliente}, tudo bem?\\n\\nSeu agendamento foi confirmado com sucesso!\\n\\n'
+    'Data: {data}\\nHora: {hora}\\nTecnico: {tecnico}\\nServico: {servico}\\n\\n'
+    'Qualquer duvida estamos a disposicao."'
+)
+
 
 MigrationFn = Callable[[Engine], None]
 
@@ -348,10 +355,29 @@ def _migration_20260325_002_system_settings(engine: Engine) -> None:
         )
 
 
+def _migration_20260325_003_whatsapp_template_refresh(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if "system_settings" not in set(inspector.get_table_names()):
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE system_settings
+                SET value = :new_value
+                WHERE key = 'whatsapp_default_message'
+                  AND value = :legacy_value
+                """
+            ),
+            {"new_value": UPDATED_WHATSAPP_TEMPLATE, "legacy_value": LEGACY_WHATSAPP_TEMPLATE},
+        )
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
     ("20260325_002_system_settings", _migration_20260325_002_system_settings),
+    ("20260325_003_whatsapp_template_refresh", _migration_20260325_003_whatsapp_template_refresh),
 ]
 
 

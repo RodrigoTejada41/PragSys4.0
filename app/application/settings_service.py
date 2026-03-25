@@ -19,7 +19,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "google_calendar_enabled": False,
     "whatsapp_enabled": False,
     "whatsapp_auto_send": True,
-    "whatsapp_default_message": "Seu agendamento foi confirmado com sucesso.",
+    "whatsapp_default_message": "Ola {nome_cliente}, tudo bem?\n\nSeu agendamento foi confirmado com sucesso!\n\nData: {data}\nHora: {hora}\nTecnico: {tecnico}\nServico: {servico}\n\nQualquer duvida estamos a disposicao.",
     "multiempresa_enabled": True,
     "operation_mode": "local",
     "notifications_enabled": True,

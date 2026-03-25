@@ -1490,6 +1490,10 @@ function buildForms() {
                     <option value="true">Sim</option>
                 </select>
             </label>
+            <label class="checkbox-field">
+                <input name="enviar_whatsapp" type="checkbox" checked>
+                <span>Enviar WhatsApp ao salvar este agendamento</span>
+            </label>
             <label class="full-width"><span>Observacoes externas</span><textarea name="observacoes" placeholder="Orientacoes visiveis para a operacao"></textarea></label>
             <label class="full-width"><span>Observacoes internas</span><textarea name="observacoes_internas"></textarea></label>
             <label class="full-width"><span>Instrucoes tecnicas</span><textarea name="instrucoes_tecnicas"></textarea></label>
@@ -3986,6 +3990,7 @@ function getAppointmentPayload(form) {
         status: raw.status,
         origem: raw.origem,
         sincronizar_google: raw.sincronizar_google === "true",
+        enviar_whatsapp: form.querySelector('[name="enviar_whatsapp"]').checked,
     };
 }
 
@@ -4168,6 +4173,7 @@ function bindAppointmentWorkspace() {
     });
     form.querySelector('[name="tecnico_id"]').addEventListener("change", renderAppointmentCustomerSummary);
     form.querySelector('[name="sincronizar_google"]').addEventListener("change", renderAppointmentCustomerSummary);
+    form.querySelector('[name="enviar_whatsapp"]').addEventListener("change", renderAppointmentCustomerSummary);
     form.querySelector('[name="data_agendamento"]').addEventListener("change", renderAppointmentCustomerSummary);
     form.querySelector('[name="hora_agendamento"]').addEventListener("change", renderAppointmentCustomerSummary);
     form.querySelector('[name="duracao_prevista_minutos"]').addEventListener("change", renderAppointmentCustomerSummary);
@@ -4190,6 +4196,7 @@ function clearAppointmentForm() {
     form.querySelector('[name="status"]').value = "pendente";
     form.querySelector('[name="origem"]').value = "manual";
     form.querySelector('[name="sincronizar_google"]').value = state.settings?.system?.appointment_default_google_sync ? "true" : "false";
+    form.querySelector('[name="enviar_whatsapp"]').checked = Boolean(state.settings?.integrations?.whatsapp_auto_send);
     form.querySelector('[name="duracao_prevista_minutos"]').value = "60";
     form.querySelector('[name="data_agendamento"]').value = todayIso();
     syncAppointmentWorkOrderOptions();
@@ -4253,6 +4260,11 @@ function renderAppointmentCustomerSummary() {
             <span class="order-summary-label">Responsavel</span>
             <strong>${escapeHtml(technician?.nome || "Tecnico ainda nao atribuido")}</strong>
             <span>${escapeHtml(form.querySelector('[name="sincronizar_google"]').value === "true" ? "Google Agenda habilitado" : "Google Agenda desabilitado")}</span>
+        </div>
+        <div class="appointment-customer-card">
+            <span class="order-summary-label">WhatsApp</span>
+            <strong>${escapeHtml(form.querySelector('[name="enviar_whatsapp"]').checked ? "Envio previsto" : "Nao enviar")}</strong>
+            <span>${escapeHtml(form.querySelector('[name="enviar_whatsapp"]').checked ? "O cliente recebera mensagem ao salvar." : "Nenhuma mensagem automatica sera enviada neste salvamento.")}</span>
         </div>
         <div class="appointment-customer-card ${scheduleInsight.conflict ? "is-conflict" : "is-available"}">
             <span class="order-summary-label">Disponibilidade</span>
@@ -6829,6 +6841,10 @@ function fillForm(form, data) {
     Object.entries(data).forEach(([key, value]) => {
         const field = form.querySelector(`[name="${key}"]`);
         if (field) {
+            if (field.type === "checkbox") {
+                field.checked = Boolean(value);
+                return;
+            }
             field.value = value ?? "";
         }
     });
@@ -6910,6 +6926,7 @@ function fillAppointmentForm(item) {
         status: item.status,
         origem: item.origem,
         sincronizar_google: item.sincronizar_google ? "true" : "false",
+        enviar_whatsapp: true,
         observacoes: item.observacoes || "",
         observacoes_internas: item.observacoes_internas || "",
         instrucoes_tecnicas: item.instrucoes_tecnicas || "",

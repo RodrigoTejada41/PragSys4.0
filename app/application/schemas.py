@@ -697,6 +697,7 @@ class AppointmentBase(BaseModel):
     retorno_revisita: Optional[str] = None
     status: AppointmentStatus = AppointmentStatus.PENDENTE
     sincronizar_google: bool = False
+    enviar_whatsapp: bool = True
     agendamento_pai_id: Optional[int] = None
 
 
