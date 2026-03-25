@@ -35,8 +35,24 @@ class WhatsAppConnectionStatus:
     status: str
     provider: str
     instance_name: Optional[str]
+    connected_phone: Optional[str]
     error_message: Optional[str]
     configured: bool
+    supports_qr: bool
+    session_persistent: bool
+
+
+@dataclass(frozen=True)
+class WhatsAppQrSessionStatus:
+    status: str
+    provider: str
+    instance_name: Optional[str]
+    qr_code: Optional[str]
+    qr_image_data_url: Optional[str]
+    pairing_code: Optional[str]
+    expires_at: Optional[str]
+    message: Optional[str]
+    error_message: Optional[str]
 
 
 class WhatsAppProviderClient(Protocol):
@@ -103,19 +119,20 @@ class CustomWhatsAppClient:
         self._config = config
 
     def send_message(self, destination_phone: str, message: str) -> WhatsAppSendResult:
-        headers = {"Content-Type": "application/json"}
-        if self._config.auth_token:
-            headers["Authorization"] = f"Bearer {self._config.auth_token}"
-        if self._config.api_key:
-            headers["X-API-Key"] = self._config.api_key
+        headers = _build_auth_headers(self._config)
+        headers["Content-Type"] = "application/json"
         payload = {
             "sender_id": self._config.sender_id,
+            "instance_name": self._config.instance_name,
+            "instance": self._config.instance_name,
             "to": destination_phone,
+            "number": destination_phone,
             "message": message,
+            "text": message,
             "channel": "whatsapp",
         }
         response = httpx.post(
-            self._config.api_base_url,
+            _resolve_message_url(self._config),
             json=payload,
             headers=headers,
             timeout=self._config.timeout_seconds,
@@ -124,6 +141,35 @@ class CustomWhatsAppClient:
         body = response.json()
         external_message_id = body.get("message_id") or body.get("messageId") or body.get("id")
         return WhatsAppSendResult(provider="custom", external_message_id=external_message_id, raw_response=body)
+
+
+class EvolutionWhatsAppClient:
+    def __init__(self, config: WhatsAppIntegrationConfig):
+        self._config = config
+
+    def send_message(self, destination_phone: str, message: str) -> WhatsAppSendResult:
+        endpoint = _resolve_message_url(self._config)
+        headers = _build_auth_headers(self._config)
+        headers["Content-Type"] = "application/json"
+        payload = {
+            "number": destination_phone,
+            "text": message,
+        }
+        response = httpx.post(
+            endpoint,
+            json=payload,
+            headers=headers,
+            timeout=self._config.timeout_seconds,
+        )
+        response.raise_for_status()
+        body = response.json() if response.content else {}
+        external_message_id = (
+            body.get("key", {}).get("id")
+            or body.get("response", {}).get("key", {}).get("id")
+            or body.get("message", {}).get("key", {}).get("id")
+            or body.get("id")
+        )
+        return WhatsAppSendResult(provider="evolution", external_message_id=external_message_id, raw_response=body)
 
 
 def _appointment_query(db: Session):
@@ -152,7 +198,60 @@ def _build_client(config: WhatsAppIntegrationConfig) -> WhatsAppProviderClient:
         return MetaCloudApiClient(config)
     if provider == "twilio":
         return TwilioWhatsAppClient(config)
+    if provider == "evolution":
+        return EvolutionWhatsAppClient(config)
     return CustomWhatsAppClient(config)
+
+
+def _build_auth_headers(config: WhatsAppIntegrationConfig) -> dict[str, str]:
+    headers = {}
+    if config.auth_token:
+        headers["Authorization"] = f"Bearer {config.auth_token}"
+    if config.api_key:
+        headers["X-API-Key"] = config.api_key
+        headers["apikey"] = config.api_key
+    return headers
+
+
+def _resolve_message_url(config: WhatsAppIntegrationConfig) -> str:
+    if config.message_api_url:
+        return config.message_api_url
+    provider = config.provider.strip().lower()
+    if provider == "evolution" and config.api_base_url and config.instance_name:
+        return f"{config.api_base_url.rstrip('/')}/message/sendText/{config.instance_name}"
+    if config.api_base_url:
+        return config.api_base_url
+    raise BusinessRuleViolation("Configure o endpoint de envio do WhatsApp antes de disparar mensagens.")
+
+
+def _resolve_qr_url(config: WhatsAppIntegrationConfig) -> Optional[str]:
+    if config.qr_api_url:
+        return config.qr_api_url
+    if config.provider == "evolution" and config.api_base_url and config.instance_name:
+        return f"{config.api_base_url.rstrip('/')}/instance/connect/{config.instance_name}"
+    if config.supports_qr and config.api_base_url:
+        return f"{config.api_base_url.rstrip('/')}/session/qr"
+    return None
+
+
+def _resolve_connect_url(config: WhatsAppIntegrationConfig) -> Optional[str]:
+    if config.connect_api_url:
+        return config.connect_api_url
+    if config.provider == "evolution":
+        return None
+    if config.supports_qr and config.api_base_url:
+        return f"{config.api_base_url.rstrip('/')}/session/connect"
+    return None
+
+
+def _resolve_logout_url(config: WhatsAppIntegrationConfig) -> Optional[str]:
+    if config.logout_api_url:
+        return config.logout_api_url
+    if config.provider == "evolution" and config.api_base_url and config.instance_name:
+        return f"{config.api_base_url.rstrip('/')}/instance/logout/{config.instance_name}"
+    if config.supports_qr and config.api_base_url:
+        return f"{config.api_base_url.rstrip('/')}/session/logout"
+    return None
 
 
 def _serialize_external_response(payload: Optional[Union[dict, str]]) -> Optional[str]:
@@ -191,12 +290,15 @@ def get_whatsapp_configuration_status(db: Session) -> dict:
         "api_base_url": config.api_base_url,
         "sender_id_configured": bool(config.sender_id),
         "auth_configured": bool(config.auth_token or config.api_key),
+        "supports_qr": config.supports_qr,
     }
 
 
 def _resolve_status_url(config: WhatsAppIntegrationConfig) -> Optional[str]:
     if config.status_api_url:
         return config.status_api_url
+    if config.provider == "evolution" and config.api_base_url and config.instance_name:
+        return f"{config.api_base_url.rstrip('/')}/instance/connectionState/{config.instance_name}"
     if config.provider == "custom" and config.api_base_url:
         return f"{config.api_base_url.rstrip('/')}/status"
     return None
@@ -204,8 +306,11 @@ def _resolve_status_url(config: WhatsAppIntegrationConfig) -> Optional[str]:
 
 def _normalize_connection_status(payload: Optional[dict], config: WhatsAppIntegrationConfig) -> WhatsAppConnectionStatus:
     payload = payload or {}
+    instance_payload = payload.get("instance") if isinstance(payload.get("instance"), dict) else {}
     instance_name = (
-        payload.get("instance_name")
+        instance_payload.get("instanceName")
+        or instance_payload.get("instance")
+        or payload.get("instance_name")
         or payload.get("instance")
         or payload.get("name")
         or config.instance_name
@@ -213,7 +318,8 @@ def _normalize_connection_status(payload: Optional[dict], config: WhatsAppIntegr
     )
     connected_flag = payload.get("connected")
     raw_status = str(
-        payload.get("status")
+        instance_payload.get("state")
+        or payload.get("status")
         or payload.get("state")
         or payload.get("connection_status")
         or ""
@@ -229,12 +335,24 @@ def _normalize_connection_status(payload: Optional[dict], config: WhatsAppIntegr
         status = "ativo" if config.is_ready else "aguardando_conexao"
 
     error_message = payload.get("error") or payload.get("message") or None
+    connected_phone = (
+        instance_payload.get("ownerJid")
+        or instance_payload.get("profileName")
+        or payload.get("phone")
+        or payload.get("wid")
+        or payload.get("session_phone")
+        or payload.get("me")
+        or payload.get("account")
+    )
     return WhatsAppConnectionStatus(
         status=status,
         provider=config.provider,
         instance_name=instance_name,
+        connected_phone=compact_error_message(str(connected_phone)) if connected_phone else None,
         error_message=compact_error_message(error_message) if error_message else None,
         configured=config.is_ready,
+        supports_qr=config.supports_qr,
+        session_persistent=config.supports_qr,
     )
 
 
@@ -249,16 +367,22 @@ class WhatsAppService:
                 status="desconectado",
                 provider=config.provider,
                 instance_name=instance_name,
+                connected_phone=None,
                 error_message="Integracao WhatsApp desabilitada nas configuracoes.",
                 configured=False,
+                supports_qr=config.supports_qr,
+                session_persistent=config.supports_qr,
             )
         if not config.is_ready:
             return WhatsAppConnectionStatus(
                 status="aguardando_conexao",
                 provider=config.provider,
                 instance_name=instance_name,
+                connected_phone=None,
                 error_message="Configuracao da integracao WhatsApp incompleta.",
                 configured=False,
+                supports_qr=config.supports_qr,
+                session_persistent=config.supports_qr,
             )
 
         status_url = _resolve_status_url(config)
@@ -267,15 +391,14 @@ class WhatsAppService:
                 status="ativo",
                 provider=config.provider,
                 instance_name=instance_name,
+                connected_phone=None,
                 error_message=None,
                 configured=True,
+                supports_qr=config.supports_qr,
+                session_persistent=config.supports_qr,
             )
 
-        headers = {}
-        if config.auth_token:
-            headers["Authorization"] = f"Bearer {config.auth_token}"
-        if config.api_key:
-            headers["X-API-Key"] = config.api_key
+        headers = _build_auth_headers(config)
 
         try:
             response = httpx.get(status_url, headers=headers, timeout=config.timeout_seconds)
@@ -288,8 +411,11 @@ class WhatsAppService:
                 status="erro",
                 provider=config.provider,
                 instance_name=instance_name,
+                connected_phone=None,
                 error_message="Timeout ao consultar o status da conexao WhatsApp.",
                 configured=True,
+                supports_qr=config.supports_qr,
+                session_persistent=config.supports_qr,
             )
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("WhatsApp status check failed: %s", exc)
@@ -297,8 +423,11 @@ class WhatsAppService:
                 status="erro",
                 provider=config.provider,
                 instance_name=instance_name,
+                connected_phone=None,
                 error_message=compact_error_message(str(exc)) or "Falha ao consultar o status da conexao WhatsApp.",
                 configured=True,
+                supports_qr=config.supports_qr,
+                session_persistent=config.supports_qr,
             )
 
 
@@ -318,6 +447,102 @@ def get_whatsapp_connection_status(db: Session) -> dict:
         status["status"] = "desconectado"
         status["configured"] = False
         status["error_message"] = "Integracao WhatsApp desabilitada nas configuracoes do sistema."
+    return status
+
+
+def request_whatsapp_qr_session(db: Session) -> dict:
+    config = load_whatsapp_config()
+    if not get_boolean_setting(db, "whatsapp_enabled", fallback=config.enabled):
+        raise BusinessRuleViolation("Ative o WhatsApp nas configuracoes do sistema antes de conectar via QR.")
+    if not config.supports_qr:
+        raise BusinessRuleViolation("O provedor atual nao suporta autenticacao por QR Code.")
+    if not config.api_base_url:
+        raise BusinessRuleViolation("Configure a URL base do conector WhatsApp Web para gerar o QR Code.")
+
+    headers = _build_auth_headers(config)
+    session_payload = {
+        "instance_name": config.instance_name,
+        "sender_id": config.sender_id,
+    }
+    connect_url = _resolve_connect_url(config)
+    qr_url = _resolve_qr_url(config)
+    if not qr_url:
+        raise BusinessRuleViolation("Nao foi possivel determinar o endpoint de QR Code do conector WhatsApp.")
+
+    try:
+        if connect_url:
+            httpx.post(connect_url, json=session_payload, headers=headers, timeout=config.timeout_seconds)
+        request_kwargs = {"headers": headers, "timeout": config.timeout_seconds}
+        if config.provider == "evolution":
+            response = httpx.get(qr_url, **request_kwargs)
+        else:
+            response = httpx.get(qr_url, params=session_payload, **request_kwargs)
+        response.raise_for_status()
+        payload = response.json() if response.content else {}
+    except httpx.TimeoutException as exc:
+        raise BusinessRuleViolation("Timeout ao solicitar o QR Code do WhatsApp.") from exc
+    except (httpx.HTTPError, ValueError) as exc:
+        detail = exc.response.text if getattr(exc, "response", None) is not None else str(exc)
+        raise BusinessRuleViolation(f"Falha ao obter QR Code do WhatsApp: {compact_error_message(detail)}") from exc
+
+    qr_code = (
+        payload.get("qr_code")
+        or payload.get("qr")
+        or payload.get("code")
+        or payload.get("qrcode")
+    )
+    qr_image = (
+        payload.get("qr_image_data_url")
+        or payload.get("qr_image")
+        or payload.get("image")
+        or payload.get("base64")
+    )
+    if qr_image and not str(qr_image).startswith("data:image"):
+        qr_image = f"data:image/png;base64,{qr_image}"
+    pairing_code = payload.get("pairingCode") or payload.get("pairing_code")
+
+    status = payload.get("status") or ("aguardando_conexao" if qr_code or qr_image else "erro")
+    return WhatsAppQrSessionStatus(
+        status=str(status),
+        provider=config.provider,
+        instance_name=payload.get("instance_name") or config.instance_name or config.sender_id,
+        qr_code=qr_code,
+        qr_image_data_url=qr_image,
+        pairing_code=pairing_code,
+        expires_at=payload.get("expires_at") or payload.get("ttl"),
+        message=payload.get("message") or "Leia o QR Code com o WhatsApp para conectar esta sessao.",
+        error_message=payload.get("error"),
+    ).__dict__
+
+
+def logout_whatsapp_session(db: Session) -> dict:
+    config = load_whatsapp_config()
+    if not config.supports_qr:
+        raise BusinessRuleViolation("O provedor atual nao suporta logout de sessao por QR Code.")
+    logout_url = _resolve_logout_url(config)
+    if not logout_url:
+        raise BusinessRuleViolation("Nao foi possivel determinar o endpoint de logout do conector WhatsApp.")
+
+    headers = _build_auth_headers(config)
+    payload = {
+        "instance_name": config.instance_name,
+        "sender_id": config.sender_id,
+    }
+    try:
+        if config.provider == "evolution":
+            response = httpx.delete(logout_url, headers=headers, timeout=config.timeout_seconds)
+        else:
+            response = httpx.post(logout_url, json=payload, headers=headers, timeout=config.timeout_seconds)
+        response.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise BusinessRuleViolation("Timeout ao encerrar a sessao do WhatsApp.") from exc
+    except httpx.HTTPError as exc:
+        detail = exc.response.text if getattr(exc, "response", None) is not None else str(exc)
+        raise BusinessRuleViolation(f"Falha ao desconectar a sessao do WhatsApp: {compact_error_message(detail)}") from exc
+
+    status = get_whatsapp_connection_status(db)
+    status["status"] = "desconectado"
+    status["error_message"] = "Sessao WhatsApp desconectada. Gere um novo QR Code para reconectar."
     return status
 
 

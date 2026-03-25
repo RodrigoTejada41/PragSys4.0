@@ -774,14 +774,30 @@ class WhatsAppConfigStatusRead(BaseModel):
     api_base_url: Optional[str] = None
     sender_id_configured: bool
     auth_configured: bool
+    supports_qr: bool = False
 
 
 class WhatsAppConnectionStatusRead(BaseModel):
     status: str
     provider: str
     instance_name: Optional[str] = None
+    connected_phone: Optional[str] = None
     error_message: Optional[str] = None
     configured: bool
+    supports_qr: bool = False
+    session_persistent: bool = False
+
+
+class WhatsAppQrSessionRead(BaseModel):
+    status: str
+    provider: str
+    instance_name: Optional[str] = None
+    qr_code: Optional[str] = None
+    qr_image_data_url: Optional[str] = None
+    pairing_code: Optional[str] = None
+    expires_at: Optional[str] = None
+    message: Optional[str] = None
+    error_message: Optional[str] = None
 
 
 class GoogleCalendarOAuthStartRead(BaseModel):

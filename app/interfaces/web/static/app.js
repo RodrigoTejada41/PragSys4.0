@@ -14,6 +14,7 @@ const state = {
     integrations: {
         whatsapp: null,
         whatsappConfig: null,
+        whatsappQr: null,
         google: null,
     },
     finance: [],
@@ -259,6 +260,25 @@ function bindSettingsActions() {
                 await refreshAppointmentIntegrationStatus();
                 await loadAllData();
                 toast("Status das integracoes atualizado.");
+                return;
+            }
+            if (action === "whatsapp-connect-qr") {
+                state.integrations.whatsappQr = await apiFetch("/api/v1/whatsapp/sessao/qr", {
+                    method: "POST",
+                });
+                await refreshAppointmentIntegrationStatus();
+                renderSettings();
+                toast(state.integrations.whatsappQr.message || "Leia o QR Code do WhatsApp para conectar a sessao.");
+                return;
+            }
+            if (action === "whatsapp-logout") {
+                state.integrations.whatsapp = await apiFetch("/api/v1/whatsapp/sessao/logout", {
+                    method: "POST",
+                });
+                state.integrations.whatsappQr = null;
+                renderSettings();
+                renderAppointments();
+                toast(state.integrations.whatsapp.error_message || "Sessao WhatsApp desconectada.");
                 return;
             }
         } catch (error) {
@@ -752,6 +772,7 @@ function renderSettings() {
     const google = state.integrations.google || {};
     const whatsapp = state.integrations.whatsapp || {};
     const whatsappConfig = state.integrations.whatsappConfig || {};
+    const whatsappQr = state.integrations.whatsappQr || {};
     const isMaster = state.user?.role === "master";
     const multiempresaBadge = settingsState.system.multiempresa_enabled ? "Ativo" : "Unificado";
     const operationModeLabel = settingsState.system.operation_mode === "rede" ? "Rede interna" : "Local";
@@ -845,8 +866,32 @@ function renderSettings() {
                 ${settingsInfoRow("Numero ou instancia", whatsapp.instance_name || "Nao identificado")}
                 ${settingsInfoRow("Provedor", whatsapp.provider || whatsappConfig.provider || "custom")}
                 ${settingsInfoRow("Configuracao tecnica", whatsappConfig.configured ? "Pronta" : "Incompleta")}
+                ${settingsInfoRow("QR Code", whatsapp.supports_qr ? "Disponivel" : "Nao suportado")}
+                ${settingsInfoRow("Numero conectado", whatsapp.connected_phone || "-")}
             </div>
             <p class="origin-note">${escapeHtml(whatsapp.error_message || "Use esta area para validar a integracao antes de disparos automaticos.")}</p>
+            <div class="inline-actions">
+                <button type="button" class="btn btn-success" data-settings-action="whatsapp-connect-qr" ${(whatsapp.supports_qr && settingsState.integrations.whatsapp_enabled) ? "" : "disabled"}>Conectar via QR</button>
+                <button type="button" class="btn btn-default ghost-button" data-settings-action="whatsapp-logout" ${whatsapp.supports_qr ? "" : "disabled"}>Desconectar sessao</button>
+                <button type="button" class="btn btn-default ghost-button" data-integration-action="refresh-whatsapp">Atualizar status</button>
+            </div>
+            ${whatsappQr.qr_image_data_url || whatsappQr.qr_code || whatsappQr.message ? `
+                <div class="whatsapp-qr-panel">
+                    <div class="section-heading compact">
+                        <h4>Autenticacao por QR Code</h4>
+                        <p>${escapeHtml(whatsappQr.message || "Leia o QR Code abaixo com o WhatsApp para conectar a sessao.")}</p>
+                    </div>
+                    ${whatsappQr.qr_image_data_url ? `<img class="whatsapp-qr-image" src="${escapeHtml(whatsappQr.qr_image_data_url)}" alt="QR Code do WhatsApp">` : ""}
+                    ${!whatsappQr.qr_image_data_url && whatsappQr.qr_code ? `<pre class="whatsapp-qr-text">${escapeHtml(whatsappQr.qr_code)}</pre>` : ""}
+                    <div class="settings-side-list">
+                        ${settingsInfoRow("Status da sessao", whatsappQr.status || "aguardando_conexao")}
+                        ${settingsInfoRow("Instancia", whatsappQr.instance_name || whatsapp.instance_name || "Nao identificada")}
+                        ${settingsInfoRow("Expira em", whatsappQr.expires_at || "-")}
+                        ${settingsInfoRow("Codigo de pareamento", whatsappQr.pairing_code || "-")}
+                    </div>
+                    ${whatsappQr.error_message ? `<p class="origin-note">${escapeHtml(whatsappQr.error_message)}</p>` : ""}
+                </div>
+            ` : ""}
         </section>
     `;
 
@@ -4719,11 +4764,22 @@ function renderAppointmentCard(item, options = {}) {
     const compact = options.compact || false;
     const linkedWorkOrder = item.os_id ? getEntityByKind("workOrder", item.os_id) : null;
     const isOverdue = item.data_agendamento < todayIso() && ["pendente", "confirmado", "em_deslocamento", "em_atendimento"].includes(item.status);
+    const whatsappIntegration = state.integrations.whatsapp || {};
     const googleEnabled = Boolean(item.sincronizar_google);
     const whatsappLogs = Array.isArray(item.whatsapp_logs) ? item.whatsapp_logs : [];
-    const whatsappEnabled = Boolean(item.telefone);
+    const hasPhone = Boolean(item.telefone);
+    const whatsappIntegrationAvailable = whatsappIntegration.status === "ativo";
+    const whatsappEnabled = hasPhone && whatsappIntegrationAvailable;
     const whatsappStatusLabel = item.whatsapp_status ? item.whatsapp_status.replaceAll("_", " ") : "sem envio";
-    const whatsappButtonLabel = whatsappLogs.length ? "Reenviar WhatsApp" : "Enviar WhatsApp";
+    let whatsappButtonLabel = whatsappLogs.length ? "Reenviar WhatsApp" : "Enviar WhatsApp";
+    let whatsappDisabledReason = "";
+    if (!hasPhone) {
+        whatsappButtonLabel = "WhatsApp indisponivel";
+        whatsappDisabledReason = "Cliente sem telefone valido para envio.";
+    } else if (!whatsappIntegrationAvailable) {
+        whatsappButtonLabel = "WhatsApp indisponivel";
+        whatsappDisabledReason = whatsappIntegration.error_message || "Integracao WhatsApp desabilitada ou incompleta.";
+    }
     const googleStatusLabel = (item.google_sync_status || "desconectado").replaceAll("_", " ");
     let googleButtonLabel = "Google desativado";
     if (googleEnabled) {
@@ -4743,6 +4799,9 @@ function renderAppointmentCard(item, options = {}) {
         : (whatsappLogs[0]?.created_at
             ? `<p class="origin-note">WhatsApp ${escapeHtml(whatsappStatusLabel)} em ${escapeHtml(formatDateTime(whatsappLogs[0].created_at))}.</p>`
             : "");
+    const whatsappAvailabilityMessage = whatsappDisabledReason
+        ? `<p class="origin-note">WhatsApp indisponivel: ${escapeHtml(whatsappDisabledReason)}</p>`
+        : "";
     const detailsHtml = linkedWorkOrder
         ? `
             <div class="appointment-linked-assets">
@@ -4772,12 +4831,13 @@ function renderAppointmentCard(item, options = {}) {
             <p class="appointment-card-note">${escapeHtml(item.observacoes || item.observacoes_internas || "Sem observacoes adicionais.")}</p>
             ${googleMessage}
             ${whatsappMessage}
+            ${whatsappAvailabilityMessage}
             <div class="appointment-status-actions">
                 ${renderAppointmentProgressActions(item)}
             </div>
             <div class="appointment-main-actions">
                 <button type="button" class="btn btn-default ghost-button" data-appointment-action="edit" data-id="${item.id}">Editar / reagendar</button>
-                <button type="button" class="btn btn-default ghost-button" data-appointment-action="send-whatsapp" data-id="${item.id}" ${whatsappEnabled ? "" : "disabled"}>${whatsappButtonLabel}</button>
+                <button type="button" class="btn btn-default ghost-button" data-appointment-action="send-whatsapp" data-id="${item.id}" ${whatsappEnabled ? "" : `disabled title="${escapeHtml(whatsappDisabledReason)}"`}>${whatsappButtonLabel}</button>
                 <button type="button" class="btn btn-default ghost-button" data-appointment-action="sync-google" data-id="${item.id}" ${googleEnabled ? "" : "disabled"}>${googleButtonLabel}</button>
                 <button type="button" class="btn btn-default ghost-button" data-appointment-action="open-work-order" data-os-id="${item.os_id || ""}" ${item.os_id ? "" : "disabled"}>Abrir OS</button>
             </div>

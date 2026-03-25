@@ -49,11 +49,15 @@ class Settings(BaseSettings):
     whatsapp_enabled: bool = False
     whatsapp_provider: str = "custom"
     whatsapp_api_base_url: Optional[str] = None
+    whatsapp_message_api_url: Optional[str] = None
     whatsapp_api_key: Optional[str] = None
     whatsapp_auth_token: Optional[str] = None
     whatsapp_sender_id: Optional[str] = None
     whatsapp_instance_name: Optional[str] = None
     whatsapp_status_api_url: Optional[str] = None
+    whatsapp_qr_api_url: Optional[str] = None
+    whatsapp_connect_api_url: Optional[str] = None
+    whatsapp_logout_api_url: Optional[str] = None
     whatsapp_timeout_seconds: float = 15.0
     ncm_external_source_url: Optional[str] = None
     ncm_external_source_token: Optional[str] = None
