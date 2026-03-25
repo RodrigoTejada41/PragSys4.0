@@ -35,6 +35,8 @@ NAV_ITEMS = [
     {"view": "financeiro-nfe", "label": "NF-e", "icon": "fas fa-file-invoice-dollar", "classes": "finance-only"},
     {"view": "financeiro-caixa", "label": "Fluxo de caixa", "icon": "fas fa-cash-register", "classes": "finance-only"},
     {"view": "financeiro-relatorios", "label": "Relatorios", "icon": "fas fa-chart-bar", "classes": "finance-only"},
+    {"kind": "header", "label": "Configuracoes", "classes": "admin-only hidden"},
+    {"view": "configuracoes", "label": "Config. do sistema", "icon": "fas fa-sliders-h", "classes": "admin-only hidden"},
     {"kind": "header", "label": "Administracao", "classes": "master-only hidden"},
     {"view": "empresas", "label": "Empresas", "icon": "fas fa-building", "classes": "master-only hidden"},
     {"view": "usuarios", "label": "Usuarios", "icon": "fas fa-users", "classes": "master-only hidden"},

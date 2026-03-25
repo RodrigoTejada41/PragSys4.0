@@ -804,4 +804,50 @@ class GoogleCalendarAppointmentSyncRead(BaseModel):
     appointment: Optional[AppointmentRead] = None
 
 
+class SettingsIntegrationsRead(BaseModel):
+    google_calendar_enabled: bool
+    whatsapp_enabled: bool
+    whatsapp_auto_send: bool
+    whatsapp_default_message: str
+
+
+class SettingsSystemRead(BaseModel):
+    multiempresa_enabled: bool
+    operation_mode: str
+    notifications_enabled: bool
+    appointment_default_google_sync: bool
+
+
+class SettingsEnvironmentRead(BaseModel):
+    database_url_masked: str
+    app_host: str
+    app_port: int
+    allow_remote_access: bool
+
+
+class SystemSettingsRead(BaseModel):
+    integrations: SettingsIntegrationsRead
+    system: SettingsSystemRead
+    environment: SettingsEnvironmentRead
+
+
+class SettingsIntegrationsUpdate(BaseModel):
+    google_calendar_enabled: Optional[bool] = None
+    whatsapp_enabled: Optional[bool] = None
+    whatsapp_auto_send: Optional[bool] = None
+    whatsapp_default_message: Optional[str] = None
+
+
+class SettingsSystemUpdate(BaseModel):
+    multiempresa_enabled: Optional[bool] = None
+    operation_mode: Optional[str] = None
+    notifications_enabled: Optional[bool] = None
+    appointment_default_google_sync: Optional[bool] = None
+
+
+class SystemSettingsUpdate(BaseModel):
+    integrations: Optional[SettingsIntegrationsUpdate] = None
+    system: Optional[SettingsSystemUpdate] = None
+
+
 UserCreate.model_rebuild()

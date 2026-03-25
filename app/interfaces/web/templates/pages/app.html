@@ -400,6 +400,54 @@
         </div>
     </section>
 
+    <section class="view" id="view-configuracoes">
+        <div class="settings-module-shell admin-only hidden" id="settings-root">
+            <section class="panel panel-accent">
+                <div class="card-body">
+                    <div class="section-heading compact">
+                        <p class="eyebrow">Configuracoes do sistema</p>
+                        <h3>Governanca central para integracoes, operacao e ambiente</h3>
+                        <p>Concentre ajustes criticos em uma area unica, com acesso restrito e contexto claro para operacao local, em rede e multiempresa.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="card-body">
+                    <div class="section-heading">
+                        <h3>Resumo operacional</h3>
+                        <p>Visao rapida do modo de operacao, isolamento de empresas e estado atual das integracoes principais.</p>
+                    </div>
+                    <div id="settings-summary-grid"></div>
+                </div>
+            </section>
+
+            <section class="settings-layout">
+                <section class="panel settings-primary-panel">
+                    <div class="card-body">
+                        <div class="section-heading">
+                            <h3>Parametros dinamicos</h3>
+                            <p>Atualize comportamento do sistema sem alterar codigo, preservando o padrao operacional da empresa.</p>
+                        </div>
+                        <form id="system-settings-form" class="data-form"></form>
+                    </div>
+                </section>
+
+                <section class="panel settings-secondary-panel">
+                    <div class="card-body">
+                        <div class="section-heading">
+                            <h3>Integracoes e administracao</h3>
+                            <p>Gerencie conexoes, acesso administrativo e o contexto tecnico do ambiente em um fluxo unico.</p>
+                        </div>
+                        <div id="settings-integrations-panel"></div>
+                        <div id="settings-admin-panel"></div>
+                        <div id="settings-environment-panel"></div>
+                    </div>
+                </section>
+            </section>
+        </div>
+    </section>
+
     {{ crud_view("empresas", "Cadastrar empresa", "Cadastre a empresa prestadora e vincule os usuarios dela em uma unica tela.", "provider-company-form", "Empresas prestadoras", "Controle as prestadoras cadastradas e seus usuarios vinculados.", "provider-companies-table") }}
 
     {{ crud_view("usuarios", "Novo usuario", "Gestao exclusiva do perfil MASTER com controle de acesso.", "user-form", "Usuarios do sistema", "Controle de perfis, status e acesso administrativo.", "users-table") }}

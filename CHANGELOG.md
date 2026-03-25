@@ -11,6 +11,17 @@
 - Logging basico centralizado e payload de autenticacao preparado para transportar contexto de empresa.
 - Base documental expandida para arquitetura alvo, operacao local/rede, publicacao no GitHub e relatorio tecnico da release.
 - Nova pasta de release criada sem sobrescrever a base anterior: `release/SysPragas-4.0.0`.
+- Menu centralizado de `Configuracoes` introduzido na interface web para governanca de integracoes, parametros operacionais, multiempresa e ambiente.
+- Persistencia de configuracoes dinamicas adicionada com tabela `system_settings`, seed automatica e endpoint administrativo `/api/v1/settings`.
+- Frontend reorganizado com area administrativa mais limpa, agrupamento por contexto operacional e painel dedicado para Google Agenda, WhatsApp, usuarios e ambiente.
+- Integracoes Google Agenda e WhatsApp passaram a respeitar configuracoes persistidas sem quebrar o comportamento legado por ambiente.
+- Formularios de agendamento e Ordem de Servico passaram a obedecer o padrao configuravel de sincronizacao Google.
+- Suite de regressao expandida para cobrir acesso ao menu de configuracoes, atualizacao de settings e alternancia do modo multiempresa.
+- Fluxo OAuth do Google Agenda ajustado para reativar automaticamente a integracao ao conectar uma conta.
+- Persistencia da sessao Google estabilizada para contexto de empresa prestadora e expiracao de token com timezone legado.
+- Eventos enviados ao Google Agenda passaram a incluir endereco, telefone, tecnico, horario detalhado e duracao prevista.
+- Titulo do evento do Google Agenda passou a usar o padrao `Cliente | Tecnico | Hora`.
+- Cards de agendamento passaram a expor botao explicito de sincronizacao/reenvio com Google e mensagens operacionais mais claras em caso de falha.
 
 ## [3.1.0] - 2026-03-21
 

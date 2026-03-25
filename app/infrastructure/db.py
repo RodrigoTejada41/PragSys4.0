@@ -68,6 +68,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
+    from app.application.settings_service import ensure_system_settings_seed
     from app.infrastructure.models import License, NcmTaxProfile, ProviderCompany, SimplesNationalConfig, User
 
     engine = get_engine()
@@ -187,5 +188,6 @@ def init_db() -> None:
             )
 
         session.commit()
+        ensure_system_settings_seed(session)
     finally:
         session.close()

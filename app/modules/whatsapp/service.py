@@ -8,6 +8,7 @@ from typing import Optional, Protocol, Union
 import httpx
 from sqlalchemy.orm import Session, joinedload
 
+from app.application.settings_service import get_boolean_setting
 from app.core.exceptions import BusinessRuleViolation
 from app.infrastructure.models import Appointment, AppointmentHistory
 from app.modules.whatsapp.config import WhatsAppIntegrationConfig, load_whatsapp_config
@@ -175,10 +176,11 @@ def _append_history(
     )
 
 
-def get_whatsapp_configuration_status() -> dict:
+def get_whatsapp_configuration_status(db: Session) -> dict:
     config = load_whatsapp_config()
+    enabled = config.enabled and get_boolean_setting(db, "whatsapp_enabled", fallback=config.enabled)
     return {
-        "enabled": config.enabled,
+        "enabled": enabled,
         "provider": config.provider,
         "configured": config.is_ready,
         "api_base_url": config.api_base_url,
@@ -295,8 +297,13 @@ class WhatsAppService:
             )
 
 
-def get_whatsapp_connection_status() -> dict:
-    return WhatsAppService.get_status().__dict__
+def get_whatsapp_connection_status(db: Session) -> dict:
+    status = WhatsAppService.get_status().__dict__
+    if not get_boolean_setting(db, "whatsapp_enabled", fallback=load_whatsapp_config().enabled):
+        status["status"] = "desconectado"
+        status["configured"] = False
+        status["error_message"] = "Integracao WhatsApp desabilitada nas configuracoes do sistema."
+    return status
 
 
 def send_appointment_whatsapp_message(
@@ -315,6 +322,8 @@ def send_appointment_whatsapp_message(
     try:
         rendered_message = build_appointment_whatsapp_message(appointment)
         normalized_phone = normalize_whatsapp_phone(destination_phone)
+        if not get_boolean_setting(db, "whatsapp_enabled", fallback=config.enabled):
+            raise BusinessRuleViolation("Integracao WhatsApp desabilitada nas configuracoes do sistema.")
         if not config.enabled:
             raise BusinessRuleViolation("Integracao WhatsApp desabilitada nas configuracoes do sistema.")
         if not config.is_ready:

@@ -330,9 +330,28 @@ def _migration_20260325_001_multitenancy_foundation(engine: Engine) -> None:
         )
 
 
+def _migration_20260325_002_system_settings(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    id INTEGER PRIMARY KEY,
+                    key VARCHAR(80) NOT NULL UNIQUE,
+                    value TEXT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_by_user_id INTEGER
+                )
+                """
+            )
+        )
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
+    ("20260325_002_system_settings", _migration_20260325_002_system_settings),
 ]
 
 

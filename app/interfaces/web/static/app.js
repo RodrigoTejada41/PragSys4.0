@@ -10,8 +10,10 @@ const state = {
     workOrders: [],
     appointments: [],
     appointmentDashboard: null,
+    settings: null,
     integrations: {
         whatsapp: null,
+        whatsappConfig: null,
         google: null,
     },
     finance: [],
@@ -106,6 +108,7 @@ const viewTitles = {
     "financeiro-nfe": "NF-e",
     "financeiro-caixa": "Fluxo de caixa",
     "financeiro-relatorios": "Relatorios financeiros",
+    configuracoes: "Configuracoes do sistema",
     empresas: "Cadastrar empresas",
     usuarios: "Usuarios",
     licencas: "Licencas",
@@ -115,6 +118,13 @@ const dashboardCharts = {
     status: null,
     finance: null,
 };
+
+const activeAppointmentStatuses = new Set([
+    "pendente",
+    "confirmado",
+    "em_deslocamento",
+    "em_atendimento",
+]);
 
 const dataTableLanguage = {
     emptyTable: "Nenhum registro disponivel",
@@ -135,12 +145,14 @@ const dataTableLanguage = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+    renderSettingsLoadingState();
     buildForms();
     bindNavigation();
     bindWorkOrderModuleNavigation();
     bindFinanceModuleNavigation();
     bindNfeTabNavigation();
     bindGoogleCalendarOAuth();
+    bindSettingsActions();
     bindAuth();
     bindDashboardFilters();
 
@@ -176,6 +188,82 @@ function bindGoogleCalendarOAuth() {
             return;
         }
         toast(payload.message || "Nao foi possivel concluir a autenticacao Google.");
+    });
+}
+
+function bindSettingsActions() {
+    const root = document.getElementById("settings-root");
+    if (!root) {
+        return;
+    }
+
+    root.addEventListener("submit", async (event) => {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement) || form.id !== "system-settings-form") {
+            return;
+        }
+        event.preventDefault();
+        const errorBox = form.querySelector(".form-error");
+        const saveButton = form.querySelector('[data-save-button="settings"]');
+        errorBox?.classList.add("hidden");
+        if (saveButton) {
+            saveButton.disabled = true;
+            saveButton.dataset.originalLabel = saveButton.dataset.originalLabel || saveButton.textContent;
+            saveButton.textContent = "Salvando...";
+        }
+        try {
+            const payload = getSystemSettingsPayload(form);
+            state.settings = await apiFetch("/api/v1/settings", {
+                method: "PUT",
+                body: JSON.stringify(payload),
+            });
+            await loadAllData();
+            toast("Configuracoes atualizadas com sucesso.");
+        } catch (error) {
+            if (errorBox) {
+                errorBox.textContent = error.message;
+                errorBox.classList.remove("hidden");
+            }
+            toast(error.message || "Nao foi possivel salvar as configuracoes.");
+        } finally {
+            if (saveButton) {
+                saveButton.disabled = false;
+                saveButton.textContent = saveButton.dataset.originalLabel || "Salvar configuracoes";
+            }
+        }
+    });
+
+    root.addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-settings-action], [data-settings-shortcut]");
+        if (!button) {
+            return;
+        }
+
+        const shortcut = button.dataset.settingsShortcut;
+        if (shortcut) {
+            switchView(shortcut);
+            return;
+        }
+
+        const action = button.dataset.settingsAction;
+        try {
+            if (action === "google-login") {
+                await loginGoogle();
+                return;
+            }
+            if (action === "google-logout") {
+                await logoutGoogle();
+                return;
+            }
+            if (action === "refresh-integrations") {
+                await refreshAppointmentIntegrationStatus();
+                await loadAllData();
+                toast("Status das integracoes atualizado.");
+                return;
+            }
+        } catch (error) {
+            toast(error.message || "Nao foi possivel concluir a acao.");
+        }
     });
 }
 
@@ -437,6 +525,7 @@ async function loadAllData() {
         })),
     ];
     const canAccessFinance = state.user?.role === "master" || state.user?.role === "admin";
+    const canAccessSettings = canAccessFinance;
     if (canAccessFinance) {
         basePromises.push(apiFetch("/api/v1/financeiro"));
         basePromises.push(apiFetch("/api/v1/financeiro/caixa"));
@@ -447,6 +536,10 @@ async function loadAllData() {
         basePromises.push(apiFetch("/api/v1/fiscal/simples"));
         basePromises.push(apiFetch("/api/v1/fiscal/fluxo-caixa/resumo?period=monthly"));
         basePromises.push(apiFetch(`/api/v1/fiscal/simples/resumo/${getSelectedSimplesReference().year}/${getSelectedSimplesReference().month}`));
+    }
+    if (canAccessSettings) {
+        basePromises.push(apiFetch("/api/v1/settings"));
+        basePromises.push(apiFetch("/api/v1/whatsapp/configuracao"));
     }
     const results = await Promise.all(basePromises);
     const [customers, products, pests, technicians, workOrders, appointments, appointmentDashboard, whatsappStatus, googleStatus] = results;
@@ -459,6 +552,8 @@ async function loadAllData() {
     const simplesConfigs = canAccessFinance ? results[15] : [];
     const cashFlowSummary = canAccessFinance ? results[16] : null;
     const simplesSummary = canAccessFinance ? results[17] : null;
+    const settingsState = canAccessSettings ? results[18] : null;
+    const whatsappConfig = canAccessSettings ? results[19] : null;
 
     state.customers = customers;
     state.products = products;
@@ -478,6 +573,8 @@ async function loadAllData() {
     state.simplesConfigs = simplesConfigs;
     state.cashFlowSummary = cashFlowSummary;
     state.simplesSummary = simplesSummary;
+    state.settings = settingsState;
+    state.integrations.whatsappConfig = whatsappConfig;
 
     if (state.user?.role === "master") {
         const [users, licenses, providerCompanies] = await Promise.all([
@@ -612,6 +709,237 @@ function setAppointmentWorkspaceView(view) {
     });
 }
 
+function renderSettingsLoadingState() {
+    const summary = document.getElementById("settings-summary-grid");
+    const form = document.getElementById("system-settings-form");
+    const integrations = document.getElementById("settings-integrations-panel");
+    const admin = document.getElementById("settings-admin-panel");
+    const environment = document.getElementById("settings-environment-panel");
+    if (summary) {
+        summary.innerHTML = `<div class="empty-state">As configuracoes carregam apos o login com perfil administrativo.</div>`;
+    }
+    if (form) {
+        form.innerHTML = `<div class="empty-state">Entre com um usuario admin ou master para editar as configuracoes do sistema.</div>`;
+    }
+    if (integrations) {
+        integrations.innerHTML = "";
+    }
+    if (admin) {
+        admin.innerHTML = "";
+    }
+    if (environment) {
+        environment.innerHTML = "";
+    }
+}
+
+function renderSettings() {
+    const summary = document.getElementById("settings-summary-grid");
+    const form = document.getElementById("system-settings-form");
+    const integrations = document.getElementById("settings-integrations-panel");
+    const admin = document.getElementById("settings-admin-panel");
+    const environment = document.getElementById("settings-environment-panel");
+    if (!summary || !form || !integrations || !admin || !environment) {
+        return;
+    }
+
+    const canAccessSettings = state.user?.role === "master" || state.user?.role === "admin";
+    if (!canAccessSettings || !state.settings) {
+        renderSettingsLoadingState();
+        return;
+    }
+
+    const settingsState = state.settings;
+    const google = state.integrations.google || {};
+    const whatsapp = state.integrations.whatsapp || {};
+    const whatsappConfig = state.integrations.whatsappConfig || {};
+    const isMaster = state.user?.role === "master";
+    const multiempresaBadge = settingsState.system.multiempresa_enabled ? "Ativo" : "Unificado";
+    const operationModeLabel = settingsState.system.operation_mode === "rede" ? "Rede interna" : "Local";
+    const notificationsLabel = settingsState.system.notifications_enabled ? "Ativas" : "Desativadas";
+    const googleLabel = formatIntegrationStatus(google.status || "desconectado");
+    const whatsappLabel = formatIntegrationStatus(whatsapp.status || "desconectado");
+    const googleMeta = google.account_email || google.message || "Conta nao conectada";
+    const whatsappMeta = whatsapp.instance_name || whatsapp.error_message || "Nenhum numero vinculado detectado";
+
+    summary.innerHTML = `
+        <div class="settings-summary-grid">
+            ${settingsSummaryCard("Modo de operacao", operationModeLabel, "Define o perfil de acesso local ou em rede do servidor atual.")}
+            ${settingsSummaryCard("Multiempresa", multiempresaBadge, settingsState.system.multiempresa_enabled ? "Os dados ficam isolados por empresa prestadora." : "Os dados operam sem escopo por empresa." )}
+            ${settingsSummaryCard("Google Agenda", googleLabel, googleMeta)}
+            ${settingsSummaryCard("WhatsApp", whatsappLabel, whatsappMeta)}
+            ${settingsSummaryCard("Notificacoes", notificationsLabel, settingsState.system.notifications_enabled ? "Avisos operacionais seguem habilitados." : "Avisos operacionais desabilitados." )}
+            ${settingsSummaryCard("Usuarios ativos", String(state.users.length || 0), isMaster ? "Leitura da administracao global disponivel neste perfil." : "Use a area de usuarios com perfil master para governanca completa.")}
+        </div>
+    `;
+
+    form.innerHTML = `
+        <section class="settings-form-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Integracoes</p>
+                <h4>Regras operacionais das integracoes</h4>
+                <p>Controle quando Google Agenda e WhatsApp participam do fluxo diario do time.</p>
+            </div>
+            <div class="settings-field-grid">
+                ${toggleField("google_calendar_enabled", "Google Agenda ativa", "Permite sincronizacao manual e automatica com a conta conectada.", settingsState.integrations.google_calendar_enabled)}
+                ${toggleField("whatsapp_enabled", "WhatsApp ativo", "Libera envio manual e automatico de mensagens do agendamento.", settingsState.integrations.whatsapp_enabled)}
+                ${toggleField("whatsapp_auto_send", "Envio automatico de WhatsApp", "Dispara mensagem automaticamente ao criar ou atualizar compromissos elegiveis.", settingsState.integrations.whatsapp_auto_send)}
+                ${toggleField("appointment_default_google_sync", "Google ativo por padrao nos novos agendamentos", "Preenche o padrao inicial dos formularios com sincronizacao ligada.", settingsState.system.appointment_default_google_sync)}
+            </div>
+            <label class="settings-textarea">
+                <span>Mensagem padrao do WhatsApp</span>
+                <textarea name="whatsapp_default_message" rows="4" placeholder="Mensagem automatica de agendamento">${escapeHtml(settingsState.integrations.whatsapp_default_message || "")}</textarea>
+            </label>
+        </section>
+        <section class="settings-form-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Sistema</p>
+                <h4>Contexto de operacao e seguranca</h4>
+                <p>Ajuste o comportamento global do sistema e a organizacao por empresa.</p>
+            </div>
+            <div class="settings-field-grid two-columns">
+                ${toggleField("multiempresa_enabled", "Multiempresa ativo", "Quando desativado, o sistema opera sem escopo por empresa.", settingsState.system.multiempresa_enabled)}
+                ${toggleField("notifications_enabled", "Notificacoes operacionais", "Mantem avisos e estados auxiliares exibidos na interface.", settingsState.system.notifications_enabled)}
+                <label>
+                    <span>Modo de operacao</span>
+                    <select name="operation_mode">
+                        <option value="local" ${settingsState.system.operation_mode === "local" ? "selected" : ""}>Local</option>
+                        <option value="rede" ${settingsState.system.operation_mode === "rede" ? "selected" : ""}>Rede</option>
+                    </select>
+                </label>
+            </div>
+        </section>
+        <div class="inline-actions">
+            <button type="submit" class="btn btn-success" data-save-button="settings">Salvar configuracoes</button>
+            <button type="button" class="btn btn-default ghost-button" data-settings-action="refresh-integrations">Atualizar status das integracoes</button>
+        </div>
+        <p class="origin-note">As configuracoes persistem no banco e passam a valer para novos fluxos operacionais.</p>
+        <p class="form-error hidden"></p>
+    `;
+
+    integrations.innerHTML = `
+        <section class="settings-side-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Google Agenda</p>
+                <h4>Conexao e troca de conta</h4>
+                <p>Use a conta correta por empresa e acompanhe o calendario vinculado.</p>
+            </div>
+            <div class="settings-side-list">
+                ${settingsInfoRow("Status", googleLabel)}
+                ${settingsInfoRow("Conta", google.account_email || "Nenhuma conta conectada")}
+                ${settingsInfoRow("Calendario", google.calendar_id || "primary")}
+                ${settingsInfoRow("Empresa", google.company_name || "Nao identificado")}
+            </div>
+            <div class="inline-actions">
+                <button type="button" class="btn btn-success" data-settings-action="google-login">Login ou troca de conta</button>
+                <button type="button" class="btn btn-default ghost-button" data-settings-action="google-logout" ${google.account_email ? "" : "disabled"}>Logout</button>
+            </div>
+        </section>
+        <section class="settings-side-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">WhatsApp</p>
+                <h4>Conexao e automacao de mensagens</h4>
+                <p>Monitore a instancia atual e o estado tecnico da integracao configurada.</p>
+            </div>
+            <div class="settings-side-list">
+                ${settingsInfoRow("Status", whatsappLabel)}
+                ${settingsInfoRow("Numero ou instancia", whatsapp.instance_name || "Nao identificado")}
+                ${settingsInfoRow("Provedor", whatsapp.provider || whatsappConfig.provider || "custom")}
+                ${settingsInfoRow("Configuracao tecnica", whatsappConfig.configured ? "Pronta" : "Incompleta")}
+            </div>
+            <p class="origin-note">${escapeHtml(whatsapp.error_message || "Use esta area para validar a integracao antes de disparos automaticos.")}</p>
+        </section>
+    `;
+
+    admin.innerHTML = `
+        <section class="settings-side-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Usuarios e permissoes</p>
+                <h4>Administracao e restricoes por empresa</h4>
+                <p>Os cadastros administrativos seguem em modulos proprios, mas a governanca parte daqui.</p>
+            </div>
+            <div class="settings-side-list">
+                ${settingsInfoRow("Perfil atual", state.user?.role || "-")}
+                ${settingsInfoRow("Empresas cadastradas", String(state.providerCompanies.length || 0))}
+                ${settingsInfoRow("Usuarios carregados", String(state.users.length || 0))}
+                ${settingsInfoRow("Licencas carregadas", String(state.licenses.length || 0))}
+            </div>
+            <div class="inline-actions">
+                <button type="button" class="btn btn-default ghost-button" data-settings-shortcut="usuarios">Usuarios</button>
+                <button type="button" class="btn btn-default ghost-button" data-settings-shortcut="empresas" ${isMaster ? "" : "disabled"}>Empresas</button>
+                <button type="button" class="btn btn-default ghost-button" data-settings-shortcut="licencas" ${isMaster ? "" : "disabled"}>Licencas</button>
+            </div>
+        </section>
+    `;
+
+    environment.innerHTML = `
+        <section class="settings-side-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Banco e ambiente</p>
+                <h4>Contexto tecnico da execucao</h4>
+                <p>Referencia segura para suporte local, rede interna e empacotamento da release.</p>
+            </div>
+            <div class="settings-side-list">
+                ${settingsInfoRow("Banco", settingsState.environment.database_url_masked)}
+                ${settingsInfoRow("Host configurado", settingsState.environment.app_host)}
+                ${settingsInfoRow("Porta", String(settingsState.environment.app_port))}
+                ${settingsInfoRow("Acesso remoto", settingsState.environment.allow_remote_access ? "Permitido" : "Desativado")}
+            </div>
+            <p class="origin-note">Para alterar host, porta ou conexao de banco use os arquivos de ambiente e os scripts de execucao da release.</p>
+        </section>
+    `;
+}
+
+function settingsSummaryCard(label, value, description) {
+    return `
+        <article class="settings-summary-card">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+            <p>${escapeHtml(description)}</p>
+        </article>
+    `;
+}
+
+function settingsInfoRow(label, value) {
+    return `
+        <div class="settings-info-row">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+        </div>
+    `;
+}
+
+function toggleField(name, label, description, checked) {
+    return `
+        <label class="settings-toggle">
+            <span class="settings-toggle-copy">
+                <strong>${escapeHtml(label)}</strong>
+                <small>${escapeHtml(description)}</small>
+            </span>
+            <span class="settings-switch">
+                <input type="checkbox" name="${escapeHtml(name)}" ${checked ? "checked" : ""}>
+                <span class="settings-switch-ui" aria-hidden="true"></span>
+            </span>
+        </label>
+    `;
+}
+
+function getSystemSettingsPayload(form) {
+    return {
+        integrations: {
+            google_calendar_enabled: form.querySelector('[name="google_calendar_enabled"]').checked,
+            whatsapp_enabled: form.querySelector('[name="whatsapp_enabled"]').checked,
+            whatsapp_auto_send: form.querySelector('[name="whatsapp_auto_send"]').checked,
+            whatsapp_default_message: form.querySelector('[name="whatsapp_default_message"]').value.trim(),
+        },
+        system: {
+            multiempresa_enabled: form.querySelector('[name="multiempresa_enabled"]').checked,
+            operation_mode: form.querySelector('[name="operation_mode"]').value,
+            notifications_enabled: form.querySelector('[name="notifications_enabled"]').checked,
+            appointment_default_google_sync: form.querySelector('[name="appointment_default_google_sync"]').checked,
+        },
+    };
+}
+
 function renderAll() {
     renderDashboard();
     renderCustomers();
@@ -621,6 +949,7 @@ function renderAll() {
     renderWorkOrders();
     renderAppointments();
     renderFinance();
+    renderSettings();
     renderProviderCompanies();
     renderUsers();
     renderLicenses();
@@ -639,12 +968,16 @@ function renderAll() {
 
 function toggleMasterSections() {
     const isMaster = state.user?.role === "master";
+    const canAccessAdminSettings = state.user?.role === "master" || state.user?.role === "admin";
     document.querySelectorAll(".master-only").forEach((node) => {
         node.classList.toggle("hidden", !isMaster);
     });
     const canAccessFinance = state.user?.role === "master" || state.user?.role === "admin";
     document.querySelectorAll(".finance-only").forEach((node) => {
         node.classList.toggle("hidden", !canAccessFinance);
+    });
+    document.querySelectorAll(".admin-only").forEach((node) => {
+        node.classList.toggle("hidden", !canAccessAdminSettings);
     });
 }
 
@@ -2849,6 +3182,18 @@ function hydrateDynamicControls() {
         "id",
         "display_name",
     );
+    if (!state.editing.workOrder) {
+        const workOrderGoogleField = document.querySelector('#work-order-form [name="sincronizar_google_agenda"]');
+        if (workOrderGoogleField) {
+            workOrderGoogleField.value = state.settings?.system?.appointment_default_google_sync ? "true" : "false";
+        }
+    }
+    if (!state.editing.appointment) {
+        const appointmentGoogleField = document.querySelector('#appointment-form [name="sincronizar_google"]');
+        if (appointmentGoogleField) {
+            appointmentGoogleField.value = state.settings?.system?.appointment_default_google_sync ? "true" : "false";
+        }
+    }
     syncWorkOrderPickerState();
     renderWorkOrderSelectors();
     syncProductTaxFields();
@@ -2947,7 +3292,7 @@ function clearWorkOrderForm() {
     document.getElementById("work-order-photo-input").value = "";
     form.querySelector('[name="gerar_agendamento"]').value = "true";
     form.querySelector('[name="duracao_prevista_minutos"]').value = "60";
-    form.querySelector('[name="sincronizar_google_agenda"]').value = "false";
+    form.querySelector('[name="sincronizar_google_agenda"]').value = state.settings?.system?.appointment_default_google_sync ? "true" : "false";
     renderWorkOrderSelectors();
     renderWorkOrderFormHeader();
 }
@@ -3644,6 +3989,83 @@ function getAppointmentPayload(form) {
     };
 }
 
+function parseTimeToMinutes(value) {
+    if (!value) {
+        return null;
+    }
+    const [hours, minutes] = String(value).split(":").map((part) => Number(part));
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+        return null;
+    }
+    return (hours * 60) + minutes;
+}
+
+function minutesToTimeLabel(totalMinutes) {
+    if (!Number.isFinite(totalMinutes)) {
+        return "--:--";
+    }
+    const normalized = ((totalMinutes % 1440) + 1440) % 1440;
+    const hours = String(Math.floor(normalized / 60)).padStart(2, "0");
+    const minutes = String(normalized % 60).padStart(2, "0");
+    return `${hours}:${minutes}`;
+}
+
+function getAppointmentScheduleInsight(form) {
+    const technicianId = Number(form.querySelector('[name="tecnico_id"]')?.value || 0);
+    const appointmentDate = form.querySelector('[name="data_agendamento"]')?.value || "";
+    const startTime = form.querySelector('[name="hora_agendamento"]')?.value || "";
+    const durationMinutes = Number(form.querySelector('[name="duracao_prevista_minutos"]')?.value || 0);
+    const startMinutes = parseTimeToMinutes(startTime);
+    const editingId = Number(state.editing.appointment || 0);
+
+    if (!technicianId || !appointmentDate || startMinutes === null || durationMinutes < 15) {
+        return {
+            canEvaluate: false,
+            startLabel: startTime || "--:--",
+            endLabel: "--:--",
+            conflict: null,
+        };
+    }
+
+    const endMinutes = startMinutes + durationMinutes;
+    const conflict = state.appointments.find((item) => {
+        if (item.id === editingId) {
+            return false;
+        }
+        if (item.tecnico_id !== technicianId || item.data_agendamento !== appointmentDate) {
+            return false;
+        }
+        if (!activeAppointmentStatuses.has(item.status)) {
+            return false;
+        }
+        const otherStart = parseTimeToMinutes(formatTime(item.hora_agendamento));
+        const otherEnd = otherStart === null ? null : otherStart + Number(item.duracao_prevista_minutos || 0);
+        if (otherStart === null || otherEnd === null) {
+            return false;
+        }
+        return startMinutes < otherEnd && endMinutes > otherStart;
+    }) || null;
+
+    return {
+        canEvaluate: true,
+        startLabel: minutesToTimeLabel(startMinutes),
+        endLabel: minutesToTimeLabel(endMinutes),
+        conflict,
+    };
+}
+
+function buildAppointmentConflictMessage(insight, technicianName) {
+    if (!insight?.conflict) {
+        return null;
+    }
+    const conflictingStart = parseTimeToMinutes(formatTime(insight.conflict.hora_agendamento));
+    const conflictingEnd = conflictingStart === null
+        ? null
+        : conflictingStart + Number(insight.conflict.duracao_prevista_minutos || 0);
+    const conflictingInterval = `${minutesToTimeLabel(conflictingStart)} ate ${minutesToTimeLabel(conflictingEnd)}`;
+    return `Conflito de horario para o tecnico '${technicianName || insight.conflict.tecnico_nome || "selecionado"}' com o agendamento #${insight.conflict.id} (${insight.conflict.cliente_nome}, ${conflictingInterval}). Horario solicitado: ${insight.startLabel} ate ${insight.endLabel}.`;
+}
+
 function validateAppointmentForm(form) {
     const payload = getAppointmentPayload(form);
     const errors = [];
@@ -3670,6 +4092,19 @@ function validateAppointmentForm(form) {
     }
     if (!(payload.duracao_prevista_minutos >= 15)) {
         markFieldInvalid('[name="duracao_prevista_minutos"]', "Defina uma duracao minima de 15 minutos.");
+    }
+    const scheduleInsight = getAppointmentScheduleInsight(form);
+    if (scheduleInsight.conflict) {
+        form.querySelector('[name="tecnico_id"]')?.classList.add("field-invalid");
+        form.querySelector('[name="data_agendamento"]')?.classList.add("field-invalid");
+        form.querySelector('[name="hora_agendamento"]')?.classList.add("field-invalid");
+        form.querySelector('[name="duracao_prevista_minutos"]')?.classList.add("field-invalid");
+        errors.push(
+            buildAppointmentConflictMessage(
+                scheduleInsight,
+                getEntityByKind("technician", payload.tecnico_id)?.nome || "selecionado",
+            ),
+        );
     }
 
     if (errors.length) {
@@ -3720,6 +4155,7 @@ function bindAppointmentWorkspace() {
     form.addEventListener("input", () => {
         form.querySelector(".form-error").classList.add("hidden");
         form.querySelectorAll(".field-invalid").forEach((node) => node.classList.remove("field-invalid"));
+        renderAppointmentCustomerSummary();
     });
 
     form.querySelector('[name="cliente_id"]').addEventListener("change", () => {
@@ -3732,6 +4168,9 @@ function bindAppointmentWorkspace() {
     });
     form.querySelector('[name="tecnico_id"]').addEventListener("change", renderAppointmentCustomerSummary);
     form.querySelector('[name="sincronizar_google"]').addEventListener("change", renderAppointmentCustomerSummary);
+    form.querySelector('[name="data_agendamento"]').addEventListener("change", renderAppointmentCustomerSummary);
+    form.querySelector('[name="hora_agendamento"]').addEventListener("change", renderAppointmentCustomerSummary);
+    form.querySelector('[name="duracao_prevista_minutos"]').addEventListener("change", renderAppointmentCustomerSummary);
 
     document.getElementById("appointment-open-linked-work-order").addEventListener("click", () => {
         openLinkedWorkOrderFromAppointmentForm();
@@ -3750,7 +4189,7 @@ function clearAppointmentForm() {
     form.querySelector(".form-error").classList.add("hidden");
     form.querySelector('[name="status"]').value = "pendente";
     form.querySelector('[name="origem"]').value = "manual";
-    form.querySelector('[name="sincronizar_google"]').value = "false";
+    form.querySelector('[name="sincronizar_google"]').value = state.settings?.system?.appointment_default_google_sync ? "true" : "false";
     form.querySelector('[name="duracao_prevista_minutos"]').value = "60";
     form.querySelector('[name="data_agendamento"]').value = todayIso();
     syncAppointmentWorkOrderOptions();
@@ -3792,6 +4231,12 @@ function renderAppointmentCustomerSummary() {
     const customer = getEntityByKind("customer", Number(form.querySelector('[name="cliente_id"]').value || 0));
     const workOrder = getEntityByKind("workOrder", Number(form.querySelector('[name="os_id"]').value || 0));
     const technician = getEntityByKind("technician", Number(form.querySelector('[name="tecnico_id"]').value || 0));
+    const scheduleInsight = getAppointmentScheduleInsight(form);
+    const scheduleMessage = scheduleInsight.conflict
+        ? buildAppointmentConflictMessage(scheduleInsight, technician?.nome)
+        : (scheduleInsight.canEvaluate
+            ? `Janela prevista: ${scheduleInsight.startLabel} ate ${scheduleInsight.endLabel}. Nenhum conflito encontrado para este tecnico.`
+            : "Defina tecnico, data, horario e duracao para validar a disponibilidade.");
 
     target.innerHTML = `
         <div class="appointment-customer-card">
@@ -3808,6 +4253,11 @@ function renderAppointmentCustomerSummary() {
             <span class="order-summary-label">Responsavel</span>
             <strong>${escapeHtml(technician?.nome || "Tecnico ainda nao atribuido")}</strong>
             <span>${escapeHtml(form.querySelector('[name="sincronizar_google"]').value === "true" ? "Google Agenda habilitado" : "Google Agenda desabilitado")}</span>
+        </div>
+        <div class="appointment-customer-card ${scheduleInsight.conflict ? "is-conflict" : "is-available"}">
+            <span class="order-summary-label">Disponibilidade</span>
+            <strong>${escapeHtml(scheduleInsight.canEvaluate ? `${scheduleInsight.startLabel} ate ${scheduleInsight.endLabel}` : "Analise pendente")}</strong>
+            <span>${escapeHtml(scheduleMessage)}</span>
         </div>
     `;
 
@@ -4225,6 +4675,7 @@ async function refreshAppointmentIntegrationStatus() {
     state.integrations.whatsapp = await apiFetch("/api/v1/whatsapp/status");
     state.integrations.google = await apiFetch("/api/v1/google-calendar/status");
     renderAppointments();
+    renderSettings();
 }
 
 
@@ -4262,9 +4713,16 @@ function renderAppointmentCard(item, options = {}) {
     const whatsappStatusLabel = item.whatsapp_status ? item.whatsapp_status.replaceAll("_", " ") : "sem envio";
     const whatsappButtonLabel = whatsappLogs.length ? "Reenviar WhatsApp" : "Enviar WhatsApp";
     const googleStatusLabel = (item.google_sync_status || "desconectado").replaceAll("_", " ");
-    const googleButtonLabel = googleEnabled
-        ? (item.google_calendar_event_id ? "Atualizar Google" : "Conectar Google")
-        : "Google desativado";
+    let googleButtonLabel = "Google desativado";
+    if (googleEnabled) {
+        if (item.google_sync_status === "falha") {
+            googleButtonLabel = "Tentar sincronizar no Google";
+        } else if (item.google_calendar_event_id) {
+            googleButtonLabel = "Sincronizar novamente";
+        } else {
+            googleButtonLabel = "Sincronizar no Google";
+        }
+    }
     const googleMessage = item.google_sync_message
         ? `<p class="origin-note">${escapeHtml(item.google_sync_message)}</p>`
         : "";
@@ -6505,7 +6963,7 @@ function renderWorkOrderFormHeader() {
         if (numberDisplay) {
             numberDisplay.textContent = current?.numero || "Numero indisponivel";
         }
-        title.textContent = "Edit Order Service";
+        title.textContent = "Editar ordem de servico";
         description.textContent = current
             ? `Atualize a OS ${current.numero}, revise itens, status e anexos antes de salvar as alteracoes.`
             : "Atualize os dados operacionais, itens aplicados e fotos vinculadas a esta ordem de servico.";
@@ -6515,7 +6973,7 @@ function renderWorkOrderFormHeader() {
     if (numberDisplay) {
         numberDisplay.textContent = "Sera gerado automaticamente ao salvar";
     }
-    title.textContent = "New Order Service";
+    title.textContent = "Nova ordem de servico";
     description.textContent = "Preencha os dados operacionais, produtos aplicados, status e anexos. O numero da OS sera gerado automaticamente em sequencia.";
 }
 

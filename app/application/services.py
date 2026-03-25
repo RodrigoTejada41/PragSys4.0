@@ -45,6 +45,7 @@ from app.application.schemas import (
     WorkOrderCreate,
     WorkOrderUpdate,
 )
+from app.application.settings_service import get_boolean_setting
 from app.core.exceptions import BusinessRuleViolation
 from app.core.security import create_access_token, get_password_hash, verify_password
 from app.domain.enums import FinanceStatus
@@ -126,6 +127,9 @@ def _require_company_scope(current_user: Optional[User]) -> int:
 
 
 def _apply_company_scope(query, model, current_user: Optional[User]):
+    session = query.session
+    if session is not None and not get_boolean_setting(session, "multiempresa_enabled", fallback=True):
+        return query
     if current_user is None or _is_master_user(current_user):
         return query
     company_id = _require_company_scope(current_user)

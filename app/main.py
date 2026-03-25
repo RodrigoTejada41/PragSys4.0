@@ -21,6 +21,7 @@ from app.interfaces.api.routes import (
     products,
     provider_companies,
     receipts,
+    settings as system_settings,
     technicians,
     users,
     whatsapp,
@@ -71,6 +72,7 @@ app.include_router(work_orders.router, prefix=settings.api_v1_prefix)
 app.include_router(appointments.router, prefix=settings.api_v1_prefix)
 app.include_router(google_calendar.router, prefix=settings.api_v1_prefix)
 app.include_router(whatsapp.router, prefix=settings.api_v1_prefix)
+app.include_router(system_settings.router, prefix=settings.api_v1_prefix)
 app.include_router(users.router, prefix=settings.api_v1_prefix)
 app.include_router(licenses.router, prefix=settings.api_v1_prefix)
 app.include_router(provider_companies.router, prefix=settings.api_v1_prefix)

@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from app.core.config import get_settings
 from app.infrastructure.models import Appointment, ProviderCompany
@@ -141,6 +141,8 @@ def test_create_manual_appointment_and_prevent_technician_conflict(client, auth_
 
     assert conflicting.status_code == 400
     assert "Conflito de horario" in conflicting.json()["detail"]
+    assert "09:00 ate 10:30" in conflicting.json()["detail"]
+    assert "09:30 ate 10:30" in conflicting.json()["detail"]
 
 
 def test_work_order_generates_and_updates_linked_appointment(client, auth_headers):
@@ -360,6 +362,115 @@ def test_google_status_and_logout_flow_for_provider_company(client, auth_headers
     assert status_after_logout.json()["status"] == "aguardando_conexao"
 
 
+def test_google_oauth_callback_reenables_google_integration_when_account_connects(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "client-id-teste")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret-teste")
+    monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "http://testserver/api/v1/google-calendar/oauth/callback")
+    get_settings.cache_clear()
+
+    client.put(
+        "/api/v1/settings",
+        headers=auth_headers,
+        json={"integrations": {"google_calendar_enabled": False}},
+    )
+
+    with get_session_local()() as db:
+        company = db.query(ProviderCompany).order_by(ProviderCompany.id.asc()).first()
+        if company is None:
+            company = ProviderCompany(
+                razao_social="SysPragas",
+                nome_fantasia="SysPragas",
+                cnpj="12345678000199",
+            )
+            db.add(company)
+            db.commit()
+            db.refresh(company)
+        company_id = company.id
+
+    def fake_exchange_code_for_tokens(code: str):
+        return {
+            "access_token": "oauth-access-token",
+            "refresh_token": "oauth-refresh-token",
+            "expires_in": 3600,
+        }
+
+    monkeypatch.setattr(
+        "app.application.google_calendar_service._exchange_code_for_tokens",
+        fake_exchange_code_for_tokens,
+    )
+    monkeypatch.setattr(
+        "app.application.google_calendar_service._fetch_google_account_email",
+        lambda access_token: "google@empresa.teste",
+    )
+
+    start_response = client.post("/api/v1/google-calendar/oauth/start", headers=auth_headers)
+    assert start_response.status_code == 200
+    state_token = start_response.json()["authorization_url"].split("state=", 1)[1]
+
+    callback_response = client.get(
+        f"/api/v1/google-calendar/oauth/callback?code=fake-code&state={state_token}",
+        headers=auth_headers,
+    )
+
+    assert callback_response.status_code == 200
+
+    status_response = client.get("/api/v1/google-calendar/status", headers=auth_headers)
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "ativo"
+    assert status_response.json()["account_email"] == "google@empresa.teste"
+    assert status_response.json()["company_id"] == company_id
+
+    settings_response = client.get("/api/v1/settings", headers=auth_headers)
+    assert settings_response.status_code == 200
+    assert settings_response.json()["integrations"]["google_calendar_enabled"] is True
+
+
+def test_create_appointment_with_google_handles_naive_token_expiration(client, auth_headers, monkeypatch):
+    class FakeCalendarResponse:
+        content = b'{"id":"google-event-123"}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": "google-event-123"}
+
+    monkeypatch.setattr("app.application.google_calendar_service.httpx.request", lambda *args, **kwargs: FakeCalendarResponse())
+
+    with get_session_local()() as db:
+        company = db.query(ProviderCompany).order_by(ProviderCompany.id.asc()).first()
+        company.google_calendar_id = "primary"
+        company.google_account_email = "agenda@empresa.teste"
+        company.google_access_token = "access-token"
+        company.google_refresh_token = "refresh-token"
+        company.google_token_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+        db.commit()
+
+    customer = create_customer(client, auth_headers, "271")
+    technician = create_technician(client, auth_headers, "271")
+    target_date = (date.today() + timedelta(days=5)).isoformat()
+
+    response = client.post(
+        "/api/v1/agendamentos",
+        headers=auth_headers,
+        json={
+            "cliente_id": customer["id"],
+            "tecnico_id": technician["id"],
+            "tipo_servico": "Visita com Google e token legado",
+            "data_agendamento": target_date,
+            "hora_agendamento": "16:00:00",
+            "duracao_prevista_minutos": 60,
+            "observacoes": "Nao deve gerar erro 500 por datetime legado",
+            "status": "pendente",
+            "origem": "manual",
+            "sincronizar_google": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["google_calendar_event_id"] == "google-event-123"
+
+
 def test_completing_appointment_updates_linked_work_order(client, auth_headers):
     customer = create_customer(client, auth_headers, "303")
     technician = create_technician(client, auth_headers, "303")
@@ -391,7 +502,7 @@ def test_disabling_google_sync_removes_existing_calendar_event(client, auth_head
     calls = []
 
     def fake_google_request(db, user_id, method, path, payload=None):
-        calls.append((method, path))
+        calls.append((method, path, payload))
         if method == "POST":
             return {"id": "evt-123"}, "primary"
         if method == "DELETE":
@@ -423,6 +534,14 @@ def test_disabling_google_sync_removes_existing_calendar_event(client, auth_head
     assert created.status_code == 200
     appointment = created.json()
     assert appointment["google_calendar_event_id"] == "evt-123"
+    post_call = next(call for call in calls if call[0] == "POST")
+    google_payload = post_call[2]
+    assert google_payload["summary"] == f"{customer['razao_social']} | {technician['nome']} | 09:00"
+    assert google_payload["location"] == "Rua Agenda 401, Sao Paulo/SP"
+    assert "Telefone: 11990000401" in google_payload["description"]
+    assert "Horario:" in google_payload["description"]
+    assert "Duracao prevista: 60 minutos" in google_payload["description"]
+    assert f"Tecnico: {technician['nome']}" in google_payload["description"]
 
     updated = client.put(
         f"/api/v1/agendamentos/{appointment['id']}",
@@ -445,7 +564,7 @@ def test_disabling_google_sync_removes_existing_calendar_event(client, auth_head
     assert payload["sincronizar_google"] is False
     assert payload["google_sync_status"] == "desconectado"
     assert payload["google_calendar_event_id"] is None
-    assert ("DELETE", "events/evt-123") in calls
+    assert any(call[0] == "DELETE" and call[1] == "events/evt-123" for call in calls)
 
 
 def test_disabling_work_order_schedule_cancels_rescheduled_linked_appointment(client, auth_headers):

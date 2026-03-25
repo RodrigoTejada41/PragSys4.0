@@ -13,6 +13,7 @@ from app.application.schemas import (
     AppointmentUpdate,
 )
 from app.application.google_calendar_service import google_calendar_request
+from app.application.settings_service import get_boolean_setting
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
 from app.domain.enums import AppointmentSource, AppointmentStatus, GoogleSyncStatus, WorkOrderStatus
@@ -134,6 +135,10 @@ def _appointment_interval(appointment_date: date, appointment_time: time, durati
     return start, end
 
 
+def _format_interval(start: datetime, end: datetime) -> str:
+    return f"{start.strftime('%H:%M')} ate {end.strftime('%H:%M')}"
+
+
 def _assert_technician_availability(
     db: Session,
     technician_id: Optional[int],
@@ -163,7 +168,8 @@ def _assert_technician_availability(
         if candidate_start < other_end and candidate_end > other_start:
             raise BusinessRuleViolation(
                 f"Conflito de horario para o tecnico '{other.tecnico.nome if other.tecnico else technician_id}' "
-                f"com o agendamento #{other.id} ({other.cliente.razao_social} as {other.hora_agendamento.strftime('%H:%M')})."
+                f"com o agendamento #{other.id} ({other.cliente.razao_social}, {_format_interval(other_start, other_end)}). "
+                f"Horario solicitado: {_format_interval(candidate_start, candidate_end)}."
             )
 
 
@@ -196,12 +202,21 @@ def _build_google_event_payload(appointment: Appointment) -> dict:
         company_timezone = timezone.utc
     start_dt = datetime.combine(appointment.data_agendamento, appointment.hora_agendamento, tzinfo=company_timezone)
     end_dt = start_dt + timedelta(minutes=appointment.duracao_prevista_minutos)
+    schedule_label = f"{start_dt.strftime('%d/%m/%Y %H:%M')} ate {end_dt.strftime('%H:%M')}"
+    summary_parts = [appointment.cliente_nome]
+    if appointment.tecnico_nome:
+        summary_parts.append(appointment.tecnico_nome)
+    summary_parts.append(start_dt.strftime("%H:%M"))
     description_lines = [
         f"Cliente: {appointment.cliente_nome}",
         f"Telefone: {appointment.telefone}",
         f"Endereco: {appointment.endereco_completo}",
+        f"Horario: {schedule_label}",
+        f"Duracao prevista: {appointment.duracao_prevista_minutos} minutos",
         f"Tipo de servico: {appointment.tipo_servico}",
     ]
+    if appointment.tecnico_nome:
+        description_lines.append(f"Tecnico: {appointment.tecnico_nome}")
     if appointment.os_numero:
         description_lines.append(f"OS vinculada: {appointment.os_numero}")
     if appointment.observacoes:
@@ -214,7 +229,7 @@ def _build_google_event_payload(appointment: Appointment) -> dict:
         description_lines.append(f"Retorno/Revisita: {appointment.retorno_revisita}")
 
     return {
-        "summary": f"{appointment.cliente_nome} | {appointment.tipo_servico}",
+        "summary": " | ".join(filter(None, summary_parts)),
         "location": appointment.endereco_completo,
         "description": "\n".join(description_lines),
         "start": {
@@ -465,7 +480,8 @@ def create_appointment(
     db.commit()
     appointment = get_appointment(db, appointment.id)
     if (
-        get_settings().whatsapp_enabled
+        get_boolean_setting(db, "whatsapp_enabled", fallback=get_settings().whatsapp_enabled)
+        and get_boolean_setting(db, "whatsapp_auto_send", fallback=True)
         and appointment.status not in {AppointmentStatus.CANCELADO.value, AppointmentStatus.NAO_REALIZADO.value}
     ):
         appointment = send_appointment_whatsapp_message(

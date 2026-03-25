@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
+from app.application.settings_service import get_boolean_setting, set_setting_value
 from app.infrastructure.models import ProviderCompany, User
 
 GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -20,6 +21,14 @@ GOOGLE_OAUTH_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _normalize_utc_datetime(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _get_company_for_user(db: Session, user_id: Optional[int]) -> Optional[ProviderCompany]:
@@ -199,6 +208,7 @@ def handle_google_oauth_callback(db: Session, code: str, state_token: str) -> di
 
     tokens = _exchange_code_for_tokens(code)
     _apply_company_token_payload(company, tokens)
+    set_setting_value(db, "google_calendar_enabled", True, updated_by_user_id=user_id)
     db.commit()
 
     appointment_id = payload.get("appointment_id")
@@ -252,17 +262,20 @@ def _refresh_company_access_token(company: ProviderCompany) -> None:
 def _get_runtime_google_credentials(db: Session, user_id: Optional[int]) -> tuple[str, str]:
     company = _get_company_for_context(db, user_id)
     if company and (company.google_access_token or company.google_refresh_token):
+        if not get_boolean_setting(db, "google_calendar_enabled", fallback=True):
+            raise BusinessRuleViolation("Integracao com Google Agenda desabilitada nas configuracoes do sistema.")
+        expires_at = _normalize_utc_datetime(company.google_token_expires_at)
         if (
             not company.google_access_token
-            or not company.google_token_expires_at
-            or company.google_token_expires_at <= _now_utc()
+            or not expires_at
+            or expires_at <= _now_utc()
         ):
             _refresh_company_access_token(company)
             db.commit()
         return _resolve_calendar_id(company), company.google_access_token
 
     settings = get_settings()
-    if settings.google_calendar_enabled and settings.google_calendar_access_token:
+    if get_boolean_setting(db, "google_calendar_enabled", fallback=settings.google_calendar_enabled) and settings.google_calendar_access_token:
         return settings.google_calendar_id or "primary", settings.google_calendar_access_token
 
     raise BusinessRuleViolation(
@@ -340,9 +353,10 @@ def get_google_connection_status(
     provider_company_id: Optional[int] = None,
 ) -> dict:
     company = _get_company_for_context(db, user_id, provider_company_id=provider_company_id)
+    google_enabled = get_boolean_setting(db, "google_calendar_enabled", fallback=True)
     if not company:
         settings = get_settings()
-        if settings.google_calendar_enabled and settings.google_calendar_access_token:
+        if google_enabled and settings.google_calendar_access_token:
             return {
                 "status": "ativo",
                 "message": "Configuracao global de Google Agenda ativa.",
@@ -353,7 +367,10 @@ def get_google_connection_status(
             }
         raise BusinessRuleViolation("Nao existe empresa prestadora disponivel para verificar a conexao Google.")
 
-    if company.google_refresh_token or company.google_access_token:
+    if not google_enabled:
+        status = "desconectado"
+        message = "Integracao com Google Agenda desabilitada nas configuracoes do sistema."
+    elif company.google_refresh_token or company.google_access_token:
         status = "ativo"
         message = "Conta Google conectada para sincronizacao de agenda."
     elif _oauth_is_configured():

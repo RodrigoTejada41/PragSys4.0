@@ -19,9 +19,10 @@ router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
     response_model=WhatsAppConfigStatusRead,
 )
 def get_whatsapp_configuration(
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(["master", "admin"])),
 ) -> WhatsAppConfigStatusRead:
-    return WhatsAppConfigStatusRead(**get_whatsapp_configuration_status())
+    return WhatsAppConfigStatusRead(**get_whatsapp_configuration_status(db))
 
 
 @router.get(
@@ -29,9 +30,10 @@ def get_whatsapp_configuration(
     response_model=WhatsAppConnectionStatusRead,
 )
 def get_whatsapp_status(
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(["master", "admin", "operador"])),
 ) -> WhatsAppConnectionStatusRead:
-    return WhatsAppConnectionStatusRead(**get_whatsapp_connection_status())
+    return WhatsAppConnectionStatusRead(**get_whatsapp_connection_status(db))
 
 
 @router.post(
