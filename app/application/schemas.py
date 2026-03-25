@@ -604,7 +604,7 @@ class WorkOrderPhotoRead(BaseModel):
 
 
 class WorkOrderCreate(BaseModel):
-    numero: str
+    numero: Optional[str] = None
     cliente_id: int
     tecnico_id: int
     data_execucao: date

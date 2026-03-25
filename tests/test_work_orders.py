@@ -89,7 +89,7 @@ def test_create_work_order_decrements_stock_and_generates_finance(client, auth_h
 
     assert os_response.status_code == 200
     data = os_response.json()
-    assert data["numero"] == "OS-1001"
+    assert data["numero"].startswith("OS-")
     assert data["cliente"]["razao_social"] == "Mercado Central"
     assert Decimal(data["produtos"][0]["quantidade"]) == Decimal("2.50")
 
@@ -220,7 +220,7 @@ def test_create_open_work_order_allows_empty_products(client, auth_headers):
 
     assert os_response.status_code == 200
     data = os_response.json()
-    assert data["numero"] == "OS-SEM-PRODUTO"
+    assert data["numero"].startswith("OS-")
     assert data["produtos"] == []
 
     financeiro_response = client.get("/api/v1/financeiro", headers=auth_headers)
@@ -599,3 +599,95 @@ def test_work_order_allows_photo_upload_and_removal(client, auth_headers):
     )
     assert delete_response.status_code == 200
     assert delete_response.json()["fotos"] == []
+
+
+def test_work_order_number_is_generated_sequentially_and_cannot_be_edited(client, auth_headers):
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Sequencial",
+            "cpf_cnpj": "31313131000100",
+            "endereco": "Rua Sequencial, 10",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11911110000",
+            "contato": "Rita",
+        },
+    ).json()
+
+    produto = client.post(
+        "/api/v1/produtos",
+        headers=auth_headers,
+        json={
+            "nome": "Produto Sequencial",
+            "principio_ativo": "Permetrina",
+            "grupo_quimico": "Piretroide",
+            "toxicidade": "Moderada",
+            "concentracao": "5%",
+            "registro_ms": "MS-SEQUENCIAL",
+            "estoque_atual": "10.00",
+            "estoque_minimo": "1.00",
+        },
+    ).json()
+
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Sequencial",
+            "registro": "TEC-SEQUENCIAL",
+            "telefone": "11911112222",
+            "ativo": True,
+        },
+    ).json()
+
+    base_payload = {
+        "cliente_id": cliente["id"],
+        "tecnico_id": tecnico["id"],
+        "data_execucao": "2026-03-20",
+        "hora_inicio": "08:00:00",
+        "hora_fim": "09:00:00",
+        "local_execucao": "Area 1",
+        "garantia_ate": "2026-04-20",
+        "status": "aberta",
+        "valor_servico": "100.00",
+        "produtos": [{"produto_id": produto["id"], "quantidade": "1.00", "diluicao": "1:10"}],
+        "pragas_ids": [],
+        "gerar_financeiro": False,
+        "gerar_agendamento": False,
+    }
+
+    first_response = client.post("/api/v1/os", headers=auth_headers, json={**base_payload, "numero": "MANUAL-IGNORADO-1"})
+    second_response = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={**base_payload, "numero": "MANUAL-IGNORADO-2", "hora_inicio": "10:00:00", "hora_fim": "11:00:00"},
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+
+    first = first_response.json()
+    second = second_response.json()
+    assert first["numero"].startswith(f"OS-{date.today().year}-")
+    assert second["numero"].startswith(f"OS-{date.today().year}-")
+    assert first["numero"] != "MANUAL-IGNORADO-1"
+    assert second["numero"] != "MANUAL-IGNORADO-2"
+
+    first_seq = int(first["numero"].rsplit("-", 1)[1])
+    second_seq = int(second["numero"].rsplit("-", 1)[1])
+    assert second_seq == first_seq + 1
+
+    updated = client.put(
+        f"/api/v1/os/{first['id']}",
+        headers=auth_headers,
+        json={
+            **base_payload,
+            "numero": "TENTATIVA-DE-ALTERAR",
+            "local_execucao": "Area editada",
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["numero"] == first["numero"]

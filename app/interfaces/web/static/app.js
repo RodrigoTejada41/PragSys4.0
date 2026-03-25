@@ -930,7 +930,11 @@ function buildForms() {
 
     document.getElementById("work-order-form").innerHTML = `
         <div class="form-grid">
-            <label><span>Numero</span><input name="numero" required></label>
+            <label>
+                <span>Numero</span>
+                <input name="numero" readonly placeholder="Gerado automaticamente">
+                <small>Numero sequencial gerado automaticamente pelo sistema.</small>
+            </label>
             <label><span>Cliente</span><select name="cliente_id" required></select></label>
             <label><span>Tecnico</span><select name="tecnico_id" required></select></label>
             <label><span>Local de execucao</span><input name="local_execucao" required></label>
@@ -2959,7 +2963,7 @@ function getWorkOrderPayload(form) {
         .filter((item) => item.produto_id);
 
     return {
-        numero: raw.numero,
+        numero: raw.numero || null,
         cliente_id: Number(raw.cliente_id),
         tecnico_id: Number(raw.tecnico_id),
         data_execucao: raw.data_execucao,
@@ -2999,9 +3003,6 @@ function validate_work_order_form(form) {
         errors.push(message);
     };
 
-    if (!payload.numero?.trim()) {
-        markFieldInvalid('[name="numero"]', "Informe o numero da ordem de servico.");
-    }
     if (!payload.cliente_id) {
         markFieldInvalid('[name="cliente_id"]', "Selecione um cliente para a ordem.");
     }
@@ -6495,12 +6496,16 @@ function fillNfeItemRowsFromInvoice(item) {
 function renderWorkOrderFormHeader() {
     const title = document.getElementById("work-order-form-title");
     const description = document.getElementById("work-order-form-description");
+    const numberField = document.querySelector('#work-order-form [name="numero"]');
     if (!title || !description) {
         return;
     }
 
     if (state.editing.workOrder) {
         const current = getEntityByKind("workOrder", state.editing.workOrder);
+        if (numberField) {
+            numberField.value = current?.numero || "";
+        }
         title.textContent = "Edit Order Service";
         description.textContent = current
             ? `Atualize a OS ${current.numero}, revise itens, status e anexos antes de salvar as alteracoes.`
@@ -6508,8 +6513,11 @@ function renderWorkOrderFormHeader() {
         return;
     }
 
+    if (numberField) {
+        numberField.value = "Sera gerado ao salvar";
+    }
     title.textContent = "New Order Service";
-    description.textContent = "Preencha os dados operacionais, produtos aplicados, status e anexos da ordem de servico.";
+    description.textContent = "Preencha os dados operacionais, produtos aplicados, status e anexos. O numero da OS sera gerado automaticamente em sequencia.";
 }
 
 function renderAppointmentFormHeader() {

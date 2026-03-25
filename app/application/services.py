@@ -1362,7 +1362,6 @@ def _validate_work_order_payload(
     payload: WorkOrderCreate,
     current_work_order_id: Optional[int] = None,
 ) -> tuple[Customer, dict]:
-    normalized_number = _clean_required_text(payload.numero, "Informe o numero da ordem de servico.")
     normalized_location = _clean_required_text(payload.local_execucao, "Informe o local de execucao da ordem de servico.")
     normalized_notes = _clean_optional_text(payload.observacoes)
 
@@ -1370,12 +1369,6 @@ def _validate_work_order_payload(
         raise BusinessRuleViolation("A garantia deve possuir data limite igual ou posterior a execucao.")
     if payload.hora_fim and payload.hora_fim <= payload.hora_inicio:
         raise BusinessRuleViolation("A hora final deve ser posterior a hora inicial.")
-
-    duplicate_query = db.query(WorkOrder).filter(WorkOrder.numero == normalized_number)
-    if current_work_order_id is not None:
-        duplicate_query = duplicate_query.filter(WorkOrder.id != current_work_order_id)
-    if duplicate_query.first():
-        raise BusinessRuleViolation("Ja existe ordem de servico com este numero.")
 
     customer = _get_customer_or_fail(db, payload.cliente_id)
     _get_technician_or_fail(db, payload.tecnico_id, require_active=True)
@@ -1401,10 +1394,32 @@ def _validate_work_order_payload(
         _get_pest_or_fail(db, pest_id)
 
     return customer, {
-        "numero": normalized_number,
         "local_execucao": normalized_location,
         "observacoes": normalized_notes,
     }
+
+
+def _generate_work_order_number(db: Session, reference_date: Optional[date] = None) -> str:
+    base_date = reference_date or date.today()
+    prefix = f"OS-{base_date.year}-"
+    last_work_order = (
+        db.query(WorkOrder)
+        .filter(WorkOrder.numero.like(f"{prefix}%"))
+        .order_by(WorkOrder.id.desc())
+        .first()
+    )
+    sequence = 1
+    if last_work_order and last_work_order.numero.startswith(prefix):
+        try:
+            sequence = int(last_work_order.numero.replace(prefix, "")) + 1
+        except ValueError:
+            sequence = 1
+
+    candidate = f"{prefix}{sequence:06d}"
+    while db.query(WorkOrder).filter(WorkOrder.numero == candidate).first():
+        sequence += 1
+        candidate = f"{prefix}{sequence:06d}"
+    return candidate
 
 
 def _restore_stock(work_order: WorkOrder) -> None:
@@ -1484,7 +1499,7 @@ def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Op
     customer, normalized = _validate_work_order_payload(db, payload)
 
     work_order = WorkOrder(
-        numero=normalized["numero"],
+        numero=_generate_work_order_number(db),
         cliente_id=payload.cliente_id,
         tecnico_id=payload.tecnico_id,
         data_execucao=payload.data_execucao,
@@ -1561,7 +1576,6 @@ def update_work_order(
         db.delete(item)
     db.flush()
 
-    work_order.numero = normalized["numero"]
     work_order.cliente_id = payload.cliente_id
     work_order.tecnico_id = payload.tecnico_id
     work_order.data_execucao = payload.data_execucao
