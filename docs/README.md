@@ -11,6 +11,7 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - `delivery-process.md`: versionamento, fluxo de PR e operacao em Agile/Scrum.
 - `financial-nfe-module.md`: integracao entre financeiro, NF-e, Simples Nacional e apoio fiscal por NCM.
 - `sefaz-direct-nfe-module.md`: arquitetura e configuracao da emissao direta de NF-e com SEFAZ.
+- `validation-review-2026-03-25.md`: registro da revisao tecnica do worktree, diagnostico do ambiente Python e validacao da suite.
 - `adr/ADR-0001-layered-modular-monolith.md`: decisao arquitetural base do sistema.
 
 ## Como usar esta base
@@ -20,5 +21,6 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - consulte `api-reference.md` antes de mudar contratos HTTP;
 - consulte `financial-nfe-module.md` antes de evoluir cobranca, emissao de NF-e ou regras fiscais;
 - consulte `sefaz-direct-nfe-module.md` antes de ativar ou ajustar a emissao direta pela SEFAZ;
+- consulte `validation-review-2026-03-25.md` para entender o diagnostico recente do ambiente e a validacao executada no repositorio;
 - consulte `code-standards.md` antes de abrir PR de refactor ou feature;
 - consulte `delivery-process.md` para planejar e acompanhar trabalho em sprint.
