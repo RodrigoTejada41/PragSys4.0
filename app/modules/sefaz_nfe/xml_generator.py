@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, time
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 from xml.etree import ElementTree as ET
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -40,11 +40,11 @@ def _digits_only(value: Any) -> str:
     return "".join(char for char in str(value or "") if char.isdigit())
 
 
-def _money(value: Decimal | int | float | str | None) -> Decimal:
+def _money(value: Optional[Union[Decimal, int, float, str]]) -> Decimal:
     return Decimal(str(value or "0")).quantize(MONEY_QUANTIZER, rounding=ROUND_HALF_UP)
 
 
-def _decimal4(value: Decimal | int | float | str | None) -> Decimal:
+def _decimal4(value: Optional[Union[Decimal, int, float, str]]) -> Decimal:
     return Decimal(str(value or "0")).quantize(FOUR_DECIMAL_QUANTIZER, rounding=ROUND_HALF_UP)
 
 
@@ -56,7 +56,7 @@ def _format_decimal4(value: Decimal) -> str:
     return f"{_decimal4(value):.4f}"
 
 
-def _append_text(parent: ET.Element, tag: str, value: Any) -> ET.Element | None:
+def _append_text(parent: ET.Element, tag: str, value: Any) -> Optional[ET.Element]:
     if value in (None, "", []):
         return None
     element = ET.SubElement(parent, f"{{{NFE_NAMESPACE}}}{tag}")
@@ -369,7 +369,7 @@ def build_nfe_xml(invoice, customer, items: list[dict[str, Any]]) -> GeneratedNf
     )
 
 
-def validate_xml_against_xsd(xml_content: str, schema_name: str, *, environment: str | None = None) -> None:
+def validate_xml_against_xsd(xml_content: str, schema_name: str, *, environment: Optional[str] = None) -> None:
     settings = get_settings()
     current_environment = str(environment or settings.focus_nfe_environment or "homologacao").strip().lower()
     if not settings.sefaz_nfe_xsd_dir:

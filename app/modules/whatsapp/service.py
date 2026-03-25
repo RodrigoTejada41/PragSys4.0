@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Optional, Protocol, Union
 
 import httpx
 from sqlalchemy.orm import Session, joinedload
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class WhatsAppSendResult:
     provider: str
     external_message_id: Optional[str]
-    raw_response: Optional[dict | str]
+    raw_response: Optional[Union[dict, str]]
 
 
 @dataclass(frozen=True)
@@ -149,7 +149,7 @@ def _build_client(config: WhatsAppIntegrationConfig) -> WhatsAppProviderClient:
     return CustomWhatsAppClient(config)
 
 
-def _serialize_external_response(payload: Optional[dict | str]) -> Optional[str]:
+def _serialize_external_response(payload: Optional[Union[dict, str]]) -> Optional[str]:
     if payload is None:
         return None
     if isinstance(payload, str):
@@ -195,7 +195,7 @@ def _resolve_status_url(config: WhatsAppIntegrationConfig) -> Optional[str]:
     return None
 
 
-def _normalize_connection_status(payload: dict | None, config: WhatsAppIntegrationConfig) -> WhatsAppConnectionStatus:
+def _normalize_connection_status(payload: Optional[dict], config: WhatsAppIntegrationConfig) -> WhatsAppConnectionStatus:
     payload = payload or {}
     instance_name = (
         payload.get("instance_name")

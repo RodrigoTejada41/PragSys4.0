@@ -1,5 +1,7 @@
 import json
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -29,8 +31,8 @@ router = APIRouter(prefix="/google-calendar", tags=["google-calendar"])
     response_model=GoogleCalendarOAuthStartRead,
 )
 def post_google_oauth_start(
-    appointment_id: int | None = None,
-    provider_company_id: int | None = None,
+    appointment_id: Optional[int] = None,
+    provider_company_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(["master", "admin", "operador"])),
 ) -> GoogleCalendarOAuthStartRead:
@@ -50,8 +52,8 @@ def post_google_oauth_start(
     response_model=GoogleCalendarOAuthStartRead,
 )
 def post_google_login(
-    appointment_id: int | None = None,
-    provider_company_id: int | None = None,
+    appointment_id: Optional[int] = None,
+    provider_company_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(["master", "admin", "operador"])),
 ) -> GoogleCalendarOAuthStartRead:
@@ -68,7 +70,7 @@ def post_google_login(
     response_model=GoogleCalendarConnectionStatusRead,
 )
 def get_google_status(
-    provider_company_id: int | None = None,
+    provider_company_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(["master", "admin", "operador"])),
 ) -> GoogleCalendarConnectionStatusRead:
@@ -86,7 +88,7 @@ def get_google_status(
     response_model=GoogleCalendarConnectionStatusRead,
 )
 def post_google_logout(
-    provider_company_id: int | None = None,
+    provider_company_id: Optional[int] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(["master", "admin", "operador"])),
 ) -> GoogleCalendarConnectionStatusRead:

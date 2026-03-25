@@ -276,7 +276,7 @@ def google_calendar_request(
     method: str,
     path: str,
     payload: Optional[dict] = None,
-) -> tuple[dict | None, str]:
+) -> tuple[Optional[dict], str]:
     calendar_id, access_token = _get_runtime_google_credentials(db, user_id)
     url = f"https://www.googleapis.com/calendar/v3/calendars/{quote(calendar_id, safe='')}/{path}"
     headers = {

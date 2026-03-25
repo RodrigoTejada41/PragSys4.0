@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Body, Depends, status
 from sqlalchemy.orm import Session
 
@@ -59,7 +61,7 @@ def put_direct_nfe(nfe_id: int, payload: NfeInvoiceUpdate, db: Session = Depends
 )
 def delete_direct_nfe(
     nfe_id: int,
-    payload: NfeCancelRequest | None = Body(default=None),
+    payload: Optional[NfeCancelRequest] = Body(default=None),
     db: Session = Depends(get_db),
 ) -> NfeInvoiceRead:
     return cancel_direct_nfe(db, nfe_id, payload)

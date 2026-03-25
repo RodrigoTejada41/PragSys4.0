@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Union
 
 from sqlalchemy.orm import Session, joinedload
 
@@ -21,11 +21,11 @@ MONEY_QUANTIZER = Decimal("0.01")
 ALIQUOT_QUANTIZER = Decimal("0.0001")
 
 
-def _money(value: Decimal | int | float | None) -> Decimal:
+def _money(value: Optional[Union[Decimal, int, float]]) -> Decimal:
     return Decimal(value or 0).quantize(MONEY_QUANTIZER)
 
 
-def _aliquot(value: Decimal | int | float | None) -> Decimal:
+def _aliquot(value: Optional[Union[Decimal, int, float]]) -> Decimal:
     return Decimal(value or 0).quantize(ALIQUOT_QUANTIZER)
 
 

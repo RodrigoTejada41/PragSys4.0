@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from urllib.parse import urljoin
 
 import httpx
@@ -24,7 +24,7 @@ class FocusNfeClient:
         *,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
-        environment: Optional[NfeEnvironment | str] = None,
+        environment: Optional[Union[NfeEnvironment, str]] = None,
         timeout_seconds: Optional[float] = None,
     ) -> None:
         settings = get_settings()
@@ -35,7 +35,7 @@ class FocusNfeClient:
         self.timeout_seconds = timeout_seconds or settings.focus_nfe_timeout_seconds
 
     @staticmethod
-    def _normalize_environment(value: NfeEnvironment | str) -> NfeEnvironment:
+    def _normalize_environment(value: Union[NfeEnvironment, str]) -> NfeEnvironment:
         if isinstance(value, NfeEnvironment):
             return value
         return NfeEnvironment(str(value).strip().lower())

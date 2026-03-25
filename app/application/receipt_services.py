@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from io import BytesIO
-from typing import Optional
+from typing import Optional, Union
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -74,7 +74,7 @@ def _normalize_receipt_description(value: str) -> str:
     return _clean_required_text(value, "Informe a descricao do recibo.")
 
 
-def _receipt_payment_label(value: ReceiptPaymentMethod | str) -> str:
+def _receipt_payment_label(value: Union[ReceiptPaymentMethod, str]) -> str:
     normalized = value.value if hasattr(value, "value") else str(value or "")
     return RECEIPT_PAYMENT_LABELS.get(normalized, "Outros")
 
@@ -191,7 +191,7 @@ def _serialize_receipt(receipt: Receipt) -> Receipt:
 def _build_receipt_preview(
     *,
     customer,
-    payload: ReceiptCreate | ReceiptUpdate,
+    payload: Union[ReceiptCreate, ReceiptUpdate],
     work_order: Optional[WorkOrder],
     description: str,
 ) -> ReceiptPreviewRead:
@@ -226,7 +226,7 @@ def _build_receipt_preview(
 
 def _validate_receipt_payload(
     db: Session,
-    payload: ReceiptCreate | ReceiptUpdate,
+    payload: Union[ReceiptCreate, ReceiptUpdate],
     *,
     current_receipt_id: Optional[int] = None,
     skip_duplicate_check: bool = False,
@@ -353,7 +353,7 @@ def get_receipt(db: Session, receipt_id: int) -> Receipt:
     return _serialize_receipt(_get_receipt_or_fail(db, receipt_id))
 
 
-def preview_receipt(db: Session, payload: ReceiptCreate | ReceiptUpdate) -> ReceiptPreviewRead:
+def preview_receipt(db: Session, payload: Union[ReceiptCreate, ReceiptUpdate]) -> ReceiptPreviewRead:
     customer, work_order, description = _validate_receipt_payload(db, payload, skip_duplicate_check=True)
     return _build_receipt_preview(
         customer=customer,

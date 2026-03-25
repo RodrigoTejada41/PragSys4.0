@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Union
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session, joinedload
@@ -326,7 +326,7 @@ def _sync_google_for_appointment(
 
 def _validate_appointment_payload(
     db: Session,
-    payload: AppointmentCreate | AppointmentUpdate,
+    payload: Union[AppointmentCreate, AppointmentUpdate],
     current_appointment_id: Optional[int] = None,
 ) -> tuple[Customer, Optional[Technician], Optional[WorkOrder], dict]:
     customer = _get_customer_or_fail(db, payload.cliente_id)
