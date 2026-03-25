@@ -37,7 +37,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="3.2.5", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="3.2.6", lifespan=lifespan)
 
 
 @app.exception_handler(BusinessRuleViolation)

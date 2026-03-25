@@ -11,6 +11,8 @@
 - Novo modulo de agendamento integrado a clientes, tecnicos, Ordem de Servico e historico operacional.
 - Preparacao da integracao com Google Agenda e testes automatizados do fluxo de agenda.
 
-## [3.2.5] - Em desenvolvimento
+## [3.2.6] - 2026-03-25
 
-- Linha de desenvolvimento aberta apos a publicacao da tag `v3.1.0`.
+- Compatibilidade de anotacoes de tipo ajustada para preservar suporte ao Python 3.9 nos modulos fiscal, agendamento, recibos, Google Calendar, NF-e e WhatsApp.
+- Ambiente virtual principal `.venv` reparado e realinhado com as dependencias declaradas do projeto.
+- Suite automatizada validada com sucesso no fluxo padrao de desenvolvimento: `53 passed`.
