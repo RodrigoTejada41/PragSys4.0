@@ -293,6 +293,17 @@ def google_calendar_request(
     return content, calendar_id
 
 
+def _should_offer_google_oauth_reconnect(message: str) -> bool:
+    normalized = str(message or "").strip().lower()
+    oauth_reconnect_markers = (
+        "nenhuma conta google conectada",
+        "conecte uma conta google",
+        "expirou e nao possui refresh token",
+        "falha ao atualizar a sessao do google agenda",
+    )
+    return any(marker in normalized for marker in oauth_reconnect_markers)
+
+
 def sync_appointment_with_google_or_request_oauth(db: Session, appointment_id: int, current_user_id: int) -> dict:
     from app.application.scheduling_services import get_appointment, sync_appointment_google_event
 
@@ -311,7 +322,7 @@ def sync_appointment_with_google_or_request_oauth(db: Session, appointment_id: i
             "appointment": synced,
         }
     except BusinessRuleViolation as exc:
-        if not _oauth_is_configured():
+        if not _oauth_is_configured() or not _should_offer_google_oauth_reconnect(exc.message):
             raise
         authorization_url = build_google_oauth_authorization_url(db, current_user_id, appointment_id=appointment_id)
         return {

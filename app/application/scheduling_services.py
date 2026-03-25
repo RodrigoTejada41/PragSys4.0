@@ -27,7 +27,6 @@ ACTIVE_APPOINTMENT_STATUSES = {
 
 FINISHED_APPOINTMENT_STATUSES = {
     AppointmentStatus.CONCLUIDO.value,
-    AppointmentStatus.REAGENDADO.value,
     AppointmentStatus.CANCELADO.value,
     AppointmentStatus.NAO_REALIZADO.value,
 }
@@ -242,11 +241,15 @@ def _set_google_sync_state(
     calendar_id: Optional[str] = None,
     message: Optional[str] = None,
     event_id: Optional[str] = None,
+    *,
+    clear_event_id: bool = False,
 ) -> None:
     appointment.google_sync_status = status.value
     appointment.google_sync_message = _clean_optional_text(message)
     if calendar_id is not None:
         appointment.google_calendar_id = calendar_id
+    if clear_event_id:
+        appointment.google_calendar_event_id = None
     if event_id is not None:
         appointment.google_calendar_event_id = event_id
 
@@ -259,16 +262,6 @@ def _sync_google_for_appointment(
     raise_on_error: bool = False,
     user_id: Optional[int] = None,
 ) -> Appointment:
-    if not appointment.sincronizar_google:
-        _set_google_sync_state(
-            appointment,
-            GoogleSyncStatus.DESCONECTADO,
-            appointment.google_calendar_id,
-            "Sincronizacao com Google Agenda desabilitada.",
-        )
-        db.flush()
-        return appointment
-
     try:
         integration_user_id = user_id or appointment.usuario_ultima_atualizacao_id or appointment.usuario_responsavel_id
         if remove_event and appointment.google_calendar_event_id:
@@ -278,14 +271,30 @@ def _sync_google_for_appointment(
                 "DELETE",
                 f"events/{appointment.google_calendar_event_id}",
             )
+            sync_status = GoogleSyncStatus.DESCONECTADO if not appointment.sincronizar_google else GoogleSyncStatus.SINCRONIZADO
+            sync_message = (
+                "Evento removido do Google Agenda e sincronizacao desabilitada."
+                if not appointment.sincronizar_google
+                else "Evento removido do Google Agenda."
+            )
             _set_google_sync_state(
                 appointment,
-                GoogleSyncStatus.SINCRONIZADO,
+                sync_status,
                 calendar_id,
-                "Evento removido do Google Agenda.",
-                "",
+                sync_message,
+                clear_event_id=True,
             )
             _log_appointment_history(db, appointment, user_id, "google_delete", "Evento removido da agenda Google.")
+            db.flush()
+            return appointment
+
+        if not appointment.sincronizar_google:
+            _set_google_sync_state(
+                appointment,
+                GoogleSyncStatus.DESCONECTADO,
+                appointment.google_calendar_id,
+                "Sincronizacao com Google Agenda desabilitada.",
+            )
             db.flush()
             return appointment
 
@@ -485,6 +494,7 @@ def update_appointment(
     previous_status = appointment.status
     previous_date = appointment.data_agendamento
     previous_time = appointment.hora_agendamento
+    previous_google_event_id = appointment.google_calendar_event_id
 
     appointment.cliente_id = customer.id
     appointment.os_id = payload.os_id
@@ -524,8 +534,19 @@ def update_appointment(
     _log_appointment_history(db, appointment, current_user_id, history_action, details, previous_status, appointment.status)
     db.commit()
     appointment = get_appointment(db, appointment.id)
-    if sync_google_after_commit and appointment.sincronizar_google:
-        _sync_google_for_appointment(db, appointment, user_id=current_user_id)
+    should_remove_google_event = bool(
+        previous_google_event_id and (
+            not appointment.sincronizar_google
+            or appointment.status in {AppointmentStatus.CANCELADO.value, AppointmentStatus.NAO_REALIZADO.value}
+        )
+    )
+    if sync_google_after_commit and (appointment.sincronizar_google or should_remove_google_event):
+        _sync_google_for_appointment(
+            db,
+            appointment,
+            remove_event=should_remove_google_event,
+            user_id=current_user_id,
+        )
         db.commit()
         appointment = get_appointment(db, appointment.id)
     return appointment
