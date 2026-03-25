@@ -44,8 +44,12 @@ NAV_ITEMS = [
 
 @router.get("/app", response_class=HTMLResponse)
 def web_app(request: Request) -> HTMLResponse:
+    app_js_version = str(int((STATIC_DIR / "app.js").stat().st_mtime))
     return templates.TemplateResponse(
         request=request,
         name="pages/app.html",
-        context={"nav_items": NAV_ITEMS},
+        context={
+            "nav_items": NAV_ITEMS,
+            "app_js_version": app_js_version,
+        },
     )
