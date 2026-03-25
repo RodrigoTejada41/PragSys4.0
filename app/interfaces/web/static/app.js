@@ -668,7 +668,7 @@ function buildForms() {
                 <button type="button" class="btn btn-default ghost-button" id="customer-cnpj-lookup">Buscar por CNPJ</button>
             </div>
             <label><span>CEP</span><input name="cep" maxlength="9" placeholder="00000-000"></label>
-            <label><span>Numero</span><input name="numero" placeholder="Numero"></label>
+            <label><span>Numero do endereco</span><input name="numero" placeholder="Numero"></label>
             <div class="inline-actions compact-actions full-width">
                 <button type="button" class="btn btn-default ghost-button" id="customer-cep-lookup">Buscar por CEP</button>
             </div>
@@ -930,11 +930,11 @@ function buildForms() {
 
     document.getElementById("work-order-form").innerHTML = `
         <div class="form-grid">
-            <label>
+            <div class="form-field-static">
                 <span>Numero</span>
-                <input name="numero" readonly placeholder="Gerado automaticamente">
+                <strong id="work-order-number-display">Sera gerado automaticamente ao salvar</strong>
                 <small>Numero sequencial gerado automaticamente pelo sistema.</small>
-            </label>
+            </div>
             <label><span>Cliente</span><select name="cliente_id" required></select></label>
             <label><span>Tecnico</span><select name="tecnico_id" required></select></label>
             <label><span>Local de execucao</span><input name="local_execucao" required></label>
@@ -2963,7 +2963,6 @@ function getWorkOrderPayload(form) {
         .filter((item) => item.produto_id);
 
     return {
-        numero: raw.numero || null,
         cliente_id: Number(raw.cliente_id),
         tecnico_id: Number(raw.tecnico_id),
         data_execucao: raw.data_execucao,
@@ -6496,15 +6495,15 @@ function fillNfeItemRowsFromInvoice(item) {
 function renderWorkOrderFormHeader() {
     const title = document.getElementById("work-order-form-title");
     const description = document.getElementById("work-order-form-description");
-    const numberField = document.querySelector('#work-order-form [name="numero"]');
+    const numberDisplay = document.getElementById("work-order-number-display");
     if (!title || !description) {
         return;
     }
 
     if (state.editing.workOrder) {
         const current = getEntityByKind("workOrder", state.editing.workOrder);
-        if (numberField) {
-            numberField.value = current?.numero || "";
+        if (numberDisplay) {
+            numberDisplay.textContent = current?.numero || "Numero indisponivel";
         }
         title.textContent = "Edit Order Service";
         description.textContent = current
@@ -6513,8 +6512,8 @@ function renderWorkOrderFormHeader() {
         return;
     }
 
-    if (numberField) {
-        numberField.value = "Sera gerado ao salvar";
+    if (numberDisplay) {
+        numberDisplay.textContent = "Sera gerado automaticamente ao salvar";
     }
     title.textContent = "New Order Service";
     description.textContent = "Preencha os dados operacionais, produtos aplicados, status e anexos. O numero da OS sera gerado automaticamente em sequencia.";
