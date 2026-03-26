@@ -45,6 +45,15 @@ O principal gargalo nao estava no corpo dos testes, mas na infraestrutura de tes
 - leitura voltou a refletir imediatamente criacao, substituicao ou remocao de arquivos em runtime;
 - logs de resolucao foram adicionados para facilitar diagnostico de carregamento de assets.
 
+### Backup e seguranca de artefatos
+
+- pasta `release/**/bkp/` removida do versionamento para evitar duplicacao de codigo no repositorio;
+- `scripts/create_release_backup.ps1` passou a gerar backup `.zip` diretamente do projeto, sem copiar a aplicacao para uma subarvore versionada;
+- por padrao, o script exclui `assinaturas`, `assinaturas_tecnicas`, `certificado` e `XSD`, reduzindo risco de vazamento de dados sensiveis;
+- a inclusao desses ativos agora exige `-IncludeSensitiveAssets`, tornando a acao explicita e auditavel;
+- o nome padrao do artefato inclui timestamp no formato `SysPragas_<versao>_backup_YYYYMMDD_HHMM.zip`;
+- o script passou a registrar em log os itens incluidos, os itens sensiveis ignorados e a quantidade total de entradas empacotadas.
+
 ### Configuracao de seguranca
 
 - `password_hash_iterations` passou a ser configuravel via settings;
@@ -173,10 +182,14 @@ Sem alterar comportamento:
 - A suite completa continuou verde apos as mudancas.
 - Nenhuma funcionalidade foi removida.
 - O comportamento esperado da aplicacao foi preservado.
+- O backup padrao nao incluiu entradas sob `assinaturas/`, `assinaturas_tecnicas/`, `certificado/` e `XSD/`.
+- O backup com `-IncludeSensitiveAssets` voltou a incluir os ativos sensiveis presentes no ambiente local.
 
 ## Comandos usados
 
 ```powershell
 .venv\Scripts\python.exe -m pytest -q --durations=0
 .venv\Scripts\python.exe -m pytest -q --durations=20
+powershell -ExecutionPolicy Bypass -File scripts\create_release_backup.ps1 -Version 4.1
+powershell -ExecutionPolicy Bypass -File scripts\create_release_backup.ps1 -Version 4.1 -IncludeSensitiveAssets
 ```

@@ -7,6 +7,7 @@ Versao 4.1 da linha SysPragas com foco em estabilidade, rastreabilidade de relea
 - consolidacao da base 4.x para manutencao continua;
 - versionamento principal elevado para `4.1.0`;
 - estrategia de backup por artefato `.zip`, evitando duplicacao versionada dentro do repositorio;
+- exclusao padrao de ativos sensiveis (`assinaturas`, `assinaturas_tecnicas`, `certificado` e `XSD`) no backup automatizado;
 - otimizacao segura da infraestrutura de testes, sem alterar regras de negocio.
 
 ## Destaques tecnicos
@@ -16,7 +17,8 @@ Versao 4.1 da linha SysPragas com foco em estabilidade, rastreabilidade de relea
 - token de autenticacao de teste emitido diretamente no fixture;
 - custo de hash configuravel por ambiente;
 - suite automatizada reduzida de cerca de 14m30s para cerca de 44s.
-- resolucao de templates e assinaturas passou a refletir mudancas no filesystem sem reinicio do processo.
+- resolucao de templates e assinaturas passou a refletir mudancas no filesystem sem reinicio do processo;
+- script de backup com nome versionado e timestamp, inclusao opcional de ativos sensiveis via `-IncludeSensitiveAssets` e logs de itens incluidos/ignorados.
 
 ## Referencias
 

@@ -7,7 +7,8 @@
 - verificar paths de `TECHNICAL_SIGNATURES_DIR` e `CERTIFICATE_MODELS_DIR`;
 - verificar configuracoes fiscais e de integracao Google/WhatsApp;
 - garantir backup do banco antes da atualizacao.
-- se precisar empacotar backup da release, gerar artefato com `scripts/create_release_backup.ps1` em vez de versionar `bkp` no repositorio.
+- se precisar empacotar backup da release, gerar artefato com `scripts/create_release_backup.ps1` em vez de versionar `bkp` no repositorio;
+- usar `-IncludeSensitiveAssets` apenas quando houver necessidade operacional explicita de incluir certificados, assinaturas ou XSDs no artefato.
 
 ## Atualizacao
 
