@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -39,10 +40,14 @@ def _iter_candidate_names(technician: Technician) -> Iterable[str]:
             yield token
 
 
-def resolve_certificate_model_path(model_name: Optional[str] = None) -> Optional[Path]:
-    settings = get_settings()
-    official_dir = settings.certificate_models_path
-    legacy_dir = settings.legacy_certificate_models_path
+@lru_cache(maxsize=32)
+def _resolve_certificate_model_path_cached(
+    official_dir_raw: str,
+    legacy_dir_raw: str,
+    model_name: str,
+) -> Optional[Path]:
+    official_dir = Path(official_dir_raw)
+    legacy_dir = Path(legacy_dir_raw) if legacy_dir_raw else None
 
     candidate_names = []
     if model_name:
@@ -66,6 +71,36 @@ def resolve_certificate_model_path(model_name: Optional[str] = None) -> Optional
     return None
 
 
+@lru_cache(maxsize=128)
+def _resolve_signature_path_cached(signatures_dir_raw: str, candidate_name: str) -> Optional[Path]:
+    signatures_dir = Path(signatures_dir_raw)
+    for extension in SUPPORTED_IMAGE_EXTENSIONS:
+        candidate = signatures_dir / f"{candidate_name}{extension}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+@lru_cache(maxsize=32)
+def _resolve_fallback_signature_path_cached(signatures_dir_raw: str) -> Optional[Path]:
+    signatures_dir = Path(signatures_dir_raw)
+    fallback_images = [path for extension in SUPPORTED_IMAGE_EXTENSIONS for path in signatures_dir.glob(f"*{extension}")]
+    if len(fallback_images) == 1:
+        return fallback_images[0]
+    return None
+
+
+def resolve_certificate_model_path(model_name: Optional[str] = None) -> Optional[Path]:
+    settings = get_settings()
+    official_dir = settings.certificate_models_path
+    legacy_dir = settings.legacy_certificate_models_path
+    return _resolve_certificate_model_path_cached(
+        str(official_dir),
+        str(legacy_dir) if legacy_dir else "",
+        str(model_name or ""),
+    )
+
+
 def require_certificate_model_path(model_name: Optional[str] = None) -> Path:
     template_path = resolve_certificate_model_path(model_name)
     if template_path:
@@ -79,15 +114,15 @@ def require_certificate_model_path(model_name: Optional[str] = None) -> Path:
 
 def resolve_technical_signature_path(technician: Technician) -> Optional[Path]:
     signatures_dir = get_settings().technical_signatures_path
+    signatures_dir_raw = str(signatures_dir)
     for candidate_name in _iter_candidate_names(technician):
-        for extension in SUPPORTED_IMAGE_EXTENSIONS:
-            candidate = signatures_dir / f"{candidate_name}{extension}"
-            if candidate.exists():
-                return candidate
-    fallback_images = [path for extension in SUPPORTED_IMAGE_EXTENSIONS for path in signatures_dir.glob(f"*{extension}")]
-    if len(fallback_images) == 1:
+        candidate = _resolve_signature_path_cached(signatures_dir_raw, candidate_name)
+        if candidate is not None:
+            return candidate
+    fallback_image = _resolve_fallback_signature_path_cached(signatures_dir_raw)
+    if fallback_image is not None:
         logger.warning("Using fallback technical signature for technician %s", getattr(technician, "id", "?"))
-        return fallback_images[0]
+        return fallback_image
     return None
 
 

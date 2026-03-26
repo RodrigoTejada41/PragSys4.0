@@ -5,6 +5,7 @@ import re
 from calendar import monthrange
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from functools import lru_cache
 from io import BytesIO
 from io import StringIO
 from pathlib import Path
@@ -2230,18 +2231,26 @@ def _resolve_guarantee_company_data(db: Session, work_order: WorkOrder) -> dict[
     }
 
 
-def _resolve_guarantee_template_path() -> Optional[Path]:
-    settings = get_settings()
+def _guarantee_certificate_filename_for_work_order(work_order: WorkOrder) -> str:
+    customer_name = getattr(getattr(work_order, "cliente", None), "razao_social", "") or ""
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(customer_name).strip().lower()).strip("_")
+    return f"certificado_{normalized or 'cliente'}.pdf"
+
+
+@lru_cache(maxsize=16)
+def _resolve_guarantee_template_path_cached(certificate_models_path_raw: str, legacy_models_path_raw: str) -> Optional[Path]:
+    certificate_models_path = Path(certificate_models_path_raw)
+    legacy_models_path = Path(legacy_models_path_raw) if legacy_models_path_raw else None
     preferred_candidates = [
-        settings.certificate_models_path / "modelo.png",
-        settings.certificate_models_path / "modelo.jpg",
-        settings.certificate_models_path / "modelo.jpeg",
+        certificate_models_path / "modelo.png",
+        certificate_models_path / "modelo.jpg",
+        certificate_models_path / "modelo.jpeg",
     ]
     for candidate in preferred_candidates:
         if candidate.exists():
             return candidate
 
-    searchable_dirs = [settings.legacy_certificate_models_path, settings.certificate_models_path]
+    searchable_dirs = [legacy_models_path, certificate_models_path]
     ranked_keywords = ("garantia", "certificado", "modelo")
     found_candidates: list[tuple[int, Path]] = []
     for directory in searchable_dirs:
@@ -2257,6 +2266,14 @@ def _resolve_guarantee_template_path() -> Optional[Path]:
         return None
     found_candidates.sort(key=lambda item: (-item[0], str(item[1]).lower()))
     return found_candidates[0][1]
+
+
+def _resolve_guarantee_template_path() -> Optional[Path]:
+    settings = get_settings()
+    return _resolve_guarantee_template_path_cached(
+        str(settings.certificate_models_path),
+        str(settings.legacy_certificate_models_path) if settings.legacy_certificate_models_path else "",
+    )
 
 
 def _resolve_guarantee_service_text(work_order: WorkOrder) -> str:
@@ -3453,3 +3470,14 @@ def generate_guarantee_certificate_pdf(db: Session, work_order_id: int, current_
         return buffer.getvalue()
 
     return _run_document_generation("guarantee_certificate_pdf", work_order_id, _builder)
+
+
+def generate_guarantee_certificate_pdf_bundle(
+    db: Session,
+    work_order_id: int,
+    current_user: Optional[User] = None,
+) -> tuple[bytes, str]:
+    work_order = get_work_order(db, work_order_id, current_user=current_user)
+    filename = _guarantee_certificate_filename_for_work_order(work_order)
+    pdf_bytes = generate_guarantee_certificate_pdf(db, work_order_id, current_user=current_user)
+    return pdf_bytes, filename
