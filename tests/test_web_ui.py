@@ -34,3 +34,8 @@ def test_static_app_js_includes_appointment_availability_feedback(client):
     assert "Periodo final" in response.text
     assert "Reabrir OS" in response.text
     assert "Reimprimir OS" in response.text
+    assert "Visualizar OS" in response.text
+    assert "Abrir moldura" in response.text
+    assert "Baixar moldura" in response.text
+    assert "Moldura recomendada" in response.text
+    assert "Sanitario padrao" in response.text

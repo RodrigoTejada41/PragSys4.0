@@ -1,5 +1,6 @@
 import csv
 import json
+import logging
 from calendar import monthrange
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -19,7 +20,7 @@ from reportlab.lib.utils import ImageReader
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import get_settings
-from app.application.certificate_assets import require_certificate_model_path, require_technical_signature_path
+from app.application.certificate_assets import resolve_certificate_model_path, resolve_technical_signature_path
 from app.application.schemas import (
     AddressLookupRead,
     CustomerCnpjLookupRead,
@@ -74,11 +75,46 @@ ALLOWED_WORK_ORDER_PHOTO_TYPES = {
     "image/webp",
 }
 
+LOGGER = logging.getLogger(__name__)
+
 
 def _money(value: Decimal) -> Decimal:
     if value is None:
         return Decimal("0.00")
     return Decimal(value).quantize(MONEY_QUANTIZER)
+
+
+def _run_document_generation(document_kind: str, work_order_id: int, builder) -> bytes:
+    LOGGER.info(
+        "document_generation_started document_kind=%s work_order_id=%s",
+        document_kind,
+        work_order_id,
+    )
+    try:
+        payload = builder()
+    except BusinessRuleViolation:
+        LOGGER.warning(
+            "document_generation_blocked document_kind=%s work_order_id=%s",
+            document_kind,
+            work_order_id,
+            exc_info=True,
+        )
+        raise
+    except Exception:
+        LOGGER.exception(
+            "document_generation_failed document_kind=%s work_order_id=%s",
+            document_kind,
+            work_order_id,
+        )
+        raise
+
+    LOGGER.info(
+        "document_generation_completed document_kind=%s work_order_id=%s bytes=%s",
+        document_kind,
+        work_order_id,
+        len(payload),
+    )
+    return payload
 
 
 def _enum_value(value):
@@ -2152,7 +2188,7 @@ def _resolve_responsible_name(settings, work_order: WorkOrder) -> str:
 def _draw_signature_stamp(
     pdf: canvas.Canvas,
     *,
-    signature_path: Path,
+    signature_path: Optional[Path],
     center_x: float,
     line_y: float,
     label: str,
@@ -2160,20 +2196,24 @@ def _draw_signature_stamp(
     max_width: float = 40 * mm,
     max_height: float = 14 * mm,
 ) -> None:
-    image = ImageReader(str(signature_path))
-    image_width, image_height = image.getSize()
-    scale = min(max_width / image_width, max_height / image_height)
-    draw_width = image_width * scale
-    draw_height = image_height * scale
-    pdf.drawImage(
-        image,
-        center_x - (draw_width / 2),
-        line_y + 2 * mm,
-        width=draw_width,
-        height=draw_height,
-        preserveAspectRatio=True,
-        mask="auto",
-    )
+    if signature_path:
+        image = ImageReader(str(signature_path))
+        image_width, image_height = image.getSize()
+        scale = min(max_width / image_width, max_height / image_height)
+        draw_width = image_width * scale
+        draw_height = image_height * scale
+        pdf.drawImage(
+            image,
+            center_x - (draw_width / 2),
+            line_y + 2 * mm,
+            width=draw_width,
+            height=draw_height,
+            preserveAspectRatio=True,
+            mask="auto",
+        )
+    else:
+        pdf.setFont("Helvetica-Oblique", 7.4)
+        pdf.drawCentredString(center_x, line_y + 5.4 * mm, "Assinatura tecnica pendente no cadastro")
     pdf.line(center_x - (max_width / 2), line_y, center_x + (max_width / 2), line_y)
     _draw_centered_text_to_fit(
         pdf,
@@ -2362,142 +2402,152 @@ def _draw_certificate_badge(pdf: canvas.Canvas, center_x: float, center_y: float
 
 
 def generate_work_order_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
-    work_order = get_work_order(db, work_order_id, current_user=current_user)
-    settings = get_settings()
-    buffer = BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=A4)
-    y = _draw_document_frame(
-        pdf,
-        "Comprovante de Execucao / Ordem de Servico",
-        "Conforme requisitos aplicaveis da RDC 622/2022",
-    )
+    def _builder() -> bytes:
+        work_order = get_work_order(db, work_order_id, current_user=current_user)
+        settings = get_settings()
+        buffer = BytesIO()
+        pdf = canvas.Canvas(buffer, pagesize=A4)
+        y = _draw_document_frame(
+            pdf,
+            "Comprovante de Execucao / Ordem de Servico",
+            "Conforme requisitos aplicaveis da RDC 622/2022",
+        )
 
-    y = _draw_section_title(pdf, y, "Identificacao do atendimento")
-    y = _draw_key_values(
-        pdf,
-        y,
-        [
-            ("Cliente", work_order.cliente.razao_social),
-            ("Endereco do imovel", f"{work_order.cliente.endereco} - {work_order.cliente.cidade}/{work_order.cliente.estado}"),
-            ("Praga(s) alvo", ", ".join([item.praga.nome_comum for item in work_order.pragas]) if work_order.pragas else "Nao informada"),
-            ("Data de execucao", work_order.data_execucao.strftime("%d/%m/%Y")),
-            ("Prazo de assistencia tecnica", _assistance_text(work_order)),
-            ("Horario", f"{work_order.hora_inicio} ate {work_order.hora_fim or '--:--'}"),
-            ("Local", work_order.local_execucao),
-            ("Responsavel tecnico", f"{settings.technical_responsible_name} - {settings.technical_responsible_registry}"),
-            ("Centro de Informacao Toxicologica", settings.toxicology_center_phone),
-            ("Valor", f"R$ {Decimal(work_order.valor_servico):.2f}"),
-        ],
-    )
+        y = _draw_section_title(pdf, y, "Identificacao do atendimento")
+        y = _draw_key_values(
+            pdf,
+            y,
+            [
+                ("Cliente", work_order.cliente.razao_social),
+                ("Endereco do imovel", f"{work_order.cliente.endereco} - {work_order.cliente.cidade}/{work_order.cliente.estado}"),
+                ("Praga(s) alvo", ", ".join([item.praga.nome_comum for item in work_order.pragas]) if work_order.pragas else "Nao informada"),
+                ("Data de execucao", work_order.data_execucao.strftime("%d/%m/%Y")),
+                ("Prazo de assistencia tecnica", _assistance_text(work_order)),
+                ("Horario", f"{work_order.hora_inicio} ate {work_order.hora_fim or '--:--'}"),
+                ("Local", work_order.local_execucao),
+                ("Responsavel tecnico", f"{settings.technical_responsible_name} - {settings.technical_responsible_registry}"),
+                ("Centro de Informacao Toxicologica", settings.toxicology_center_phone),
+                ("Valor", f"R$ {Decimal(work_order.valor_servico):.2f}"),
+            ],
+        )
 
-    y = _draw_section_title(pdf, y - 2 * mm, "Produtos aplicados")
-    y = _draw_bullets(
-        pdf,
-        y,
-        [
-            f"{item.produto.nome} | Grupo quimico: {item.produto.grupo_quimico} | Concentracao de uso: {item.produto.concentracao} | Quantidade: {item.quantidade} | Diluicao: {item.diluicao}"
-            for item in work_order.produtos
-        ],
-    )
+        y = _draw_section_title(pdf, y - 2 * mm, "Produtos aplicados")
+        y = _draw_bullets(
+            pdf,
+            y,
+            [
+                f"{item.produto.nome} | Grupo quimico: {item.produto.grupo_quimico} | Concentracao de uso: {item.produto.concentracao} | Quantidade: {item.quantidade} | Diluicao: {item.diluicao}"
+                for item in work_order.produtos
+            ],
+        )
 
-    y = _draw_section_title(pdf, y - 2 * mm, "Orientacoes pertinentes ao servico executado")
-    y = _draw_bullets(
-        pdf,
-        y,
-        [
-            "Manter pessoas e animais afastados das areas tratadas durante o periodo de seguranca definido pela empresa.",
-            "Nao remover residuos de barreiras quimicas ou iscas tecnicas sem orientacao profissional.",
-            "Em caso de intercorrencia com o produto utilizado, contatar imediatamente o Centro de Informacao Toxicologica informado neste comprovante.",
-        ],
-    )
+        y = _draw_section_title(pdf, y - 2 * mm, "Orientacoes pertinentes ao servico executado")
+        y = _draw_bullets(
+            pdf,
+            y,
+            [
+                "Manter pessoas e animais afastados das areas tratadas durante o periodo de seguranca definido pela empresa.",
+                "Nao remover residuos de barreiras quimicas ou iscas tecnicas sem orientacao profissional.",
+                "Em caso de intercorrencia com o produto utilizado, contatar imediatamente o Centro de Informacao Toxicologica informado neste comprovante.",
+            ],
+        )
 
-    y = _draw_section_title(pdf, y - 2 * mm, "Observacoes")
-    y = _draw_paragraph(pdf, y, work_order.observacoes or "Sem observacoes registradas.")
+        y = _draw_section_title(pdf, y - 2 * mm, "Observacoes")
+        y = _draw_paragraph(pdf, y, work_order.observacoes or "Sem observacoes registradas.")
 
-    y = _draw_section_title(pdf, y - 2 * mm, "Identificacao da empresa prestadora")
-    y = _draw_bullets(pdf, y, _company_identification_lines(), width_chars=84)
+        y = _draw_section_title(pdf, y - 2 * mm, "Identificacao da empresa prestadora")
+        y = _draw_bullets(pdf, y, _company_identification_lines(), width_chars=84)
 
-    pdf.setFont("Helvetica", 10)
-    pdf.drawString(20 * mm, 24 * mm, "Assinatura do tecnico: ______________________________")
-    pdf.drawRightString(190 * mm, 24 * mm, "Assinatura do cliente: ______________________________")
-    pdf.showPage()
-    pdf.save()
-    return buffer.getvalue()
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(20 * mm, 24 * mm, "Assinatura do tecnico: ______________________________")
+        pdf.drawRightString(190 * mm, 24 * mm, "Assinatura do cliente: ______________________________")
+        pdf.showPage()
+        pdf.save()
+        return buffer.getvalue()
+
+    return _run_document_generation("work_order_pdf", work_order_id, _builder)
 
 
 def generate_technical_report_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
+    def _builder() -> bytes:
+        work_order = get_work_order(db, work_order_id, current_user=current_user)
+        settings = get_settings()
+        buffer = BytesIO()
+        pdf = canvas.Canvas(buffer, pagesize=A4)
+        y = _draw_document_frame(
+            pdf,
+            "Relatorio Tecnico",
+            "Estruturado com base nos requisitos aplicaveis da RDC 622/2022",
+        )
+
+        y = _draw_section_title(pdf, y, "Resumo tecnico")
+        y = _draw_key_values(
+            pdf,
+            y,
+            [
+                ("OS", work_order.numero),
+                ("Cliente", work_order.cliente.razao_social),
+                ("Tecnico executor", work_order.tecnico.nome),
+                ("Responsavel tecnico", f"{settings.technical_responsible_name} - {settings.technical_responsible_registry}"),
+                ("Data da vistoria", work_order.data_execucao.isoformat()),
+                ("Status da OS", work_order.status.replace("_", " ")),
+                ("Garantia", work_order.garantia_ate.isoformat()),
+            ],
+        )
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Diagnostico")
+        diagnostic = (
+            f"Foram avaliadas as condicoes do local '{work_order.local_execucao}' para controle de vetores e pragas urbanas. "
+            f"O atendimento foi executado conforme os dados operacionais registrados na OS {work_order.numero}."
+        )
+        y = _draw_paragraph(pdf, y, diagnostic)
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Pragas e riscos observados")
+        pest_items = [f"{item.praga.nome_comum} ({item.praga.nome_cientifico})" for item in work_order.pragas]
+        if not pest_items:
+            pest_items = ["Nao houve praga especifica registrada; manter monitoramento preventivo."]
+        y = _draw_bullets(pdf, y, pest_items)
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Produtos e metodologia")
+        y = _draw_bullets(
+            pdf,
+            y,
+            [
+                f"{item.produto.nome} com principio ativo {item.produto.principio_ativo}, quantidade {item.quantidade} e diluicao {item.diluicao}"
+                for item in work_order.produtos
+            ],
+        )
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Recomendacoes")
+        recommendations = [
+            "Manter o ambiente higienizado, sem aculo de residuos e umidade excessiva.",
+            "Reforcar vedacao de acessos, ralos, frestas e pontos de abrigo identificados.",
+            f"Agendar reavaliacao antes do termino da garantia em {work_order.garantia_ate.isoformat()}.",
+        ]
+        y = _draw_bullets(pdf, y, recommendations)
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Observacoes complementares")
+        y = _draw_paragraph(pdf, y, work_order.observacoes or "Sem observacoes complementares.")
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Dados regulatorios da empresa")
+        y = _draw_bullets(pdf, y, _company_identification_lines(), width_chars=84)
+
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(20 * mm, 24 * mm, "Responsavel tecnico: ______________________________")
+        pdf.drawRightString(190 * mm, 24 * mm, "Cliente/ciente: ______________________________")
+        pdf.showPage()
+        pdf.save()
+        return buffer.getvalue()
+
+    return _run_document_generation("technical_report_pdf", work_order_id, _builder)
+
+
+def _generate_standard_sanitary_certificate_pdf(
+    db: Session,
+    work_order_id: int,
+    current_user: Optional[User] = None,
+) -> bytes:
     work_order = get_work_order(db, work_order_id, current_user=current_user)
-    settings = get_settings()
-    buffer = BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=A4)
-    y = _draw_document_frame(
-        pdf,
-        "Relatorio Tecnico",
-        "Estruturado com base nos requisitos aplicaveis da RDC 622/2022",
-    )
-
-    y = _draw_section_title(pdf, y, "Resumo tecnico")
-    y = _draw_key_values(
-        pdf,
-        y,
-        [
-            ("OS", work_order.numero),
-            ("Cliente", work_order.cliente.razao_social),
-            ("Tecnico executor", work_order.tecnico.nome),
-            ("Responsavel tecnico", f"{settings.technical_responsible_name} - {settings.technical_responsible_registry}"),
-            ("Data da vistoria", work_order.data_execucao.isoformat()),
-            ("Status da OS", work_order.status.replace("_", " ")),
-            ("Garantia", work_order.garantia_ate.isoformat()),
-        ],
-    )
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Diagnostico")
-    diagnostic = (
-        f"Foram avaliadas as condicoes do local '{work_order.local_execucao}' para controle de vetores e pragas urbanas. "
-        f"O atendimento foi executado conforme os dados operacionais registrados na OS {work_order.numero}."
-    )
-    y = _draw_paragraph(pdf, y, diagnostic)
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Pragas e riscos observados")
-    pest_items = [f"{item.praga.nome_comum} ({item.praga.nome_cientifico})" for item in work_order.pragas]
-    if not pest_items:
-        pest_items = ["Nao houve praga especifica registrada; manter monitoramento preventivo."]
-    y = _draw_bullets(pdf, y, pest_items)
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Produtos e metodologia")
-    y = _draw_bullets(
-        pdf,
-        y,
-        [
-            f"{item.produto.nome} com principio ativo {item.produto.principio_ativo}, quantidade {item.quantidade} e diluicao {item.diluicao}"
-            for item in work_order.produtos
-        ],
-    )
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Recomendacoes")
-    recommendations = [
-        "Manter o ambiente higienizado, sem aculo de residuos e umidade excessiva.",
-        "Reforcar vedacao de acessos, ralos, frestas e pontos de abrigo identificados.",
-        f"Agendar reavaliacao antes do termino da garantia em {work_order.garantia_ate.isoformat()}.",
-    ]
-    y = _draw_bullets(pdf, y, recommendations)
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Observacoes complementares")
-    y = _draw_paragraph(pdf, y, work_order.observacoes or "Sem observacoes complementares.")
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Dados regulatorios da empresa")
-    y = _draw_bullets(pdf, y, _company_identification_lines(), width_chars=84)
-
-    pdf.setFont("Helvetica", 10)
-    pdf.drawString(20 * mm, 24 * mm, "Responsavel tecnico: ______________________________")
-    pdf.drawRightString(190 * mm, 24 * mm, "Cliente/ciente: ______________________________")
-    pdf.showPage()
-    pdf.save()
-    return buffer.getvalue()
-
-
-def _generate_standard_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
-    work_order = get_work_order(db, work_order_id)
     settings = get_settings()
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -2695,8 +2745,32 @@ def _generate_official_sanitary_certificate_pdf(
 ) -> bytes:
     work_order = get_work_order(db, work_order_id, current_user=current_user)
     settings = get_settings()
-    signature_path = require_technical_signature_path(work_order.tecnico)
-    template_path = require_certificate_model_path()
+    signature_path = resolve_technical_signature_path(work_order.tecnico)
+    if signature_path is None:
+        LOGGER.warning(
+            "technical_signature_missing work_order_id=%s technician_id=%s technician_name=%s",
+            work_order_id,
+            getattr(work_order.tecnico, "id", None),
+            getattr(work_order.tecnico, "nome", None),
+        )
+    template_path = resolve_certificate_model_path()
+    if template_path is None:
+        LOGGER.warning(
+            "certificate_template_missing work_order_id=%s framed=%s",
+            work_order_id,
+            framed,
+        )
+        if framed:
+            return _generate_premium_framed_sanitary_certificate_pdf(
+                db,
+                work_order_id,
+                current_user=current_user,
+            )
+        return _generate_standard_sanitary_certificate_pdf(
+            db,
+            work_order_id,
+            current_user=current_user,
+        )
     buffer = BytesIO()
     width, height = landscape(A4)
     pdf = canvas.Canvas(buffer, pagesize=(width, height))
@@ -2832,11 +2906,24 @@ def _generate_official_sanitary_certificate_pdf(
 
 
 def generate_sanitary_certificate_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
-    return _generate_official_sanitary_certificate_pdf(db, work_order_id, framed=False, current_user=current_user)
+    return _run_document_generation(
+        "sanitary_certificate_pdf",
+        work_order_id,
+        lambda: _generate_official_sanitary_certificate_pdf(
+            db,
+            work_order_id,
+            framed=False,
+            current_user=current_user,
+        ),
+    )
 
 
-def _generate_ornamental_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
-    work_order = get_work_order(db, work_order_id)
+def _generate_ornamental_sanitary_certificate_pdf(
+    db: Session,
+    work_order_id: int,
+    current_user: Optional[User] = None,
+) -> bytes:
+    work_order = get_work_order(db, work_order_id, current_user=current_user)
     settings = get_settings()
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -2912,8 +2999,12 @@ def _generate_ornamental_sanitary_certificate_pdf(db: Session, work_order_id: in
     return buffer.getvalue()
 
 
-def _generate_premium_framed_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
-    work_order = get_work_order(db, work_order_id)
+def _generate_premium_framed_sanitary_certificate_pdf(
+    db: Session,
+    work_order_id: int,
+    current_user: Optional[User] = None,
+) -> bytes:
+    work_order = get_work_order(db, work_order_id, current_user=current_user)
     settings = get_settings()
     buffer = BytesIO()
     width, height = landscape(A4)
@@ -3079,4 +3170,13 @@ def _generate_premium_framed_sanitary_certificate_pdf(db: Session, work_order_id
 
 
 def generate_framed_sanitary_certificate_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
-    return _generate_official_sanitary_certificate_pdf(db, work_order_id, framed=True, current_user=current_user)
+    return _run_document_generation(
+        "framed_sanitary_certificate_pdf",
+        work_order_id,
+        lambda: _generate_official_sanitary_certificate_pdf(
+            db,
+            work_order_id,
+            framed=True,
+            current_user=current_user,
+        ),
+    )

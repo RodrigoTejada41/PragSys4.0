@@ -98,7 +98,8 @@ textarea {
 .login-form,
 .data-form {
     display: grid;
-    gap: 14px;
+    gap: 18px;
+    align-items: start;
 }
 
 .login-form label,
@@ -109,6 +110,18 @@ textarea {
     margin: 0;
     font-size: 0.94rem;
     color: var(--sys-ink);
+    align-content: start;
+    min-width: 0;
+}
+
+.data-form label > span,
+.inline-field > span {
+    color: var(--sys-muted);
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    line-height: 1.35;
+    text-transform: uppercase;
 }
 
 .login-form input,
@@ -555,7 +568,8 @@ textarea {
 }
 
 .form-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    align-items: start;
 }
 
 .form-grid .full-width {
@@ -1500,6 +1514,17 @@ textarea {
 
 .action-menu-panel .toolbar-link {
     min-height: 40px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(30, 42, 34, 0.08);
+    background: rgba(246, 248, 242, 0.96);
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.action-menu-panel .toolbar-link:hover {
+    border-color: rgba(45, 106, 79, 0.28);
+    background: rgba(217, 240, 216, 0.5);
 }
 
 .orders-workspace {
@@ -2138,7 +2163,7 @@ textarea {
 
 .work-order-save-actions {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 12px;
 }
 

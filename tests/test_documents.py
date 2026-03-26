@@ -91,17 +91,18 @@ def _create_base_work_order(client, auth_headers):
 def test_all_work_order_documents_are_generated(client, auth_headers):
     work_order = _create_base_work_order(client, auth_headers)
 
-    endpoints = [
-        f"/api/v1/os/{work_order['id']}/pdf",
-        f"/api/v1/os/{work_order['id']}/relatorio-tecnico.pdf",
-        f"/api/v1/os/{work_order['id']}/certificado-sanitario.pdf",
-        f"/api/v1/os/{work_order['id']}/certificado-moldura.pdf",
-    ]
+    endpoints = {
+        f"/api/v1/os/{work_order['id']}/pdf": f'inline; filename="os-{work_order["id"]}.pdf"',
+        f"/api/v1/os/{work_order['id']}/relatorio-tecnico.pdf": f'inline; filename="relatorio-tecnico-{work_order["id"]}.pdf"',
+        f"/api/v1/os/{work_order['id']}/certificado-sanitario.pdf": f'inline; filename="certificado-sanitario-{work_order["id"]}.pdf"',
+        f"/api/v1/os/{work_order['id']}/certificado-moldura.pdf": f'inline; filename="certificado-moldura-{work_order["id"]}.pdf"',
+    }
 
-    for endpoint in endpoints:
+    for endpoint, expected_disposition in endpoints.items():
         response = client.get(endpoint, headers=auth_headers)
         assert response.status_code == 200
         assert response.headers["content-type"] == "application/pdf"
+        assert response.headers["content-disposition"] == expected_disposition
         assert response.content.startswith(b"%PDF")
         assert len(response.content) > 1200
 
@@ -148,7 +149,7 @@ def test_standard_certificate_text_covers_food_risk_compliance_language():
     assert "seguranca ambiental" in declaration
 
 
-def test_certificate_generation_returns_controlled_error_when_signature_is_missing(client, auth_headers, monkeypatch):
+def test_certificate_generation_keeps_working_when_signature_is_missing(client, auth_headers, monkeypatch):
     monkeypatch.setenv("TECHNICAL_SIGNATURES_DIR", "test_assets/assinaturas_vazias")
     monkeypatch.setenv("CERTIFICATE_MODELS_DIR", "test_assets/modelos")
     get_settings.cache_clear()
@@ -156,5 +157,20 @@ def test_certificate_generation_returns_controlled_error_when_signature_is_missi
     work_order = _create_base_work_order(client, auth_headers)
     response = client.get(f"/api/v1/os/{work_order['id']}/certificado-sanitario.pdf", headers=auth_headers)
 
-    assert response.status_code == 400
-    assert "Assinatura tecnica nao encontrada" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+    get_settings.cache_clear()
+
+
+def test_certificate_generation_falls_back_when_template_is_missing(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("CERTIFICATE_MODELS_DIR", "test_assets/modelos_vazios")
+    get_settings.cache_clear()
+
+    work_order = _create_base_work_order(client, auth_headers)
+    response = client.get(f"/api/v1/os/{work_order['id']}/certificado-moldura.pdf", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+    get_settings.cache_clear()

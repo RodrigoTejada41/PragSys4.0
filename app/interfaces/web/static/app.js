@@ -3623,28 +3623,56 @@ function bindWorkOrderSelectors() {
         if (!button) {
             return;
         }
+        const workOrderId = Number(button.dataset.id);
+        const action = button.dataset.workOrderAction;
+        const previewActions = new Set(["preview-order", "print", "certificate-preview", "certificate-moldura-preview"]);
+        const previewTitleMap = {
+            "preview-order": `Ordem de Servico ${workOrderId}`,
+            print: `Ordem de Servico ${workOrderId}`,
+            "certificate-preview": `Certificado ${workOrderId}`,
+            "certificate-moldura-preview": `Certificado Moldura ${workOrderId}`,
+        };
+        const previewWindow = previewActions.has(action)
+            ? openDocumentPreviewShell(previewTitleMap[action] || `Documento ${workOrderId}`)
+            : null;
         try {
-            const workOrderId = Number(button.dataset.id);
-            if (button.dataset.workOrderAction === "print") {
-                await print_order(workOrderId);
+            logClientEvent("work_order_save_action_click", { work_order_id: workOrderId, action });
+            if (action === "preview-order") {
+                await preview_work_order(workOrderId, { previewWindow });
                 return;
             }
-            if (button.dataset.workOrderAction === "certificate-preview") {
-                await generate_certificate(workOrderId, { mode: "preview" });
+            if (action === "print") {
+                await print_order(workOrderId, { previewWindow });
                 return;
             }
-            if (button.dataset.workOrderAction === "certificate-download") {
+            if (action === "certificate-preview") {
+                await generate_certificate(workOrderId, { mode: "preview", previewWindow });
+                return;
+            }
+            if (action === "certificate-download") {
                 await generate_certificate(workOrderId, { mode: "download" });
                 return;
             }
-            if (button.dataset.workOrderAction === "certificate-moldura-preview") {
-                await generate_certificate(workOrderId, { mode: "preview", variant: "moldura" });
+            if (action === "certificate-moldura-preview") {
+                await generate_certificate(workOrderId, { mode: "preview", variant: "moldura", previewWindow });
                 return;
             }
-            if (button.dataset.workOrderAction === "certificate-moldura-download") {
+            if (action === "certificate-moldura-download") {
                 await generate_certificate(workOrderId, { mode: "download", variant: "moldura" });
             }
         } catch (error) {
+            if (previewWindow) {
+                renderDocumentPreviewError(previewWindow, previewTitleMap[action] || "Documento", error.message);
+            }
+            logClientEvent(
+                "work_order_save_action_error",
+                {
+                    work_order_id: Number(button.dataset.id),
+                    action: button.dataset.workOrderAction,
+                    message: error.message,
+                },
+                "error"
+            );
             toast(error.message);
         }
     });
@@ -5750,18 +5778,38 @@ function bindWorkOrderDocumentLinks() {
     document.querySelectorAll(".pdf-link").forEach((link) => {
         link.addEventListener("click", async (event) => {
             event.preventDefault();
+            const { id, doc } = event.currentTarget.dataset;
+            const docUrlMap = {
+                os: `/api/v1/os/${id}/pdf`,
+                relatorio: `/api/v1/os/${id}/relatorio-tecnico.pdf`,
+                certificado: `/api/v1/os/${id}/certificado-sanitario.pdf`,
+                moldura: `/api/v1/os/${id}/certificado-moldura.pdf`,
+            };
+            const docTitleMap = {
+                os: `Ordem de Servico ${id}`,
+                relatorio: `Relatorio tecnico ${id}`,
+                certificado: `Certificado sanitario ${id}`,
+                moldura: `Certificado moldura ${id}`,
+            };
+            const previewWindow = openDocumentPreviewShell(
+                docTitleMap[doc] || `Documento ${id}`,
+                "Preparando documento..."
+            );
             try {
-                const { id, doc } = event.currentTarget.dataset;
-                const docUrlMap = {
-                    os: `/api/v1/os/${id}/pdf`,
-                    relatorio: `/api/v1/os/${id}/relatorio-tecnico.pdf`,
-                    certificado: `/api/v1/os/${id}/certificado-sanitario.pdf`,
-                    moldura: `/api/v1/os/${id}/certificado-moldura.pdf`,
-                };
+                logClientEvent("work_order_document_open", { work_order_id: Number(id), document: doc });
                 const blob = await apiFetch(docUrlMap[doc]);
-                const fileUrl = URL.createObjectURL(blob);
-                window.open(fileUrl, "_blank", "noopener");
+                openBlobPreview(blob, docTitleMap[doc] || `Documento ${id}`, { previewWindow });
             } catch (error) {
+                renderDocumentPreviewError(
+                    previewWindow,
+                    docTitleMap[doc] || `Documento ${id}`,
+                    error.message || "Nao foi possivel abrir o documento."
+                );
+                logClientEvent(
+                    "work_order_document_error",
+                    { work_order_id: Number(id), document: doc, message: error.message },
+                    "error"
+                );
                 toast(error.message);
             }
         });
@@ -5801,7 +5849,7 @@ function renderWorkOrderSaveFeedback() {
         <section class="work-order-save-card">
             <div class="section-heading compact">
                 <h4>Ordem salva com sucesso</h4>
-                <p>OS ${escapeHtml(workOrder.numero)} pronta para impressao e para emissao do certificado. A versao de moldura fica em destaque abaixo.</p>
+                <p>OS ${escapeHtml(workOrder.numero)} pronta para visualizacao, impressao e emissao dos documentos. A moldura segue em destaque para abertura e download.</p>
             </div>
             <div class="work-order-save-meta">
                 <span class="orders-stat is-active">${escapeHtml(workOrder.cliente?.razao_social || "Cliente")}</span>
@@ -5809,7 +5857,8 @@ function renderWorkOrderSaveFeedback() {
                 <span class="orders-stat">${state.workOrderWorkflow.certificateReady ? "Certificado pronto" : "Certificado sob demanda"}</span>
             </div>
             <div class="work-order-save-actions">
-                <button type="button" class="btn btn-success" data-work-order-action="print" data-id="${workOrder.id}">Imprimir OS</button>
+                <button type="button" class="btn btn-success" data-work-order-action="preview-order" data-id="${workOrder.id}">Visualizar OS</button>
+                <button type="button" class="btn btn-default ghost-button" data-work-order-action="print" data-id="${workOrder.id}">Imprimir OS</button>
                 <button type="button" class="btn btn-warning" data-work-order-action="certificate-moldura-preview" data-id="${workOrder.id}">Abrir moldura</button>
                 <button type="button" class="btn btn-default ghost-button" data-work-order-action="certificate-moldura-download" data-id="${workOrder.id}">Baixar moldura</button>
             </div>
@@ -5818,10 +5867,21 @@ function renderWorkOrderSaveFeedback() {
     target.classList.remove("hidden");
 }
 
-async function print_order(workOrderId) {
+async function preview_work_order(workOrderId, options = {}) {
     const blob = await apiFetch(`/api/v1/os/${workOrderId}/pdf`);
     const workOrder = getEntityByKind("workOrder", workOrderId);
-    openBlobPreview(blob, `Ordem de Servico ${workOrder?.numero || workOrderId}`, { printOnLoad: true });
+    openBlobPreview(blob, `Ordem de Servico ${workOrder?.numero || workOrderId}`, {
+        previewWindow: options.previewWindow,
+    });
+}
+
+async function print_order(workOrderId, options = {}) {
+    const blob = await apiFetch(`/api/v1/os/${workOrderId}/pdf`);
+    const workOrder = getEntityByKind("workOrder", workOrderId);
+    openBlobPreview(blob, `Ordem de Servico ${workOrder?.numero || workOrderId}`, {
+        printOnLoad: true,
+        previewWindow: options.previewWindow,
+    });
 }
 
 function printAppointmentSummary(appointmentId) {
@@ -5898,7 +5958,9 @@ async function generate_certificate(workOrderId, options = {}) {
         return blob;
     }
     const titlePrefix = variant === "moldura" ? "Certificado Moldura" : "Certificado";
-    openBlobPreview(blob, `${titlePrefix} ${workOrder?.numero || workOrderId}`);
+    openBlobPreview(blob, `${titlePrefix} ${workOrder?.numero || workOrderId}`, {
+        previewWindow: options.previewWindow,
+    });
     return blob;
 }
 
@@ -5923,6 +5985,15 @@ function sanitizeFilenamePart(value) {
         .toLowerCase() || "arquivo";
 }
 
+function logClientEvent(eventName, payload = {}, level = "info") {
+    const logger = level === "error"
+        ? console.error
+        : level === "warn"
+            ? console.warn
+            : console.info;
+    logger(`[SysPragas] ${eventName}`, payload);
+}
+
 function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -5931,17 +6002,32 @@ function downloadBlob(blob, filename) {
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
+    logClientEvent("document_download", { filename, size_bytes: blob.size || null });
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function openBlobPreview(blob, title, options = {}) {
-    const previewUrl = URL.createObjectURL(blob);
+function openDocumentPreviewShell(title, message = "Preparando documento...") {
     const previewWindow = window.open("", "_blank");
     if (!previewWindow) {
-        window.open(previewUrl, "_blank", "noopener");
+        return null;
+    }
+    renderPreviewWindowState(previewWindow, title, {
+        bodyHtml: `<div class="preview-state preview-state-loading">${escapeHtml(message)}</div>`,
+    });
+    return previewWindow;
+}
+
+function renderDocumentPreviewError(previewWindow, title, message) {
+    if (!previewWindow || previewWindow.closed) {
         return;
     }
-    const printOnLoad = options.printOnLoad ? "true" : "false";
+    renderPreviewWindowState(previewWindow, title, {
+        bodyHtml: `<div class="preview-state preview-state-error">${escapeHtml(message)}</div>`,
+    });
+}
+
+function renderPreviewWindowState(previewWindow, title, options = {}) {
+    previewWindow.document.open();
     previewWindow.document.write(`
         <!doctype html>
         <html lang="pt-BR">
@@ -5950,33 +6036,55 @@ function openBlobPreview(blob, title, options = {}) {
                 <title>${escapeHtml(title)}</title>
                 <style>
                     body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #eef2ea; color: #1e2a22; }
-                    .preview-shell { display: grid; gap: 12px; padding: 16px; }
-                    .preview-note { padding: 12px 14px; background: #ffffff; border-bottom: 1px solid #d7ded1; }
-                    iframe { width: 100%; height: calc(100vh - 86px); border: 0; background: #fff; }
+                    .preview-shell { display: grid; gap: 12px; min-height: 100vh; padding: 16px; }
+                    .preview-note { padding: 12px 14px; background: #ffffff; border-bottom: 1px solid #d7ded1; border-radius: 14px; }
+                    .preview-state { display: grid; place-items: center; min-height: calc(100vh - 120px); padding: 24px; text-align: center; border-radius: 18px; background: rgba(255, 255, 255, 0.92); border: 1px solid #d7ded1; }
+                    .preview-state-loading { color: #2d6a4f; font-weight: 700; }
+                    .preview-state-error { color: #b14534; font-weight: 700; }
+                    iframe { width: 100%; height: calc(100vh - 86px); border: 0; background: #fff; border-radius: 18px; }
                 </style>
             </head>
             <body>
                 <div class="preview-shell">
-                    <div class="preview-note">Documento pronto para visualizacao e impressao.</div>
-                    <iframe id="preview-frame" src="${previewUrl}" title="${escapeHtml(title)}"></iframe>
+                    <div class="preview-note">${escapeHtml(options.note || "Documento pronto para visualizacao e impressao.")}</div>
+                    ${options.bodyHtml || ""}
                 </div>
-                <script>
-                    const frame = document.getElementById('preview-frame');
-                    frame.addEventListener('load', () => {
-                        if (${printOnLoad}) {
-                            setTimeout(() => {
-                                try {
-                                    frame.contentWindow.focus();
-                                    frame.contentWindow.print();
-                                } catch (_) {}
-                            }, 400);
-                        }
-                    });
-                </script>
             </body>
         </html>
     `);
     previewWindow.document.close();
+}
+
+function openBlobPreview(blob, title, options = {}) {
+    const previewUrl = URL.createObjectURL(blob);
+    const previewWindow = options.previewWindow && !options.previewWindow.closed
+        ? options.previewWindow
+        : window.open("", "_blank");
+    if (!previewWindow) {
+        window.open(previewUrl, "_blank", "noopener");
+        return;
+    }
+    const printOnLoad = options.printOnLoad ? "true" : "false";
+    renderPreviewWindowState(previewWindow, title, {
+        bodyHtml: `<iframe id="preview-frame" src="${previewUrl}" title="${escapeHtml(title)}"></iframe>`,
+    });
+    previewWindow.addEventListener("beforeunload", () => URL.revokeObjectURL(previewUrl), { once: true });
+    const frame = previewWindow.document.getElementById("preview-frame");
+    frame?.addEventListener("load", () => {
+        if (options.printOnLoad) {
+            setTimeout(() => {
+                try {
+                    frame.contentWindow.focus();
+                    frame.contentWindow.print();
+                } catch (_) {}
+            }, 400);
+        }
+    });
+    logClientEvent("document_preview_opened", {
+        title,
+        size_bytes: blob.size || null,
+        print_on_load: Boolean(options.printOnLoad),
+    });
 }
 
 async function openReceiptPdf(receiptId, options = {}) {
