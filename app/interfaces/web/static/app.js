@@ -833,6 +833,9 @@ function renderSettings() {
     const operationModeLabel = settingsState.system.operation_mode === "rede" ? "Rede interna" : "Local";
     const notificationsLabel = settingsState.system.notifications_enabled ? "Ativas" : "Desativadas";
     const contractNotificationsLabel = settingsState.contracts.email_enabled ? "Email ativo" : "Email desativado";
+    const smtpSummaryLabel = settingsState.email.smtp_host
+        ? `${escapeHtml(settingsState.email.smtp_host)}:${escapeHtml(String(settingsState.email.smtp_port))}`
+        : "SMTP nao configurado";
     const googleLabel = formatIntegrationStatus(google.status || "desconectado");
     const whatsappLabel = formatIntegrationStatus(whatsapp.status || "desconectado");
     const whatsappEnabledInSettings = Boolean(settingsState.integrations.whatsapp_enabled);
@@ -847,6 +850,7 @@ function renderSettings() {
             ${settingsSummaryCard("WhatsApp", whatsappLabel, whatsappMeta)}
             ${settingsSummaryCard("Notificacoes", notificationsLabel, settingsState.system.notifications_enabled ? "Avisos operacionais seguem habilitados." : "Avisos operacionais desabilitados." )}
             ${settingsSummaryCard("Contratos", contractNotificationsLabel, `${settingsState.contracts.alert_days} dias de antecedencia e armazenamento em ${settingsState.contracts.storage_dir}.`)}
+            ${settingsSummaryCard("SMTP", smtpSummaryLabel, settingsState.email.smtp_password_configured ? "Credenciais salvas para envio automatico de e-mail." : "Defina host, porta e remetente para habilitar notificacoes por e-mail.")}
             ${settingsSummaryCard("Usuarios ativos", String(state.users.length || 0), isMaster ? "Leitura da administracao global disponivel neste perfil." : "Use a area de usuarios com perfil master para governanca completa.")}
         </div>
     `;
@@ -884,6 +888,41 @@ function renderSettings() {
                 <label class="full-width">
                     <span>Diretorio de armazenamento</span>
                     <input name="contract_storage_dir" value="${escapeHtml(settingsState.contracts.storage_dir || "uploads/contratos")}">
+                </label>
+            </div>
+        </section>
+        <section class="settings-form-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">SMTP</p>
+                <h4>Servidor de e-mail</h4>
+                <p>Configure o SMTP usado nas notificacoes automaticas dos contratos. Deixe a senha em branco para manter a atual.</p>
+            </div>
+            <div class="settings-field-grid two-columns">
+                <label>
+                    <span>Servidor SMTP</span>
+                    <input name="smtp_host" value="${escapeHtml(settingsState.email.smtp_host || "")}" placeholder="smtp.empresa.com">
+                </label>
+                <label>
+                    <span>Porta SMTP</span>
+                    <input name="smtp_port" type="number" min="1" max="65535" value="${escapeHtml(String(settingsState.email.smtp_port || 587))}">
+                </label>
+                <label>
+                    <span>Usuario SMTP</span>
+                    <input name="smtp_username" value="${escapeHtml(settingsState.email.smtp_username || "")}" placeholder="usuario@empresa.com">
+                </label>
+                <label>
+                    <span>Senha SMTP</span>
+                    <input name="smtp_password" type="password" placeholder="${settingsState.email.smtp_password_configured ? "Senha ja configurada" : "Informe a senha"}">
+                </label>
+                ${toggleField("smtp_use_tls", "Usar STARTTLS", "Ative para conexoes SMTP com negociacao TLS.", settingsState.email.smtp_use_tls)}
+                ${toggleField("smtp_use_ssl", "Usar SSL direto", "Ative para conexoes SMTPS, normalmente na porta 465.", settingsState.email.smtp_use_ssl)}
+                <label>
+                    <span>E-mail remetente</span>
+                    <input name="smtp_sender_email" value="${escapeHtml(settingsState.email.smtp_sender_email || "")}" placeholder="naoresponda@empresa.com">
+                </label>
+                <label>
+                    <span>Nome do remetente</span>
+                    <input name="smtp_sender_name" value="${escapeHtml(settingsState.email.smtp_sender_name || "")}" placeholder="SysPragas">
                 </label>
             </div>
         </section>
@@ -1071,6 +1110,16 @@ function getSystemSettingsPayload(form) {
             alert_days: Number(form.querySelector('[name="contract_alert_days"]').value || 15),
             email_enabled: form.querySelector('[name="contract_email_enabled"]').checked,
             storage_dir: form.querySelector('[name="contract_storage_dir"]').value.trim(),
+        },
+        email: {
+            smtp_host: form.querySelector('[name="smtp_host"]').value.trim() || null,
+            smtp_port: Number(form.querySelector('[name="smtp_port"]').value || 587),
+            smtp_username: form.querySelector('[name="smtp_username"]').value.trim() || null,
+            smtp_password: form.querySelector('[name="smtp_password"]').value,
+            smtp_use_tls: form.querySelector('[name="smtp_use_tls"]').checked,
+            smtp_use_ssl: form.querySelector('[name="smtp_use_ssl"]').checked,
+            smtp_sender_email: form.querySelector('[name="smtp_sender_email"]').value.trim() || null,
+            smtp_sender_name: form.querySelector('[name="smtp_sender_name"]').value.trim() || null,
         },
         system: {
             multiempresa_enabled: form.querySelector('[name="multiempresa_enabled"]').checked,

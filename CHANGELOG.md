@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.4] - 2026-03-26
+
+- Painel de `Configuracoes` passou a expor bloco administrativo para SMTP, com host, porta, usuario, senha, TLS/SSL e remetente.
+- Endpoint `/api/v1/settings` passou a aceitar e devolver configuracao estruturada de e-mail, sem expor a senha em claro.
+- Notificacoes automáticas de contratos passaram a usar prioritariamente o SMTP persistido nas configuracoes do sistema, mantendo fallback para `.env` enquanto nao houver sobrescrita administrativa.
+- Regressao adicionada para cobrir leitura, persistencia e uso do SMTP configurado pelo painel.
+
 ## [4.1.3] - 2026-03-26
 
 - Ordens de servico passaram a suportar `tipo_os` com distincao explicita entre `avulsa` e `contrato`.

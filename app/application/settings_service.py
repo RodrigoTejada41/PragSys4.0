@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.application.schemas import (
     SettingsContractsRead,
+    SettingsEmailRead,
     SettingsEnvironmentRead,
     SettingsIntegrationsRead,
     SettingsSystemRead,
@@ -24,6 +25,14 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "contract_alert_days": 15,
     "contract_email_enabled": False,
     "contract_storage_dir": "uploads/contratos",
+    "smtp_host": None,
+    "smtp_port": 587,
+    "smtp_username": None,
+    "smtp_password": None,
+    "smtp_use_tls": True,
+    "smtp_use_ssl": False,
+    "smtp_sender_email": None,
+    "smtp_sender_name": None,
     "multiempresa_enabled": True,
     "operation_mode": "local",
     "notifications_enabled": True,
@@ -33,6 +42,14 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 RUNTIME_FALLBACK_KEYS = {
     "google_calendar_enabled",
     "whatsapp_enabled",
+    "smtp_host",
+    "smtp_port",
+    "smtp_username",
+    "smtp_password",
+    "smtp_use_tls",
+    "smtp_use_ssl",
+    "smtp_sender_email",
+    "smtp_sender_name",
 }
 
 
@@ -99,6 +116,14 @@ def update_system_settings(db: Session, payload: SystemSettingsUpdate, current_u
         )
     if payload.system:
         updates.update({key: value for key, value in payload.system.model_dump().items() if value is not None})
+    if payload.email:
+        email_payload = payload.email.model_dump()
+        for key, value in email_payload.items():
+            if value is None:
+                continue
+            if key == "smtp_password" and value == "":
+                continue
+            updates[key] = value
 
     if "operation_mode" in updates and updates["operation_mode"] not in {"local", "rede"}:
         raise BusinessRuleViolation("O modo de operacao deve ser 'local' ou 'rede'.")
@@ -133,6 +158,16 @@ def get_system_settings(db: Session) -> SystemSettingsRead:
             notifications_enabled=get_boolean_setting(db, "notifications_enabled", fallback=True),
             appointment_default_google_sync=get_boolean_setting(db, "appointment_default_google_sync", fallback=False),
         ),
+        email=SettingsEmailRead(
+            smtp_host=_clean_optional_setting_text(get_setting_value(db, "smtp_host", settings.smtp_host)),
+            smtp_port=int(get_setting_value(db, "smtp_port", settings.smtp_port)),
+            smtp_username=_clean_optional_setting_text(get_setting_value(db, "smtp_username", settings.smtp_username)),
+            smtp_use_tls=bool(get_setting_value(db, "smtp_use_tls", settings.smtp_use_tls)),
+            smtp_use_ssl=bool(get_setting_value(db, "smtp_use_ssl", settings.smtp_use_ssl)),
+            smtp_sender_email=_clean_optional_setting_text(get_setting_value(db, "smtp_sender_email", settings.smtp_sender_email)),
+            smtp_sender_name=_clean_optional_setting_text(get_setting_value(db, "smtp_sender_name", settings.smtp_sender_name)),
+            smtp_password_configured=bool(_clean_optional_setting_text(get_setting_value(db, "smtp_password", settings.smtp_password))),
+        ),
         environment=SettingsEnvironmentRead(
             database_url_masked=_mask_database_url(settings.database_url),
             app_host=settings.app_host,
@@ -140,6 +175,11 @@ def get_system_settings(db: Session) -> SystemSettingsRead:
             allow_remote_access=settings.allow_remote_access,
         ),
     )
+
+
+def _clean_optional_setting_text(value: Any) -> Optional[str]:
+    cleaned = str(value or "").strip()
+    return cleaned or None
 
 
 def _mask_database_url(database_url: str) -> str:

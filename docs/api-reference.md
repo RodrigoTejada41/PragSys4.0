@@ -69,6 +69,18 @@ Observacoes:
 - os endpoints de relatorio aceitam filtros por cliente, status, periodos e cobranca ativa;
 - downloads e visualizacao retornam binario com `Content-Disposition` apropriado.
 
+### Configuracoes
+
+- `GET /settings`
+- `PUT /settings`
+
+Observacoes:
+
+- o payload administrativo passou a incluir o bloco `email`;
+- `email` aceita `smtp_host`, `smtp_port`, `smtp_username`, `smtp_password`, `smtp_use_tls`, `smtp_use_ssl`, `smtp_sender_email` e `smtp_sender_name`;
+- a resposta devolve `smtp_password_configured` no lugar da senha em claro;
+- notificacoes automáticas de contratos usam primeiro o SMTP salvo em configuracoes e mantem fallback para `.env` quando ainda nao houve sobrescrita administrativa.
+
 ### Empresas prestadoras
 
 - `GET /empresas-prestadoras`

@@ -52,6 +52,7 @@ O SysPragas e um sistema operacional para empresas de controle de pragas com foc
 - status automatico por vencimento;
 - alertas visuais de contratos a vencer e vencidos;
 - notificacao por e-mail com base em configuracao do sistema;
+- configuracao administrativa de SMTP no painel com host, porta, credenciais, TLS/SSL e remetente;
 - rotina automatica para recalculo diario do status;
 - relatorios sinteticos e analiticos com exportacao em `.xlsx` e `.pdf`.
 

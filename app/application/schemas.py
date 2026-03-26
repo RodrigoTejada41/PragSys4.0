@@ -848,6 +848,17 @@ class SettingsSystemRead(BaseModel):
     appointment_default_google_sync: bool
 
 
+class SettingsEmailRead(BaseModel):
+    smtp_host: Optional[str] = None
+    smtp_port: int
+    smtp_username: Optional[str] = None
+    smtp_use_tls: bool
+    smtp_use_ssl: bool
+    smtp_sender_email: Optional[str] = None
+    smtp_sender_name: Optional[str] = None
+    smtp_password_configured: bool
+
+
 class SettingsEnvironmentRead(BaseModel):
     database_url_masked: str
     app_host: str
@@ -859,6 +870,7 @@ class SystemSettingsRead(BaseModel):
     integrations: SettingsIntegrationsRead
     contracts: SettingsContractsRead
     system: SettingsSystemRead
+    email: SettingsEmailRead
     environment: SettingsEnvironmentRead
 
 
@@ -882,10 +894,22 @@ class SettingsSystemUpdate(BaseModel):
     appointment_default_google_sync: Optional[bool] = None
 
 
+class SettingsEmailUpdate(BaseModel):
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_use_tls: Optional[bool] = None
+    smtp_use_ssl: Optional[bool] = None
+    smtp_sender_email: Optional[str] = None
+    smtp_sender_name: Optional[str] = None
+
+
 class SystemSettingsUpdate(BaseModel):
     integrations: Optional[SettingsIntegrationsUpdate] = None
     contracts: Optional[SettingsContractsUpdate] = None
     system: Optional[SettingsSystemUpdate] = None
+    email: Optional[SettingsEmailUpdate] = None
 
 
 class ContractBase(BaseModel):

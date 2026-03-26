@@ -394,12 +394,44 @@ def get_contract_dashboard(db: Session, current_user: Optional[User] = None) -> 
     ).model_dump()
 
 
-def _build_contract_email(contract: Contract) -> EmailMessage:
+def _get_contract_smtp_settings(db: Session) -> dict[str, object]:
     settings = get_settings()
-    sender_email = settings.smtp_sender_email or settings.company_email
+    return {
+        "smtp_host": str(get_setting_value(db, "smtp_host", settings.smtp_host) or "").strip() or None,
+        "smtp_port": int(get_setting_value(db, "smtp_port", settings.smtp_port)),
+        "smtp_username": str(get_setting_value(db, "smtp_username", settings.smtp_username) or "").strip() or None,
+        "smtp_password": get_setting_value(db, "smtp_password", settings.smtp_password),
+        "smtp_use_tls": bool(get_setting_value(db, "smtp_use_tls", settings.smtp_use_tls)),
+        "smtp_use_ssl": bool(get_setting_value(db, "smtp_use_ssl", settings.smtp_use_ssl)),
+        "smtp_sender_email": str(get_setting_value(db, "smtp_sender_email", settings.smtp_sender_email) or "").strip() or None,
+        "smtp_sender_name": str(get_setting_value(db, "smtp_sender_name", settings.smtp_sender_name) or "").strip() or None,
+        "company_email": settings.company_email,
+        "company_name": settings.company_name,
+    }
+
+
+def _default_contract_smtp_settings() -> dict[str, object]:
+    settings = get_settings()
+    return {
+        "smtp_host": settings.smtp_host,
+        "smtp_port": settings.smtp_port,
+        "smtp_username": settings.smtp_username,
+        "smtp_password": settings.smtp_password,
+        "smtp_use_tls": settings.smtp_use_tls,
+        "smtp_use_ssl": settings.smtp_use_ssl,
+        "smtp_sender_email": settings.smtp_sender_email,
+        "smtp_sender_name": settings.smtp_sender_name,
+        "company_email": settings.company_email,
+        "company_name": settings.company_name,
+    }
+
+
+def _build_contract_email(contract: Contract, smtp_settings: Optional[dict[str, object]] = None) -> EmailMessage:
+    settings = smtp_settings or _default_contract_smtp_settings()
+    sender_email = settings["smtp_sender_email"] or settings["company_email"]
     if not sender_email:
         raise BusinessRuleViolation("SMTP sem remetente configurado para notificacoes de contratos.")
-    if not settings.smtp_host:
+    if not settings["smtp_host"]:
         raise BusinessRuleViolation("SMTP nao configurado para notificacoes de contratos.")
     if not contract.cliente or not contract.cliente.email:
         raise BusinessRuleViolation("Cliente sem e-mail cadastrado para notificacao de contrato.")
@@ -408,8 +440,8 @@ def _build_contract_email(contract: Contract) -> EmailMessage:
     message = EmailMessage()
     message["Subject"] = f"Contrato {contract.nome} {status_label}"
     message["From"] = (
-        f"{settings.smtp_sender_name} <{sender_email}>"
-        if settings.smtp_sender_name
+        f"{settings['smtp_sender_name']} <{sender_email}>"
+        if settings["smtp_sender_name"]
         else sender_email
     )
     message["To"] = contract.cliente.email
@@ -427,27 +459,27 @@ def _build_contract_email(contract: Contract) -> EmailMessage:
                 "Solicitamos avaliar a renovacao ou regularizacao o quanto antes.",
                 "",
                 "Atenciosamente,",
-                settings.company_name,
+                str(settings["company_name"]),
             ]
         )
     )
     return message
 
 
-def _send_contract_email_message(message: EmailMessage) -> None:
-    settings = get_settings()
-    if settings.smtp_use_ssl:
-        with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-            if settings.smtp_username:
-                server.login(settings.smtp_username, settings.smtp_password or "")
+def _send_contract_email_message(message: EmailMessage, smtp_settings: Optional[dict[str, object]] = None) -> None:
+    settings = smtp_settings or _default_contract_smtp_settings()
+    if settings["smtp_use_ssl"]:
+        with smtplib.SMTP_SSL(str(settings["smtp_host"]), int(settings["smtp_port"]), timeout=20) as server:
+            if settings["smtp_username"]:
+                server.login(str(settings["smtp_username"]), str(settings["smtp_password"] or ""))
             server.send_message(message)
         return
 
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-        if settings.smtp_use_tls:
+    with smtplib.SMTP(str(settings["smtp_host"]), int(settings["smtp_port"]), timeout=20) as server:
+        if settings["smtp_use_tls"]:
             server.starttls()
-        if settings.smtp_username:
-            server.login(settings.smtp_username, settings.smtp_password or "")
+        if settings["smtp_username"]:
+            server.login(str(settings["smtp_username"]), str(settings["smtp_password"] or ""))
         server.send_message(message)
 
 
@@ -780,6 +812,7 @@ def run_contract_maintenance(db: Session, current_user: Optional[User] = None) -
     alert_days = _get_contract_alert_days(db)
     email_enabled = get_boolean_setting(db, "contract_email_enabled", fallback=False)
     notifications_enabled = get_boolean_setting(db, "notifications_enabled", fallback=True)
+    smtp_settings = _get_contract_smtp_settings(db)
     today = date.today()
     processed = 0
     updated_statuses = 0
@@ -808,8 +841,8 @@ def run_contract_maintenance(db: Session, current_user: Optional[User] = None) -
             continue
 
         try:
-            message = _build_contract_email(contract)
-            _send_contract_email_message(message)
+            message = _build_contract_email(contract, smtp_settings)
+            _send_contract_email_message(message, smtp_settings)
             contract.last_notification_status = contract.status
             contract.last_notification_sent_at = _utc_now_naive()
             contract.last_notification_error = None

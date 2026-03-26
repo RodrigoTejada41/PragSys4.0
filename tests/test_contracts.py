@@ -138,12 +138,13 @@ def test_contract_maintenance_sends_notification_once_per_status(client, auth_he
 
     sent_messages = []
 
-    def _fake_send(message):
-        sent_messages.append(message)
+    def _fake_send(message, smtp_settings=None):
+        sent_messages.append((message, smtp_settings))
 
-    def _fake_build(contract):
+    def _fake_build(contract, smtp_settings=None):
         message = EmailMessage()
         message["Subject"] = contract.nome
+        message["X-SMTP-Host"] = str((smtp_settings or {}).get("smtp_host") or "")
         return message
 
     monkeypatch.setattr(contracts_service, "_build_contract_email", _fake_build)
@@ -153,11 +154,74 @@ def test_contract_maintenance_sends_notification_once_per_status(client, auth_he
     assert maintenance.status_code == 200
     assert maintenance.json()["email_sent"] == 1
     assert len(sent_messages) == 1
+    assert sent_messages[0][0]["X-SMTP-Host"] == ""
+    assert sent_messages[0][1]["smtp_port"] == 587
 
     second_run = client.post("/api/v1/contratos/rotina/sincronizar", headers=auth_headers)
     assert second_run.status_code == 200
     assert second_run.json()["email_sent"] == 0
     assert len(sent_messages) == 1
+
+
+def test_contract_maintenance_uses_persisted_smtp_settings(client, auth_headers, monkeypatch):
+    customer_id = _create_customer(client, auth_headers, "17")
+    settings_response = client.put(
+        "/api/v1/settings",
+        headers=auth_headers,
+        json={
+            "contracts": {
+                "alert_days": 15,
+                "email_enabled": True,
+                "storage_dir": "uploads/contratos",
+            },
+            "email": {
+                "smtp_host": "smtp.persistido.local",
+                "smtp_port": 2525,
+                "smtp_username": "mailer",
+                "smtp_password": "segredo",
+                "smtp_use_tls": True,
+                "smtp_use_ssl": False,
+                "smtp_sender_email": "contratos@empresa.com",
+                "smtp_sender_name": "Contratos SysPragas",
+            },
+        },
+    )
+    assert settings_response.status_code == 200
+
+    today = date.today()
+    response = client.post(
+        f"/api/v1/clientes/{customer_id}/contratos",
+        headers=auth_headers,
+        data={
+            "nome": "Contrato com SMTP persistido",
+            "data_inicio": (today - timedelta(days=10)).isoformat(),
+            "data_vencimento": (today + timedelta(days=2)).isoformat(),
+            "observacoes": "",
+        },
+    )
+    assert response.status_code == 200
+
+    captured = {}
+
+    def _fake_build(contract, smtp_settings=None):
+        captured["build"] = smtp_settings
+        message = EmailMessage()
+        message["Subject"] = contract.nome
+        return message
+
+    def _fake_send(message, smtp_settings=None):
+        captured["send"] = smtp_settings
+
+    monkeypatch.setattr(contracts_service, "_build_contract_email", _fake_build)
+    monkeypatch.setattr(contracts_service, "_send_contract_email_message", _fake_send)
+
+    maintenance = client.post("/api/v1/contratos/rotina/sincronizar", headers=auth_headers)
+    assert maintenance.status_code == 200
+    assert maintenance.json()["email_sent"] == 1
+    assert captured["build"]["smtp_host"] == "smtp.persistido.local"
+    assert captured["build"]["smtp_port"] == 2525
+    assert captured["build"]["smtp_sender_email"] == "contratos@empresa.com"
+    assert captured["send"]["smtp_username"] == "mailer"
 
 
 def test_contract_maintenance_generates_recurring_charge_once_per_period(client, auth_headers):

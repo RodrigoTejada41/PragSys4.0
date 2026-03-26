@@ -46,6 +46,7 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert "integrations" in payload
     assert "contracts" in payload
     assert "system" in payload
+    assert "email" in payload
     assert payload["system"]["operation_mode"] in {"local", "rede"}
 
     update_response = client.put(
@@ -62,6 +63,16 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
                 "alert_days": 30,
                 "email_enabled": True,
                 "storage_dir": "uploads/contratos-teste",
+            },
+            "email": {
+                "smtp_host": "smtp.empresa.com",
+                "smtp_port": 465,
+                "smtp_username": "smtp-user",
+                "smtp_password": "senha-super-secreta",
+                "smtp_use_tls": False,
+                "smtp_use_ssl": True,
+                "smtp_sender_email": "naoresponda@empresa.com",
+                "smtp_sender_name": "SysPragas",
             },
             "system": {
                 "multiempresa_enabled": False,
@@ -81,6 +92,14 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert updated["contracts"]["alert_days"] == 30
     assert updated["contracts"]["email_enabled"] is True
     assert updated["contracts"]["storage_dir"] == "uploads/contratos-teste"
+    assert updated["email"]["smtp_host"] == "smtp.empresa.com"
+    assert updated["email"]["smtp_port"] == 465
+    assert updated["email"]["smtp_username"] == "smtp-user"
+    assert updated["email"]["smtp_use_tls"] is False
+    assert updated["email"]["smtp_use_ssl"] is True
+    assert updated["email"]["smtp_sender_email"] == "naoresponda@empresa.com"
+    assert updated["email"]["smtp_sender_name"] == "SysPragas"
+    assert updated["email"]["smtp_password_configured"] is True
     assert updated["system"]["multiempresa_enabled"] is False
     assert updated["system"]["operation_mode"] == "rede"
     assert updated["system"]["notifications_enabled"] is False
