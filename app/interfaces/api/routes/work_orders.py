@@ -17,6 +17,7 @@ from app.application.services import (
     get_work_order_photo_content,
     list_work_orders,
     mark_work_order_as_completed,
+    reopen_work_order,
     settle_work_order,
     update_work_order,
 )
@@ -85,6 +86,18 @@ def settle_work_order_route(
     current_user: User = Depends(require_roles(["master", "admin"])),
 ) -> WorkOrderRead:
     return settle_work_order(db, work_order_id, current_user_id=current_user.id)
+
+
+@router.post(
+    "/{work_order_id}/reabrir",
+    response_model=WorkOrderRead,
+)
+def reopen_work_order_route(
+    work_order_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> WorkOrderRead:
+    return reopen_work_order(db, work_order_id, current_user_id=current_user.id)
 
 
 @router.post(

@@ -1779,6 +1779,48 @@ def settle_work_order(db: Session, work_order_id: int, current_user_id: Optional
     return get_work_order(db, work_order.id, current_user=current_user)
 
 
+def reopen_work_order(db: Session, work_order_id: int, current_user_id: Optional[int] = None) -> WorkOrder:
+    from app.application.schemas import AppointmentStatusUpdate
+    from app.application.scheduling_services import update_appointment_status
+    from app.domain.enums import AppointmentSource, AppointmentStatus, WorkOrderStatus
+    from app.infrastructure.models import Appointment
+
+    current_user = _get_user_record_or_fail(db, current_user_id) if current_user_id else None
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
+    previous_status = work_order.status
+    work_order.status = WorkOrderStatus.ABERTA.value
+    db.commit()
+
+    appointment = (
+        db.query(Appointment)
+        .filter(
+            Appointment.os_id == work_order_id,
+            Appointment.origem == AppointmentSource.ORDEM_SERVICO.value,
+            Appointment.agendamento_pai_id.is_(None),
+        )
+        .order_by(Appointment.id.desc())
+        .first()
+    )
+    if appointment and appointment.status in {
+        AppointmentStatus.CONCLUIDO.value,
+        AppointmentStatus.CANCELADO.value,
+        AppointmentStatus.NAO_REALIZADO.value,
+    }:
+        update_appointment_status(
+            db,
+            appointment.id,
+            AppointmentStatusUpdate(
+                status=AppointmentStatus.PENDENTE,
+                detalhes=(
+                    f"OS {work_order.numero} reaberta para novo acompanhamento operacional "
+                    f"(status anterior: {previous_status})."
+                ),
+            ),
+            current_user_id=current_user_id,
+        )
+    return get_work_order(db, work_order.id, current_user=current_user)
+
+
 def _get_work_order_photo_or_fail(db: Session, photo_id: int, current_user: Optional[User] = None) -> WorkOrderPhoto:
     query = db.query(WorkOrderPhoto).join(WorkOrder, WorkOrder.id == WorkOrderPhoto.os_id)
     if current_user and not _is_master_user(current_user):

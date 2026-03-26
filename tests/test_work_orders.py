@@ -229,6 +229,97 @@ def test_create_open_work_order_allows_empty_products(client, auth_headers):
     assert Decimal(financeiro_response.json()[0]["valor"]) == Decimal("120.00")
 
 
+def test_reopen_work_order_reopens_linked_appointment(client, auth_headers):
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Reabertura",
+            "cpf_cnpj": "88811111000100",
+            "endereco": "Rua Reabertura, 30",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11944445555",
+            "contato": "Camila",
+        },
+    ).json()
+
+    produto = client.post(
+        "/api/v1/produtos",
+        headers=auth_headers,
+        json={
+            "nome": "Produto Reabertura",
+            "principio_ativo": "Permetrina",
+            "grupo_quimico": "Piretroide",
+            "toxicidade": "Moderada",
+            "concentracao": "5%",
+            "registro_ms": "MS-REABRIR",
+            "estoque_atual": "10.00",
+            "estoque_minimo": "1.00",
+        },
+    ).json()
+
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Reabertura",
+            "registro": "TEC-REABRIR",
+            "telefone": "11933334444",
+            "ativo": True,
+        },
+    ).json()
+
+    os_response = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "numero": "OS-REABRIR",
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": "2026-03-20",
+            "hora_inicio": "08:00:00",
+            "hora_fim": "09:00:00",
+            "local_execucao": "Deposito",
+            "observacoes": "Fluxo de reabertura",
+            "garantia_ate": "2026-04-20",
+            "status": "aberta",
+            "valor_servico": "300.00",
+            "produtos": [
+                {
+                    "produto_id": produto["id"],
+                    "quantidade": "1.00",
+                    "diluicao": "1:10",
+                }
+            ],
+            "pragas_ids": [],
+            "gerar_financeiro": False,
+            "gerar_agendamento": True,
+            "tipo_servico_agendamento": "Servico recorrente",
+            "duracao_prevista_minutos": 60,
+            "sincronizar_google_agenda": False,
+        },
+    )
+
+    assert os_response.status_code == 200
+    work_order = os_response.json()
+
+    complete_response = client.post(f"/api/v1/os/{work_order['id']}/efetuar", headers=auth_headers)
+    assert complete_response.status_code == 200
+    assert complete_response.json()["status"] == "concluida"
+
+    reopen_response = client.post(f"/api/v1/os/{work_order['id']}/reabrir", headers=auth_headers)
+    assert reopen_response.status_code == 200
+    reopened = reopen_response.json()
+    assert reopened["status"] == "aberta"
+
+    appointments_response = client.get("/api/v1/agendamentos", headers=auth_headers)
+    assert appointments_response.status_code == 200
+    linked = [item for item in appointments_response.json() if item["os_id"] == work_order["id"]]
+    assert len(linked) == 1
+    assert linked[0]["status"] == "pendente"
+
+
 def test_create_in_progress_work_order_requires_products(client, auth_headers):
     cliente = client.post(
         "/api/v1/clientes",

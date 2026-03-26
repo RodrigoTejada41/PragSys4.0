@@ -71,12 +71,18 @@ const state = {
         workOrderNumber: "",
         workOrderCustomer: "",
         workOrderDate: "",
+        workOrderStartDate: "",
+        workOrderEndDate: "",
         workOrderStatus: "todos",
+        workOrderLane: "pending",
         appointmentSearch: "",
         appointmentStatus: "todos",
         appointmentTechnician: "",
         appointmentCustomer: "",
         appointmentDate: "",
+        appointmentStartDate: "",
+        appointmentEndDate: "",
+        appointmentLane: "pending",
         financeSearch: "",
         financeStatus: "todos",
         financeCustomer: "",
@@ -125,6 +131,18 @@ const activeAppointmentStatuses = new Set([
     "confirmado",
     "em_deslocamento",
     "em_atendimento",
+    "reagendado",
+]);
+
+const finishedAppointmentStatuses = new Set([
+    "concluido",
+    "cancelado",
+    "nao_realizado",
+]);
+
+const finishedWorkOrderStatuses = new Set([
+    "concluida",
+    "cancelada",
 ]);
 
 const dataTableLanguage = {
@@ -4356,6 +4374,8 @@ function getFilteredAppointments() {
     const technician = state.filters.appointmentTechnician || "";
     const customer = state.filters.appointmentCustomer || "";
     const selectedDate = state.filters.appointmentDate || "";
+    const startDate = state.filters.appointmentStartDate || "";
+    const endDate = state.filters.appointmentEndDate || "";
 
     return state.appointments.filter((item) => {
         const searchMatch = !search || [
@@ -4370,7 +4390,9 @@ function getFilteredAppointments() {
         const technicianMatch = !technician || String(item.tecnico_id || "") === technician;
         const customerMatch = !customer || String(item.cliente_id) === customer;
         const dateMatch = !selectedDate || item.data_agendamento === selectedDate;
-        return searchMatch && statusMatch && technicianMatch && customerMatch && dateMatch;
+        const startMatch = !startDate || item.data_agendamento >= startDate;
+        const endMatch = !endDate || item.data_agendamento <= endDate;
+        return searchMatch && statusMatch && technicianMatch && customerMatch && dateMatch && startMatch && endMatch;
     });
 }
 
@@ -4445,6 +4467,10 @@ function renderAppointments() {
 
     const filteredAppointments = getFilteredAppointments();
     const counts = getAppointmentCounts(filteredAppointments);
+    const pendingAppointments = getAppointmentsForLane(filteredAppointments, "pending");
+    const finishedAppointments = getAppointmentsForLane(filteredAppointments, "finished");
+    const selectedLane = state.filters.appointmentLane === "finished" ? "finished" : "pending";
+    const laneAppointments = selectedLane === "finished" ? finishedAppointments : pendingAppointments;
     const referenceDate = parseLocalDate(state.filters.appointmentDate || todayIso());
 
     dashboardTarget.innerHTML = `
@@ -4465,6 +4491,10 @@ function renderAppointments() {
             <article class="summary-metric-card is-progress"><span>Em rota / atendimento</span><strong>${counts.em_deslocamento + counts.em_atendimento}</strong></article>
             <article class="summary-metric-card is-complete"><span>Concluidos</span><strong>${counts.concluido}</strong></article>
             <article class="summary-metric-card is-alert"><span>Cancelados / nao realizados</span><strong>${counts.cancelado + counts.nao_realizado}</strong></article>
+        </div>
+        <div class="tab-strip workspace-lane-tabs">
+            <button type="button" class="tab-pill ${selectedLane === "pending" ? "is-active" : ""}" data-appointment-lane="pending">Pendentes <span>${pendingAppointments.length}</span></button>
+            <button type="button" class="tab-pill ${selectedLane === "finished" ? "is-active" : ""}" data-appointment-lane="finished">Finalizados <span>${finishedAppointments.length}</span></button>
         </div>
         <div class="appointments-filter-grid">
             <label class="orders-search-field">
@@ -4500,8 +4530,16 @@ function renderAppointments() {
                 </select>
             </label>
             <label class="orders-search-field">
-                <span>Data de referencia</span>
+                <span>Referencia do calendario</span>
                 <input id="appointment-date-filter" type="date" value="${escapeHtml(state.filters.appointmentDate || "")}">
+            </label>
+            <label class="orders-search-field">
+                <span>Periodo inicial</span>
+                <input id="appointment-start-date-filter" type="date" value="${escapeHtml(state.filters.appointmentStartDate || "")}">
+            </label>
+            <label class="orders-search-field">
+                <span>Periodo final</span>
+                <input id="appointment-end-date-filter" type="date" value="${escapeHtml(state.filters.appointmentEndDate || "")}">
             </label>
             <div class="orders-filter-actions">
                 <button type="button" class="btn btn-default ghost-button" id="appointment-clear-filters">Limpar filtros</button>
@@ -4514,8 +4552,8 @@ function renderAppointments() {
         </div>
     `;
 
-    calendarTarget.innerHTML = renderAppointmentCalendar(filteredAppointments, referenceDate);
-    dayListTarget.innerHTML = renderAppointmentDayLists(filteredAppointments, referenceDate);
+    calendarTarget.innerHTML = renderAppointmentCalendar(laneAppointments, referenceDate);
+    dayListTarget.innerHTML = renderAppointmentDayLists(laneAppointments, referenceDate, selectedLane);
 
     bindAppointmentFilters();
     bindAppointmentActions();
@@ -4614,7 +4652,7 @@ function renderAppointmentCalendarChip(item) {
     `;
 }
 
-function renderAppointmentDayLists(appointments, referenceDate) {
+function renderAppointmentDayLists(appointments, referenceDate, lane = "pending") {
     const referenceIso = referenceDate.toISOString().slice(0, 10);
     const visibleAppointments = appointments.filter((item) => {
         if (state.appointmentCalendarView === "day") {
@@ -4630,16 +4668,26 @@ function renderAppointmentDayLists(appointments, referenceDate) {
         return item.data_agendamento.slice(0, 7) === referenceIso.slice(0, 7);
     });
     const todayItems = appointments.filter((item) => item.data_agendamento === todayIso());
-    const overdueItems = appointments.filter((item) =>
-        item.data_agendamento < todayIso()
-        && ["pendente", "confirmado", "em_deslocamento", "em_atendimento"].includes(item.status));
+    const overdueItems = lane === "pending"
+        ? appointments.filter((item) =>
+            item.data_agendamento < todayIso()
+            && ["pendente", "confirmado", "em_deslocamento", "em_atendimento", "reagendado"].includes(item.status))
+        : [];
+    const firstSectionTitle = lane === "finished" ? "Finalizados do dia" : "Pendentes do dia";
+    const firstSectionDescription = lane === "finished"
+        ? `${todayItems.length} compromisso(s) finalizados hoje.`
+        : `${todayItems.length} compromisso(s) pendentes para hoje.`;
+    const thirdSectionTitle = lane === "finished" ? "Historico finalizado" : "Compromissos atrasados";
+    const thirdSectionDescription = lane === "finished"
+        ? `${visibleAppointments.length} registro(s) finalizados no recorte atual.`
+        : `${overdueItems.length} item(ns) exigem atencao operacional.`;
 
     return `
         <div class="appointments-day-board">
             <section class="appointments-day-section">
                 <div class="section-heading compact">
-                    <h4>Lista do dia</h4>
-                    <p>${todayItems.length} compromisso(s) marcados para hoje.</p>
+                    <h4>${firstSectionTitle}</h4>
+                    <p>${firstSectionDescription}</p>
                 </div>
                 <div class="appointment-card-list">
                     ${todayItems.length ? todayItems.map((item) => renderAppointmentCard(item)).join("") : '<div class="empty-state">Nenhum atendimento programado para hoje.</div>'}
@@ -4654,13 +4702,19 @@ function renderAppointmentDayLists(appointments, referenceDate) {
                     ${visibleAppointments.length ? visibleAppointments.map((item) => renderAppointmentCard(item)).join("") : '<div class="empty-state">Nenhum agendamento encontrado para esta visualizacao.</div>'}
                 </div>
             </section>
-            <section class="appointments-day-section ${overdueItems.length ? "is-alert" : ""}">
+            <section class="appointments-day-section ${lane === "pending" && overdueItems.length ? "is-alert" : ""}">
                 <div class="section-heading compact">
-                    <h4>Compromissos atrasados</h4>
-                    <p>${overdueItems.length} item(ns) exigem atencao operacional.</p>
+                    <h4>${thirdSectionTitle}</h4>
+                    <p>${thirdSectionDescription}</p>
                 </div>
                 <div class="appointment-card-list">
-                    ${overdueItems.length ? overdueItems.map((item) => renderAppointmentCard(item, { compact: true })).join("") : '<div class="empty-state">Sem compromissos atrasados.</div>'}
+                    ${lane === "finished"
+        ? (visibleAppointments.length
+            ? visibleAppointments.map((item) => renderAppointmentCard(item, { compact: true })).join("")
+            : '<div class="empty-state">Nenhum agendamento finalizado neste periodo.</div>')
+        : (overdueItems.length
+            ? overdueItems.map((item) => renderAppointmentCard(item, { compact: true })).join("")
+            : '<div class="empty-state">Sem compromissos atrasados.</div>')}
                 </div>
             </section>
         </div>
@@ -4779,10 +4833,11 @@ async function logoutGoogle() {
 function renderAppointmentCard(item, options = {}) {
     const compact = options.compact || false;
     const linkedWorkOrder = item.os_id ? getEntityByKind("workOrder", item.os_id) : null;
-    const isOverdue = item.data_agendamento < todayIso() && ["pendente", "confirmado", "em_deslocamento", "em_atendimento"].includes(item.status);
+    const isOverdue = item.data_agendamento < todayIso() && ["pendente", "confirmado", "em_deslocamento", "em_atendimento", "reagendado"].includes(item.status);
     const whatsappIntegration = state.integrations.whatsapp || {};
     const googleEnabled = Boolean(item.sincronizar_google);
     const whatsappLogs = Array.isArray(item.whatsapp_logs) ? item.whatsapp_logs : [];
+    const finished = isAppointmentFinished(item.status);
     const hasPhone = Boolean(item.telefone);
     const whatsappIntegrationAvailable = whatsappIntegration.status === "ativo";
     const whatsappEnabled = hasPhone && whatsappIntegrationAvailable;
@@ -4853,6 +4908,8 @@ function renderAppointmentCard(item, options = {}) {
             </div>
             <div class="appointment-main-actions">
                 <button type="button" class="btn btn-default ghost-button" data-appointment-action="edit" data-id="${item.id}">Editar / reagendar</button>
+                <button type="button" class="btn btn-default ghost-button" data-appointment-action="print" data-id="${item.id}">${finished ? "Reimprimir" : "Imprimir resumo"}</button>
+                <button type="button" class="btn btn-default ghost-button" data-appointment-action="reopen" data-id="${item.id}" ${finished ? "" : "disabled"}>Reabrir agendamento</button>
                 <button type="button" class="btn btn-default ghost-button" data-appointment-action="send-whatsapp" data-id="${item.id}" ${whatsappEnabled ? "" : `disabled title="${escapeHtml(whatsappDisabledReason)}"`}>${whatsappButtonLabel}</button>
                 <button type="button" class="btn btn-default ghost-button" data-appointment-action="sync-google" data-id="${item.id}" ${googleEnabled ? "" : "disabled"}>${googleButtonLabel}</button>
                 <button type="button" class="btn btn-default ghost-button" data-appointment-action="open-work-order" data-os-id="${item.os_id || ""}" ${item.os_id ? "" : "disabled"}>Abrir OS</button>
@@ -4915,6 +4972,9 @@ function renderAppointmentStatusBadge(status) {
 
 function renderAppointmentProgressActions(item) {
     const actions = [];
+    if (isAppointmentFinished(item.status)) {
+        return actions.join("");
+    }
     if (item.status === "pendente" || item.status === "reagendado") {
         actions.push(`<button type="button" class="btn btn-success" data-appointment-action="status" data-id="${item.id}" data-status="confirmado">Confirmar</button>`);
     }
@@ -4956,12 +5016,29 @@ function bindAppointmentFilters() {
         state.filters.appointmentDate = event.target.value;
         renderAppointments();
     });
+    document.getElementById("appointment-start-date-filter")?.addEventListener("change", (event) => {
+        state.filters.appointmentStartDate = event.target.value;
+        renderAppointments();
+    });
+    document.getElementById("appointment-end-date-filter")?.addEventListener("change", (event) => {
+        state.filters.appointmentEndDate = event.target.value;
+        renderAppointments();
+    });
+    document.querySelectorAll("[data-appointment-lane]").forEach((button) => {
+        button.addEventListener("click", () => {
+            state.filters.appointmentLane = button.dataset.appointmentLane === "finished" ? "finished" : "pending";
+            renderAppointments();
+        });
+    });
     document.getElementById("appointment-clear-filters")?.addEventListener("click", () => {
         state.filters.appointmentSearch = "";
         state.filters.appointmentStatus = "todos";
         state.filters.appointmentTechnician = "";
         state.filters.appointmentCustomer = "";
         state.filters.appointmentDate = "";
+        state.filters.appointmentStartDate = "";
+        state.filters.appointmentEndDate = "";
+        state.filters.appointmentLane = "pending";
         renderAppointments();
     });
     document.querySelectorAll("[data-appointment-view]").forEach((button) => {
@@ -5021,6 +5098,21 @@ function bindAppointmentActions() {
                 }
                 if (action === "sync-google") {
                     await syncAppointmentWithGoogle(appointmentId);
+                    return;
+                }
+                if (action === "print") {
+                    printAppointmentSummary(appointmentId);
+                    return;
+                }
+                if (action === "reopen") {
+                    const reopened = await apiFetch(`/api/v1/agendamentos/${appointmentId}/reabrir`, {
+                        method: "POST",
+                    });
+                    await afterMutation("Agendamento reaberto com sucesso.", {
+                        kind: "appointment",
+                        entity: reopened,
+                    });
+                    openAppointmentView("operational");
                     return;
                 }
                 if (action === "send-whatsapp") {
@@ -5253,8 +5345,14 @@ function renderWorkOrders() {
     }
 
     const filteredOrders = getFilteredWorkOrdersForWorkspace();
-    const activeOrders = filteredOrders.filter((item) => item.status !== "concluida" && item.status !== "cancelada");
-    const archivedOrders = filteredOrders.filter((item) => item.status === "concluida" || item.status === "cancelada");
+    const activeOrders = getWorkOrdersForLane(filteredOrders, "pending");
+    const archivedOrders = getWorkOrdersForLane(filteredOrders, "finished");
+    const selectedLane = state.filters.workOrderLane === "finished" ? "finished" : "pending";
+    const laneOrders = selectedLane === "finished" ? archivedOrders : activeOrders;
+    const laneTitle = selectedLane === "finished" ? "Ordens finalizadas" : "Ordens pendentes";
+    const laneDescription = selectedLane === "finished"
+        ? "Historico operacional com acesso rapido para reimpressao e reabertura."
+        : "Ordens em acompanhamento com foco nas proximas execucoes e ajustes operacionais.";
 
     target.innerHTML = `
         <div class="orders-workspace">
@@ -5269,8 +5367,16 @@ function renderWorkOrders() {
                         <input id="work-orders-customer-search" type="search" placeholder="Razao social" value="${escapeHtml(state.filters.workOrderCustomer || "")}">
                     </label>
                     <label class="orders-search-field">
-                        <span>Data</span>
+                        <span>Data exata</span>
                         <input id="work-orders-date-filter" type="date" value="${escapeHtml(state.filters.workOrderDate || "")}">
+                    </label>
+                    <label class="orders-search-field">
+                        <span>Periodo inicial</span>
+                        <input id="work-orders-start-date-filter" type="date" value="${escapeHtml(state.filters.workOrderStartDate || "")}">
+                    </label>
+                    <label class="orders-search-field">
+                        <span>Periodo final</span>
+                        <input id="work-orders-end-date-filter" type="date" value="${escapeHtml(state.filters.workOrderEndDate || "")}">
                     </label>
                     <label class="orders-search-field">
                         <span>Status</span>
@@ -5292,17 +5398,15 @@ function renderWorkOrders() {
                     <span class="orders-stat">${archivedOrders.length} finalizadas / historico</span>
                 </div>
             </div>
+            <div class="tab-strip workspace-lane-tabs">
+                <button type="button" class="tab-pill ${selectedLane === "pending" ? "is-active" : ""}" data-work-order-lane="pending">Pendentes <span>${activeOrders.length}</span></button>
+                <button type="button" class="tab-pill ${selectedLane === "finished" ? "is-active" : ""}" data-work-order-lane="finished">Finalizados <span>${archivedOrders.length}</span></button>
+            </div>
             ${renderWorkOrderLane(
-                "Ordens em andamento",
-                "As OS operacionais ficam em destaque, com acoes rapidas e leitura direta dos itens aplicados.",
-                activeOrders,
-                false,
-            )}
-            ${renderWorkOrderLane(
-                "Ordens finalizadas e historico",
-                "As OS concluidas e canceladas ficam fora da area principal para reduzir ruido visual.",
-                archivedOrders,
-                true,
+                laneTitle,
+                laneDescription,
+                laneOrders,
+                selectedLane === "finished",
             )}
         </div>
     `;
@@ -5320,6 +5424,8 @@ function getFilteredWorkOrdersForWorkspace() {
     const numberSearch = (state.filters.workOrderNumber || "").trim().toLowerCase();
     const customerSearch = (state.filters.workOrderCustomer || "").trim().toLowerCase();
     const selectedDate = state.filters.workOrderDate || "";
+    const startDate = state.filters.workOrderStartDate || "";
+    const endDate = state.filters.workOrderEndDate || "";
     const selectedStatus = state.filters.workOrderStatus || "todos";
 
     return state.workOrders.filter((item) => {
@@ -5330,15 +5436,35 @@ function getFilteredWorkOrdersForWorkspace() {
             .toLowerCase()
             .includes(customerSearch);
         const dateMatch = !selectedDate || item.data_execucao === selectedDate;
+        const startMatch = !startDate || item.data_execucao >= startDate;
+        const endMatch = !endDate || item.data_execucao <= endDate;
         const statusMatch = selectedStatus === "todos" || item.status === selectedStatus;
-        return numberMatch && customerMatch && dateMatch && statusMatch;
+        return numberMatch && customerMatch && dateMatch && startMatch && endMatch && statusMatch;
     });
+}
+
+function isAppointmentFinished(status) {
+    return finishedAppointmentStatuses.has(String(status || "").toLowerCase());
+}
+
+function isWorkOrderFinished(status) {
+    return finishedWorkOrderStatuses.has(String(status || "").toLowerCase());
+}
+
+function getAppointmentsForLane(items, lane = state.filters.appointmentLane || "pending") {
+    return items.filter((item) => lane === "finished" ? isAppointmentFinished(item.status) : !isAppointmentFinished(item.status));
+}
+
+function getWorkOrdersForLane(items, lane = state.filters.workOrderLane || "pending") {
+    return items.filter((item) => lane === "finished" ? isWorkOrderFinished(item.status) : !isWorkOrderFinished(item.status));
 }
 
 function bindWorkOrderWorkspaceFilters() {
     const numberSearch = document.getElementById("work-orders-number-search");
     const customerSearch = document.getElementById("work-orders-customer-search");
     const dateFilter = document.getElementById("work-orders-date-filter");
+    const startDateFilter = document.getElementById("work-orders-start-date-filter");
+    const endDateFilter = document.getElementById("work-orders-end-date-filter");
     const statusFilter = document.getElementById("work-orders-status-filter");
     const clearButton = document.getElementById("work-orders-clear-filters");
 
@@ -5354,15 +5480,32 @@ function bindWorkOrderWorkspaceFilters() {
         state.filters.workOrderDate = event.target.value;
         renderWorkOrders();
     });
+    startDateFilter?.addEventListener("change", (event) => {
+        state.filters.workOrderStartDate = event.target.value;
+        renderWorkOrders();
+    });
+    endDateFilter?.addEventListener("change", (event) => {
+        state.filters.workOrderEndDate = event.target.value;
+        renderWorkOrders();
+    });
     statusFilter?.addEventListener("change", (event) => {
         state.filters.workOrderStatus = event.target.value;
         renderWorkOrders();
+    });
+    document.querySelectorAll("[data-work-order-lane]").forEach((button) => {
+        button.addEventListener("click", () => {
+            state.filters.workOrderLane = button.dataset.workOrderLane === "finished" ? "finished" : "pending";
+            renderWorkOrders();
+        });
     });
     clearButton?.addEventListener("click", () => {
         state.filters.workOrderNumber = "";
         state.filters.workOrderCustomer = "";
         state.filters.workOrderDate = "";
+        state.filters.workOrderStartDate = "";
+        state.filters.workOrderEndDate = "";
         state.filters.workOrderStatus = "todos";
+        state.filters.workOrderLane = "pending";
         renderWorkOrders();
     });
 }
@@ -5441,11 +5584,18 @@ function renderWorkOrderCard(item, archived) {
 function renderWorkOrderActionPanel(item) {
     const linkedFinance = state.finance.find((entry) => entry.os_id === item.id) || null;
     const quickActions = [];
-    if (item.status !== "concluida" && item.status !== "cancelada") {
+    if (!isWorkOrderFinished(item.status)) {
         quickActions.push(`
             <button type="button" class="btn btn-sm ghost-button action-button complete-work-order" data-id="${item.id}">
                 <i class="fas fa-check-circle"></i>
                 <span>Concluir ordem</span>
+            </button>
+        `);
+    } else {
+        quickActions.push(`
+            <button type="button" class="btn btn-sm ghost-button action-button reopen-work-order" data-id="${item.id}">
+                <i class="fas fa-rotate-left"></i>
+                <span>Reabrir OS</span>
             </button>
         `);
     }
@@ -5457,6 +5607,12 @@ function renderWorkOrderActionPanel(item) {
             </button>
         `);
     }
+    quickActions.push(`
+        <button type="button" class="btn btn-sm ghost-button action-button reprint-work-order" data-id="${item.id}">
+            <i class="fas fa-print"></i>
+            <span>Reimprimir OS</span>
+        </button>
+    `);
 
     const primaryActions = quickActions.length
         ? `<div class="order-primary-actions">${quickActions.join("")}</div>`
@@ -5666,6 +5822,64 @@ async function print_order(workOrderId) {
     const blob = await apiFetch(`/api/v1/os/${workOrderId}/pdf`);
     const workOrder = getEntityByKind("workOrder", workOrderId);
     openBlobPreview(blob, `Ordem de Servico ${workOrder?.numero || workOrderId}`, { printOnLoad: true });
+}
+
+function printAppointmentSummary(appointmentId) {
+    const appointment = getEntityByKind("appointment", Number(appointmentId));
+    if (!appointment) {
+        toast("Agendamento nao encontrado para impressao.");
+        return;
+    }
+    const printWindow = window.open("", "_blank", "noopener");
+    if (!printWindow) {
+        toast("Nao foi possivel abrir a janela de impressao.");
+        return;
+    }
+    printWindow.document.write(`
+        <!doctype html>
+        <html lang="pt-BR">
+            <head>
+                <meta charset="utf-8">
+                <title>Agendamento ${appointment.id}</title>
+                <style>
+                    body { font-family: "Segoe UI", sans-serif; margin: 24px; color: #1e2a22; }
+                    h1 { margin-bottom: 6px; }
+                    .meta { color: #5d675f; margin-bottom: 18px; }
+                    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }
+                    .card { border: 1px solid #d7ded1; border-radius: 12px; padding: 12px 14px; }
+                    .card span { display: block; color: #5d675f; font-size: 12px; margin-bottom: 4px; }
+                    .note { margin-top: 18px; white-space: pre-wrap; }
+                    @media print { body { margin: 12mm; } }
+                </style>
+            </head>
+            <body>
+                <h1>Agendamento #${appointment.id}</h1>
+                <p class="meta">${escapeHtml(appointment.cliente_nome)} | ${escapeHtml(appointment.tipo_servico)}</p>
+                <div class="grid">
+                    <div class="card"><span>Data</span><strong>${escapeHtml(formatDate(appointment.data_agendamento))}</strong></div>
+                    <div class="card"><span>Hora</span><strong>${escapeHtml(formatTime(appointment.hora_agendamento))}</strong></div>
+                    <div class="card"><span>Tecnico</span><strong>${escapeHtml(appointment.tecnico_nome || "Nao definido")}</strong></div>
+                    <div class="card"><span>Status</span><strong>${escapeHtml(appointment.status.replaceAll("_", " "))}</strong></div>
+                    <div class="card"><span>Telefone</span><strong>${escapeHtml(appointment.telefone || "-")}</strong></div>
+                    <div class="card"><span>OS vinculada</span><strong>${escapeHtml(appointment.os_numero || "Sem vinculacao")}</strong></div>
+                    <div class="card" style="grid-column: 1 / -1;"><span>Endereco</span><strong>${escapeHtml(appointment.endereco_completo || "-")}</strong></div>
+                </div>
+                <div class="note">
+                    <strong>Observacoes</strong>
+                    <p>${escapeHtml(appointment.observacoes || appointment.observacoes_internas || "Sem observacoes adicionais.")}</p>
+                </div>
+                <script>
+                    window.addEventListener("load", () => {
+                        setTimeout(() => {
+                            window.focus();
+                            window.print();
+                        }, 250);
+                    });
+                </script>
+            </body>
+        </html>
+    `);
+    printWindow.document.close();
 }
 
 async function generate_certificate(workOrderId, options = {}) {
@@ -6713,6 +6927,35 @@ function bindQuickActions() {
             try {
                 await apiFetch(`/api/v1/os/${button.dataset.id}/baixar`, { method: "POST" });
                 await afterMutation("Ordem de servico baixada com sucesso.");
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    });
+
+    document.querySelectorAll(".reopen-work-order").forEach((button) => {
+        if (button.dataset.quickActionBound === "true") {
+            return;
+        }
+        button.dataset.quickActionBound = "true";
+        button.addEventListener("click", async () => {
+            try {
+                await apiFetch(`/api/v1/os/${button.dataset.id}/reabrir`, { method: "POST" });
+                await afterMutation("Ordem de servico reaberta com sucesso.");
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    });
+
+    document.querySelectorAll(".reprint-work-order").forEach((button) => {
+        if (button.dataset.quickActionBound === "true") {
+            return;
+        }
+        button.dataset.quickActionBound = "true";
+        button.addEventListener("click", async () => {
+            try {
+                await print_order(button.dataset.id);
             } catch (error) {
                 toast(error.message);
             }

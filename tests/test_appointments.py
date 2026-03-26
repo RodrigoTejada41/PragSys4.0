@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime, timedelta, timezone
 
 from app.core.config import get_settings
@@ -204,6 +205,39 @@ def test_work_order_generates_and_updates_linked_appointment(client, auth_header
     assert updated_appointment["hora_agendamento"] == "13:30:00"
     assert updated_appointment["duracao_prevista_minutos"] == 120
     assert updated_appointment["status"] == "reagendado"
+
+
+def test_reopen_appointment_sets_status_back_to_pending(client, auth_headers):
+    customer = create_customer(client, auth_headers, "203")
+    technician = create_technician(client, auth_headers, "203")
+    target_date = (date.today() + timedelta(days=6)).isoformat()
+
+    created = client.post(
+        "/api/v1/agendamentos",
+        headers=auth_headers,
+        json={
+            "cliente_id": customer["id"],
+            "tecnico_id": technician["id"],
+            "tipo_servico": "Retorno preventivo",
+            "data_agendamento": target_date,
+            "hora_agendamento": "15:00:00",
+            "duracao_prevista_minutos": 60,
+            "observacoes": "Encerrar e reabrir",
+            "status": "concluido",
+            "origem": "manual",
+            "sincronizar_google": False,
+        },
+    )
+
+    assert created.status_code == 200
+    appointment_id = created.json()["id"]
+    assert created.json()["status"] == "concluido"
+
+    reopen_response = client.post(f"/api/v1/agendamentos/{appointment_id}/reabrir", headers=auth_headers)
+
+    assert reopen_response.status_code == 200
+    reopened = reopen_response.json()
+    assert reopened["status"] == "pendente"
 
 
 def test_manual_google_sync_requires_google_flag_enabled(client, auth_headers):
@@ -689,4 +723,79 @@ def test_google_sync_route_does_not_mask_non_auth_errors_as_oauth(client, auth_h
 
     assert sync_response.status_code == 400
     assert "calendarId invalido" in sync_response.json()["detail"]
+    get_settings.cache_clear()
+
+
+def test_google_sync_route_returns_friendly_message_for_disabled_google_api(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "343688887141-client-id.apps.googleusercontent.com")
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "client-secret-teste")
+    monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "http://testserver/api/v1/google-calendar/oauth/callback")
+    get_settings.cache_clear()
+
+    customer = create_customer(client, auth_headers, "404")
+    technician = create_technician(client, auth_headers, "404")
+    target_date = (date.today() + timedelta(days=5)).isoformat()
+
+    created = client.post(
+        "/api/v1/agendamentos",
+        headers=auth_headers,
+        json={
+            "cliente_id": customer["id"],
+            "tecnico_id": technician["id"],
+            "tipo_servico": "Inspecao Google API",
+            "data_agendamento": target_date,
+            "hora_agendamento": "16:00:00",
+            "duracao_prevista_minutos": 60,
+            "observacoes": "Fluxo de API desativada",
+            "status": "pendente",
+            "origem": "manual",
+            "sincronizar_google": False,
+        },
+    )
+
+    assert created.status_code == 200
+    appointment_id = created.json()["id"]
+
+    with get_session_local()() as db:
+        appointment = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+        appointment.sincronizar_google = True
+        db.commit()
+
+    disabled_api_payload = json.dumps(
+        {
+            "error": {
+                "code": 403,
+                "message": "Google Calendar API has not been used in project 343688887141 before or it is disabled.",
+                "status": "PERMISSION_DENIED",
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                        "reason": "SERVICE_DISABLED",
+                        "domain": "googleapis.com",
+                        "metadata": {
+                            "activationUrl": "https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=343688887141"
+                        },
+                    }
+                ],
+            }
+        }
+    )
+
+    from app.application.google_calendar_service import _friendly_google_calendar_error
+
+    def fake_google_request(*args, **kwargs):
+        raise BusinessRuleViolation(_friendly_google_calendar_error(disabled_api_payload))
+
+    monkeypatch.setattr("app.application.scheduling_services.google_calendar_request", fake_google_request)
+
+    sync_response = client.post(
+        f"/api/v1/google-calendar/appointments/{appointment_id}/sync",
+        headers=auth_headers,
+    )
+
+    assert sync_response.status_code == 400
+    detail = sync_response.json()["detail"]
+    assert "Google Calendar API desativada" in detail
+    assert "343688887141" in detail
+    assert "console.developers.google.com/apis/api/calendar-json.googleapis.com/overview" in detail
     get_settings.cache_clear()

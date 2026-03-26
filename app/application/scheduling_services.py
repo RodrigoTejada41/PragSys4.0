@@ -591,7 +591,7 @@ def update_appointment_status(
     current_user_id: Optional[int] = None,
     *,
     sync_google_after_commit: bool = True,
-) -> Appointment:
+    ) -> Appointment:
     appointment = get_appointment(db, appointment_id)
     previous_status = appointment.status
     appointment.status = payload.status.value
@@ -619,6 +619,39 @@ def update_appointment_status(
             remove_event=should_remove,
             user_id=current_user_id,
         )
+        db.commit()
+        appointment = get_appointment(db, appointment.id)
+    return appointment
+
+
+def reopen_appointment(
+    db: Session,
+    appointment_id: int,
+    current_user_id: Optional[int] = None,
+    *,
+    sync_google_after_commit: bool = True,
+) -> Appointment:
+    appointment = get_appointment(db, appointment_id)
+    previous_status = appointment.status
+    if previous_status == AppointmentStatus.PENDENTE.value:
+        return appointment
+
+    appointment.status = AppointmentStatus.PENDENTE.value
+    appointment.usuario_ultima_atualizacao_id = current_user_id
+    _log_appointment_history(
+        db,
+        appointment,
+        current_user_id,
+        "reopen",
+        "Agendamento reaberto para acompanhamento operacional.",
+        previous_status,
+        appointment.status,
+    )
+    _sync_linked_work_order_from_appointment(appointment)
+    db.commit()
+    appointment = get_appointment(db, appointment.id)
+    if sync_google_after_commit and appointment.sincronizar_google:
+        _sync_google_for_appointment(db, appointment, user_id=current_user_id)
         db.commit()
         appointment = get_appointment(db, appointment.id)
     return appointment

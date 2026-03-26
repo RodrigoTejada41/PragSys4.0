@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote, urlencode
@@ -259,6 +260,44 @@ def _refresh_company_access_token(company: ProviderCompany) -> None:
     _apply_company_token_payload(company, refreshed)
 
 
+def _friendly_google_calendar_error(detail: str) -> str:
+    raw = str(detail or "").strip()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        payload = None
+
+    if not isinstance(payload, dict):
+        return f"Falha ao sincronizar com Google Agenda: {raw}"
+
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    code = error.get("code")
+    status = str(error.get("status") or "").strip().upper()
+    message = str(error.get("message") or raw).strip()
+    activation_url = None
+
+    for item in error.get("details") or []:
+        if not isinstance(item, dict):
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        activation_url = activation_url or metadata.get("activationUrl")
+        if activation_url:
+            break
+
+    if code == 403 and status == "PERMISSION_DENIED":
+        normalized = raw.lower()
+        if "service_disabled" in normalized or "accessnotconfigured" in normalized or "api has not been used" in normalized:
+            friendly = (
+                "Google Calendar API desativada ou ainda nao propagada no projeto Google Cloud. "
+                "Ative a API no projeto correto, aguarde alguns minutos, reconecte a conta Google e tente novamente."
+            )
+            if activation_url:
+                friendly = f"{friendly} Ativacao: {activation_url}"
+            return friendly
+
+    return f"Falha ao sincronizar com Google Agenda: {message}"
+
+
 def _get_runtime_google_credentials(db: Session, user_id: Optional[int]) -> tuple[str, str]:
     company = _get_company_for_context(db, user_id)
     if company and (company.google_access_token or company.google_refresh_token):
@@ -301,7 +340,7 @@ def google_calendar_request(
         response.raise_for_status()
     except httpx.HTTPError as exc:
         detail = exc.response.text if getattr(exc, "response", None) is not None else str(exc)
-        raise BusinessRuleViolation(f"Falha ao sincronizar com Google Agenda: {detail}") from exc
+        raise BusinessRuleViolation(_friendly_google_calendar_error(detail)) from exc
     content = response.json() if response.content else None
     return content, calendar_id
 

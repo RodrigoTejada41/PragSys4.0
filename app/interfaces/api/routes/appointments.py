@@ -16,6 +16,7 @@ from app.application.scheduling_services import (
     get_appointment,
     get_appointment_dashboard,
     list_appointments,
+    reopen_appointment,
     update_appointment,
     update_appointment_status,
 )
@@ -97,6 +98,18 @@ def post_appointment_status(
     current_user: User = Depends(require_roles(["master", "admin", "operador"])),
 ) -> AppointmentRead:
     return update_appointment_status(db, appointment_id, payload, current_user_id=current_user.id)
+
+
+@router.post(
+    "/{appointment_id}/reabrir",
+    response_model=AppointmentRead,
+)
+def post_appointment_reopen(
+    appointment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> AppointmentRead:
+    return reopen_appointment(db, appointment_id, current_user_id=current_user.id)
 
 
 @router.post(
