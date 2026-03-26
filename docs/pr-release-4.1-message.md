@@ -14,6 +14,7 @@ Esta PR consolida a release `4.1.0`, registra o backup versionado em `release/Sy
 - ajuste de carregamento ORM de Ordem de Servico com `selectinload`;
 - marcadores de teste `unit`, `integration`, `documents` e `external`;
 - pequena otimização no fluxo de PDF de garantia, reduzindo custo repetitivo de resolucao/consulta.
+- remocao do `bkp` do controle de versao, com estrategia de backup migrada para artefato `.zip`.
 
 ## Impacto esperado
 

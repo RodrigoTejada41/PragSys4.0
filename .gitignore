@@ -28,3 +28,4 @@ XSD/
 assinaturas_tecnicas/*
 !assinaturas_tecnicas/.gitkeep
 release/**/*.zip
+/release/**/bkp/

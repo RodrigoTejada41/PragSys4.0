@@ -39,6 +39,12 @@ O principal gargalo nao estava no corpo dos testes, mas na infraestrutura de tes
 - marcadores `unit`, `integration`, `documents` e `external` adicionados ao `pytest`;
 - marcacao automatica centralizada em `tests/conftest.py`, sem precisar espalhar anotacoes por todos os arquivos.
 
+### Cache e filesystem
+
+- removido o uso de `lru_cache` em resolucao de templates, certificados e assinaturas dependentes de disco;
+- leitura voltou a refletir imediatamente criacao, substituicao ou remocao de arquivos em runtime;
+- logs de resolucao foram adicionados para facilitar diagnostico de carregamento de assets.
+
 ### Configuracao de seguranca
 
 - `password_hash_iterations` passou a ser configuravel via settings;
@@ -51,9 +57,12 @@ O principal gargalo nao estava no corpo dos testes, mas na infraestrutura de tes
 - `app/core/config.py`
 - `app/core/security.py`
 - `app/application/services.py`
+- `app/application/certificate_assets.py`
 - `app/infrastructure/models.py`
 - `app/infrastructure/migrations.py`
 - `pyproject.toml`
+- `.gitignore`
+- `scripts/create_release_backup.ps1`
 
 ## Top 10 testes mais lentos apos a otimizacao
 
@@ -155,6 +164,9 @@ Sem alterar comportamento:
 
 6. Revisar caminhos de consulta mais usados nas rotas de OS, agendamento e financeiro.
    Ha indicios de que boa parte do custo funcional restante vem de fluxos encadeados com varias operacoes de persistencia.
+
+7. Manter caches apenas em funcoes puras ou com invalidacao explicita.
+   Ja corrigido nos pontos dependentes de filesystem; essa regra deve continuar sendo observada nas proximas iteracoes.
 
 ## Validacao
 

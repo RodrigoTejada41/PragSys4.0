@@ -1,6 +1,9 @@
+import shutil
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.core.config import get_settings
+from app.application.certificate_assets import resolve_certificate_model_path, resolve_technical_signature_path
 from app.application.services import (
     _build_framed_sanitary_certificate_text,
     _build_standard_sanitary_certificate_text,
@@ -185,3 +188,62 @@ def test_guarantee_certificate_is_generated_from_visual_template(client, auth_he
     assert response.headers["content-type"] == "application/pdf"
     assert response.headers["content-disposition"] == 'inline; filename="certificado_industria_delta.pdf"'
     assert response.content.startswith(b"%PDF")
+
+
+def test_certificate_model_path_reflects_file_creation_and_removal(monkeypatch):
+    root_dir = Path("tmp/test_document_asset_runtime/model_path")
+    if root_dir.exists():
+        shutil.rmtree(root_dir)
+    models_dir = root_dir / "modelos"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CERTIFICATE_MODELS_DIR", str(models_dir))
+    monkeypatch.setenv("TECHNICAL_SIGNATURES_DIR", str(root_dir / "assinaturas"))
+    get_settings.cache_clear()
+
+    try:
+        assert resolve_certificate_model_path() is None
+
+        created_file = (models_dir / "certificado_moldura_oficial.png").resolve()
+        created_file.write_bytes(b"model-v1")
+        assert resolve_certificate_model_path() == created_file
+
+        created_file.unlink()
+        assert resolve_certificate_model_path() is None
+    finally:
+        get_settings.cache_clear()
+        if root_dir.exists():
+            shutil.rmtree(root_dir)
+
+
+def test_technical_signature_path_reflects_replacement_and_removal(monkeypatch):
+    root_dir = Path("tmp/test_document_asset_runtime/signature_path")
+    if root_dir.exists():
+        shutil.rmtree(root_dir)
+    signatures_dir = root_dir / "assinaturas"
+    signatures_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("TECHNICAL_SIGNATURES_DIR", str(signatures_dir))
+    monkeypatch.setenv("CERTIFICATE_MODELS_DIR", str(root_dir / "modelos"))
+    get_settings.cache_clear()
+
+    try:
+        technician = SimpleNamespace(id=7, registro="TEC-77", nome="Tecnico Cache")
+        signature_file = (signatures_dir / "tec_77.png").resolve()
+
+        assert resolve_technical_signature_path(technician) is None
+
+        signature_file.write_bytes(b"signature-v1")
+        first_resolved = resolve_technical_signature_path(technician)
+        assert first_resolved == signature_file
+        assert first_resolved.read_bytes() == b"signature-v1"
+
+        signature_file.write_bytes(b"signature-v2")
+        replaced_resolved = resolve_technical_signature_path(technician)
+        assert replaced_resolved == signature_file
+        assert replaced_resolved.read_bytes() == b"signature-v2"
+
+        signature_file.unlink()
+        assert resolve_technical_signature_path(technician) is None
+    finally:
+        get_settings.cache_clear()
+        if root_dir.exists():
+            shutil.rmtree(root_dir)

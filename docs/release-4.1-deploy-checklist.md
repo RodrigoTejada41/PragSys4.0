@@ -7,6 +7,7 @@
 - verificar paths de `TECHNICAL_SIGNATURES_DIR` e `CERTIFICATE_MODELS_DIR`;
 - verificar configuracoes fiscais e de integracao Google/WhatsApp;
 - garantir backup do banco antes da atualizacao.
+- se precisar empacotar backup da release, gerar artefato com `scripts/create_release_backup.ps1` em vez de versionar `bkp` no repositorio.
 
 ## Atualizacao
 

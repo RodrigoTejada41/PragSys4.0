@@ -5,7 +5,6 @@ import re
 from calendar import monthrange
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from functools import lru_cache
 from io import BytesIO
 from io import StringIO
 from pathlib import Path
@@ -2237,10 +2236,10 @@ def _guarantee_certificate_filename_for_work_order(work_order: WorkOrder) -> str
     return f"certificado_{normalized or 'cliente'}.pdf"
 
 
-@lru_cache(maxsize=16)
-def _resolve_guarantee_template_path_cached(certificate_models_path_raw: str, legacy_models_path_raw: str) -> Optional[Path]:
-    certificate_models_path = Path(certificate_models_path_raw)
-    legacy_models_path = Path(legacy_models_path_raw) if legacy_models_path_raw else None
+def _resolve_guarantee_template_path_from_dirs(
+    certificate_models_path: Path,
+    legacy_models_path: Optional[Path],
+) -> Optional[Path]:
     preferred_candidates = [
         certificate_models_path / "modelo.png",
         certificate_models_path / "modelo.jpg",
@@ -2270,10 +2269,17 @@ def _resolve_guarantee_template_path_cached(certificate_models_path_raw: str, le
 
 def _resolve_guarantee_template_path() -> Optional[Path]:
     settings = get_settings()
-    return _resolve_guarantee_template_path_cached(
-        str(settings.certificate_models_path),
-        str(settings.legacy_certificate_models_path) if settings.legacy_certificate_models_path else "",
+    resolved = _resolve_guarantee_template_path_from_dirs(
+        settings.certificate_models_path,
+        settings.legacy_certificate_models_path,
     )
+    LOGGER.info(
+        "guarantee_template_path_resolved certificate_models_path=%s legacy_models_path=%s found=%s",
+        settings.certificate_models_path,
+        settings.legacy_certificate_models_path,
+        resolved,
+    )
+    return resolved
 
 
 def _resolve_guarantee_service_text(work_order: WorkOrder) -> str:

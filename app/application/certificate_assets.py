@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import re
-from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -39,16 +38,11 @@ def _iter_candidate_names(technician: Technician) -> Iterable[str]:
             seen.add(token)
             yield token
 
-
-@lru_cache(maxsize=32)
-def _resolve_certificate_model_path_cached(
-    official_dir_raw: str,
-    legacy_dir_raw: str,
-    model_name: str,
+def _resolve_certificate_model_path_from_dirs(
+    official_dir: Path,
+    legacy_dir: Optional[Path],
+    model_name: Optional[str],
 ) -> Optional[Path]:
-    official_dir = Path(official_dir_raw)
-    legacy_dir = Path(legacy_dir_raw) if legacy_dir_raw else None
-
     candidate_names = []
     if model_name:
         candidate_names.append(Path(model_name).stem)
@@ -71,9 +65,7 @@ def _resolve_certificate_model_path_cached(
     return None
 
 
-@lru_cache(maxsize=128)
-def _resolve_signature_path_cached(signatures_dir_raw: str, candidate_name: str) -> Optional[Path]:
-    signatures_dir = Path(signatures_dir_raw)
+def _resolve_signature_path(signatures_dir: Path, candidate_name: str) -> Optional[Path]:
     for extension in SUPPORTED_IMAGE_EXTENSIONS:
         candidate = signatures_dir / f"{candidate_name}{extension}"
         if candidate.exists():
@@ -81,9 +73,7 @@ def _resolve_signature_path_cached(signatures_dir_raw: str, candidate_name: str)
     return None
 
 
-@lru_cache(maxsize=32)
-def _resolve_fallback_signature_path_cached(signatures_dir_raw: str) -> Optional[Path]:
-    signatures_dir = Path(signatures_dir_raw)
+def _resolve_fallback_signature_path(signatures_dir: Path) -> Optional[Path]:
     fallback_images = [path for extension in SUPPORTED_IMAGE_EXTENSIONS for path in signatures_dir.glob(f"*{extension}")]
     if len(fallback_images) == 1:
         return fallback_images[0]
@@ -94,11 +84,19 @@ def resolve_certificate_model_path(model_name: Optional[str] = None) -> Optional
     settings = get_settings()
     official_dir = settings.certificate_models_path
     legacy_dir = settings.legacy_certificate_models_path
-    return _resolve_certificate_model_path_cached(
-        str(official_dir),
-        str(legacy_dir) if legacy_dir else "",
-        str(model_name or ""),
+    resolved = _resolve_certificate_model_path_from_dirs(
+        official_dir,
+        legacy_dir,
+        model_name,
     )
+    logger.info(
+        "certificate_model_path_resolved model_name=%s official_dir=%s legacy_dir=%s found=%s",
+        model_name or "",
+        official_dir,
+        legacy_dir,
+        resolved,
+    )
+    return resolved
 
 
 def require_certificate_model_path(model_name: Optional[str] = None) -> Path:
@@ -114,15 +112,25 @@ def require_certificate_model_path(model_name: Optional[str] = None) -> Path:
 
 def resolve_technical_signature_path(technician: Technician) -> Optional[Path]:
     signatures_dir = get_settings().technical_signatures_path
-    signatures_dir_raw = str(signatures_dir)
     for candidate_name in _iter_candidate_names(technician):
-        candidate = _resolve_signature_path_cached(signatures_dir_raw, candidate_name)
+        candidate = _resolve_signature_path(signatures_dir, candidate_name)
         if candidate is not None:
+            logger.info(
+                "technical_signature_resolved technician_id=%s candidate_name=%s path=%s",
+                getattr(technician, "id", None),
+                candidate_name,
+                candidate,
+            )
             return candidate
-    fallback_image = _resolve_fallback_signature_path_cached(signatures_dir_raw)
+    fallback_image = _resolve_fallback_signature_path(signatures_dir)
     if fallback_image is not None:
         logger.warning("Using fallback technical signature for technician %s", getattr(technician, "id", "?"))
         return fallback_image
+    logger.info(
+        "technical_signature_missing technician_id=%s searched_dir=%s",
+        getattr(technician, "id", None),
+        signatures_dir,
+    )
     return None
 
 
