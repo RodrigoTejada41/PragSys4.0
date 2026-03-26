@@ -36,6 +36,8 @@ def test_static_app_js_includes_appointment_availability_feedback(client):
     assert "Exportar Excel" in response.text
     assert "Diretorio de armazenamento" in response.text
     assert "Enviar e-mail automaticamente" in response.text
+    assert "Tipo da O.S." in response.text
+    assert "Esta O.S. nao gerara cobranca automatica." in response.text
     assert "Reabrir agendamento" in response.text
     assert "Periodo inicial" in response.text
     assert "Periodo final" in response.text

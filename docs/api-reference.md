@@ -119,6 +119,7 @@ Observacoes:
 
 - lancamentos financeiros agora podem carregar `contrato_id`;
 - registros com `origem = contrato` sao gerados automaticamente pela rotina contratual;
+- `POST /financeiro` rejeita vinculo direto com `os_id` quando a OS for do tipo `contrato`;
 - cobrancas recorrentes entram no mesmo fluxo de contas a receber e baixa ja existente.
 
 ### Ordens de servico
@@ -126,13 +127,21 @@ Observacoes:
 - `GET /os`
 - `POST /os`
 - `PUT /os/{id}`
-- `POST /os/{id}/concluir`
-- `POST /os/{id}/quitar`
+- `POST /os/{id}/efetuar`
+- `POST /os/{id}/baixar`
+- `POST /os/{id}/reabrir`
 - `DELETE /os/{id}`
 - `GET /os/{id}/pdf`
 - `GET /os/{id}/relatorio-tecnico.pdf`
 - `GET /os/{id}/certificado-sanitario.pdf`
 - `GET /os/{id}/certificado-moldura.pdf`
+
+Observacoes:
+
+- payload de OS agora aceita `tipo_os` com valores `avulsa` e `contrato`;
+- OS `avulsa` pode continuar gerando financeiro automatico quando `gerar_financeiro = true`;
+- OS `contrato` continua gerando agendamento normalmente, mas nunca gera financeiro automatico;
+- OS `contrato` tambem bloqueia recibos e lancamentos financeiros vinculados por chamada direta, para evitar cobranca duplicada.
 
 ### Usuarios
 

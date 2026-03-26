@@ -229,6 +229,135 @@ def test_create_open_work_order_allows_empty_products(client, auth_headers):
     assert Decimal(financeiro_response.json()[0]["valor"]) == Decimal("120.00")
 
 
+def test_contract_work_order_generates_appointment_without_finance(client, auth_headers):
+    execution_date = date.today() + timedelta(days=7)
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Contrato",
+            "cpf_cnpj": "55566677000100",
+            "endereco": "Rua Contrato, 55",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11933332222",
+            "contato": "Contrato",
+        },
+    ).json()
+
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Contrato",
+            "registro": "TEC-CONTRATO",
+            "telefone": "11911113333",
+            "ativo": True,
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": execution_date.isoformat(),
+            "hora_inicio": "09:00:00",
+            "hora_fim": "10:00:00",
+            "local_execucao": "Area contratada",
+            "observacoes": "Visita operacional de contrato",
+            "garantia_ate": (execution_date + timedelta(days=30)).isoformat(),
+            "status": "aberta",
+            "tipo_os": "contrato",
+            "valor_servico": "500.00",
+            "produtos": [],
+            "pragas_ids": [],
+            "gerar_financeiro": True,
+            "gerar_agendamento": True,
+            "tipo_servico_agendamento": "Visita de contrato",
+            "duracao_prevista_minutos": 60,
+            "sincronizar_google_agenda": False,
+        },
+    )
+
+    assert response.status_code == 200
+    work_order = response.json()
+    assert work_order["tipo_os"] == "contrato"
+
+    finance_response = client.get("/api/v1/financeiro", headers=auth_headers)
+    assert finance_response.status_code == 200
+    assert finance_response.json() == []
+
+    appointments_response = client.get("/api/v1/agendamentos", headers=auth_headers)
+    linked = [item for item in appointments_response.json() if item["os_id"] == work_order["id"]]
+    assert len(linked) == 1
+    assert linked[0]["tipo_servico"] == "Visita de contrato"
+
+
+def test_contract_work_order_blocks_direct_finance_link(client, auth_headers):
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Contrato Financeiro",
+            "cpf_cnpj": "55566677000101",
+            "endereco": "Rua Contrato Financeiro, 10",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11933334455",
+            "contato": "Financeiro",
+        },
+    ).json()
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Contrato Financeiro",
+            "registro": "TEC-CONTRATO-FIN",
+            "telefone": "11900001111",
+            "ativo": True,
+        },
+    ).json()
+
+    work_order = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": "2026-03-20",
+            "hora_inicio": "08:00:00",
+            "local_execucao": "Area de contrato",
+            "garantia_ate": "2026-04-20",
+            "status": "aberta",
+            "tipo_os": "contrato",
+            "valor_servico": "280.00",
+            "produtos": [],
+            "pragas_ids": [],
+            "gerar_financeiro": False,
+            "gerar_agendamento": False,
+        },
+    ).json()
+
+    finance_response = client.post(
+        "/api/v1/financeiro",
+        headers=auth_headers,
+        json={
+            "tipo": "receita",
+            "descricao": "Tentativa indevida",
+            "valor": "280.00",
+            "vencimento": "2026-03-20",
+            "status": "pendente",
+            "cliente_id": cliente["id"],
+            "os_id": work_order["id"],
+        },
+    )
+
+    assert finance_response.status_code == 400
+    assert "contrato" in finance_response.json()["detail"].lower()
+
+
 def test_reopen_work_order_reopens_linked_appointment(client, auth_headers):
     cliente = client.post(
         "/api/v1/clientes",
@@ -595,6 +724,118 @@ def test_quick_actions_complete_and_settle_work_order_and_finance(client, auth_h
     financeiro_final = client.get("/api/v1/financeiro", headers=auth_headers)
     assert financeiro_final.status_code == 200
     assert financeiro_final.json()[0]["status"] == "pago"
+
+
+def test_switching_work_order_type_controls_finance_generation(client, auth_headers):
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Troca Tipo",
+            "cpf_cnpj": "90909090000100",
+            "endereco": "Rua Troca, 90",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11991919191",
+            "contato": "Amanda",
+        },
+    ).json()
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Troca Tipo",
+            "registro": "TEC-TROCA-TIPO",
+            "telefone": "11981818181",
+            "ativo": True,
+        },
+    ).json()
+
+    created = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": "2026-03-20",
+            "hora_inicio": "08:00:00",
+            "hora_fim": "09:00:00",
+            "local_execucao": "Area 1",
+            "garantia_ate": "2026-04-20",
+            "status": "aberta",
+            "tipo_os": "avulsa",
+            "valor_servico": "330.00",
+            "produtos": [],
+            "pragas_ids": [],
+            "gerar_financeiro": True,
+            "gerar_agendamento": True,
+            "tipo_servico_agendamento": "Atendimento inicial",
+            "sincronizar_google_agenda": False,
+        },
+    )
+    assert created.status_code == 200
+    work_order = created.json()
+
+    finance_before = client.get("/api/v1/financeiro", headers=auth_headers)
+    assert len(finance_before.json()) == 1
+
+    as_contract = client.put(
+        f"/api/v1/os/{work_order['id']}",
+        headers=auth_headers,
+        json={
+            "numero": work_order["numero"],
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": "2026-03-20",
+            "hora_inicio": "08:00:00",
+            "hora_fim": "09:00:00",
+            "local_execucao": "Area 1",
+            "garantia_ate": "2026-04-20",
+            "status": "aberta",
+            "tipo_os": "contrato",
+            "valor_servico": "330.00",
+            "produtos": [],
+            "pragas_ids": [],
+            "gerar_financeiro": True,
+            "gerar_agendamento": True,
+            "tipo_servico_agendamento": "Atendimento inicial",
+            "sincronizar_google_agenda": False,
+        },
+    )
+    assert as_contract.status_code == 200
+    assert as_contract.json()["tipo_os"] == "contrato"
+
+    finance_after_contract = client.get("/api/v1/financeiro", headers=auth_headers)
+    assert finance_after_contract.json() == []
+
+    back_to_avulsa = client.put(
+        f"/api/v1/os/{work_order['id']}",
+        headers=auth_headers,
+        json={
+            "numero": work_order["numero"],
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": "2026-03-20",
+            "hora_inicio": "08:00:00",
+            "hora_fim": "09:00:00",
+            "local_execucao": "Area 1",
+            "garantia_ate": "2026-04-20",
+            "status": "aberta",
+            "tipo_os": "avulsa",
+            "valor_servico": "330.00",
+            "produtos": [],
+            "pragas_ids": [],
+            "gerar_financeiro": True,
+            "gerar_agendamento": True,
+            "tipo_servico_agendamento": "Atendimento inicial",
+            "sincronizar_google_agenda": False,
+        },
+    )
+    assert back_to_avulsa.status_code == 200
+    assert back_to_avulsa.json()["tipo_os"] == "avulsa"
+
+    finance_after_avulsa = client.get("/api/v1/financeiro", headers=auth_headers)
+    assert len(finance_after_avulsa.json()) == 1
 
 
 def test_work_order_allows_photo_upload_and_removal(client, auth_headers):

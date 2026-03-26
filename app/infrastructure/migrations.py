@@ -486,6 +486,18 @@ def _migration_20260326_003_contract_billing_reporting(engine: Engine) -> None:
     _create_index_if_missing(engine, "financeiro", "ix_financeiro_contrato_id", ["contrato_id"])
 
 
+def _migration_20260326_004_work_order_contract_type(engine: Engine) -> None:
+    _add_column_if_missing(
+        engine,
+        "ordens_servico",
+        "tipo_os",
+        "tipo_os VARCHAR(20) NOT NULL DEFAULT 'avulsa'",
+    )
+    _create_index_if_missing(engine, "ordens_servico", "ix_ordens_servico_tipo_os", ["tipo_os"])
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE ordens_servico SET tipo_os = 'avulsa' WHERE tipo_os IS NULL OR tipo_os = ''"))
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
@@ -494,6 +506,7 @@ MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260326_001_performance_indexes", _migration_20260326_001_performance_indexes),
     ("20260326_002_contracts_module", _migration_20260326_002_contracts_module),
     ("20260326_003_contract_billing_reporting", _migration_20260326_003_contract_billing_reporting),
+    ("20260326_004_work_order_contract_type", _migration_20260326_004_work_order_contract_type),
 ]
 
 

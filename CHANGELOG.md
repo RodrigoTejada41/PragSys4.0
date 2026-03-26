@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.1.3] - 2026-03-26
+
+- Ordens de servico passaram a suportar `tipo_os` com distincao explicita entre `avulsa` e `contrato`.
+- OS do tipo `contrato` continuam gerando agendamento e sincronizacao operacional normalmente, inclusive com Google Agenda quando habilitado.
+- OS do tipo `contrato` deixaram de gerar financeiro automatico mesmo quando `gerar_financeiro = true` for enviado por payload.
+- Backend passou a bloquear lancamentos financeiros e recibos vinculados diretamente a OS de contrato para evitar cobranca duplicada.
+- Interface web da OS ganhou seletor de tipo e aviso discreto informando que OS de contrato nao geram cobranca automatica.
+- Regressao adicionada para criacao, troca de tipo, bloqueio financeiro direto e bloqueio de recibo em OS de contrato.
+
 ## [4.1.2] - 2026-03-26
 
 - Modulo de contratos expandido com cobranca recorrente por contrato, incluindo `valor_mensal`, `tipo_cobranca`, `dia_vencimento` e chave para geracao automatica.

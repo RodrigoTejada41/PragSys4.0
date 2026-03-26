@@ -25,7 +25,7 @@ from app.application.services import (
     _money,
 )
 from app.core.exceptions import BusinessRuleViolation
-from app.domain.enums import ReceiptPaymentMethod
+from app.domain.enums import ReceiptPaymentMethod, WorkOrderType
 from app.infrastructure.models import FinanceEntry, Receipt, ReceiptHistory, User, WorkOrder
 
 
@@ -235,6 +235,8 @@ def _validate_receipt_payload(
     work_order = _get_work_order_or_fail(db, payload.os_id) if payload.os_id else None
     if work_order and work_order.cliente_id != customer.id:
         raise BusinessRuleViolation("A OS vinculada ao recibo deve pertencer ao mesmo cliente informado.")
+    if work_order and work_order.tipo_os == WorkOrderType.CONTRATO.value:
+        raise BusinessRuleViolation("OS vinculadas a contrato nao permitem recibos ou cobrancas avulsas.")
 
     description = _normalize_receipt_description(payload.descricao)
     if not skip_duplicate_check:

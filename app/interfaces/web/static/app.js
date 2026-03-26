@@ -1459,6 +1459,12 @@ function buildForms() {
                     <option value="cancelada">Cancelada</option>
                 </select>
             </label>
+            <label><span>Tipo da O.S.</span>
+                <select name="tipo_os">
+                    <option value="avulsa">Avulsa</option>
+                    <option value="contrato">Contrato</option>
+                </select>
+            </label>
             <label><span>Valor do servico</span><input name="valor_servico" type="number" step="0.01" min="0" value="0"></label>
             <label class="full-width"><span>Observacoes</span><textarea name="observacoes"></textarea></label>
         </div>
@@ -1629,6 +1635,7 @@ function buildForms() {
                 <option value="false">Nao</option>
             </select>
         </label>
+        <p id="work-order-contract-warning" class="origin-note hidden">Esta O.S. nao gerara cobranca automatica.</p>
         ${formActionHtml("workOrder", "Salvar ordem de servico", "Cancelar edicao")}
         <div id="work-order-save-feedback" class="work-order-save-feedback hidden"></div>
     `;
@@ -3503,9 +3510,12 @@ function clearWorkOrderForm() {
     document.getElementById("product-picker-default-quantity").value = "1";
     document.getElementById("product-picker-default-dilution").value = "";
     document.getElementById("work-order-photo-input").value = "";
+    form.querySelector('[name="tipo_os"]').value = "avulsa";
     form.querySelector('[name="gerar_agendamento"]').value = "true";
+    form.querySelector('[name="gerar_financeiro"]').value = "true";
     form.querySelector('[name="duracao_prevista_minutos"]').value = "60";
     form.querySelector('[name="sincronizar_google_agenda"]').value = state.settings?.system?.appointment_default_google_sync ? "true" : "false";
+    syncWorkOrderTypePresentation(form);
     renderWorkOrderSelectors();
     renderWorkOrderFormHeader();
 }
@@ -3530,10 +3540,11 @@ function getWorkOrderPayload(form) {
         observacoes: raw.observacoes || null,
         garantia_ate: raw.garantia_ate,
         status: raw.status,
+        tipo_os: raw.tipo_os || "avulsa",
         valor_servico: raw.valor_servico || "0",
         produtos,
         pragas_ids: [...state.workOrderPicker.selectedPestIds],
-        gerar_financeiro: raw.gerar_financeiro === "true",
+        gerar_financeiro: (raw.tipo_os || "avulsa") === "contrato" ? false : raw.gerar_financeiro === "true",
         gerar_agendamento: raw.gerar_agendamento === "true",
         tipo_servico_agendamento: raw.tipo_servico_agendamento || null,
         duracao_prevista_minutos: Number(raw.duracao_prevista_minutos || 60),
@@ -3679,6 +3690,9 @@ function bindWorkOrderSelectors() {
         if (state.workOrderWorkflow.lastSavedOrderId) {
             clearWorkOrderSaveFeedback();
         }
+    });
+    workOrderForm.querySelector('[name="tipo_os"]').addEventListener("change", () => {
+        syncWorkOrderTypePresentation(workOrderForm);
     });
     document.getElementById("product-picker-search").addEventListener("input", (event) => {
         state.workOrderPicker.productSearch = event.target.value.trim().toLowerCase();
@@ -3863,6 +3877,30 @@ function renderWorkOrderSelectors() {
     renderWorkOrderProductPicker();
     renderWorkOrderPestPicker();
     renderWorkOrderPhotoWorkspace();
+    syncWorkOrderTypePresentation(document.getElementById("work-order-form"));
+}
+
+function syncWorkOrderTypePresentation(form) {
+    if (!form) {
+        return;
+    }
+    const typeField = form.querySelector('[name="tipo_os"]');
+    const financeField = form.querySelector('[name="gerar_financeiro"]');
+    const warning = document.getElementById("work-order-contract-warning");
+    const isContract = typeField?.value === "contrato";
+    if (financeField) {
+        if (isContract) {
+            if (!financeField.disabled) {
+                financeField.dataset.previousValue = financeField.value || "true";
+            }
+            financeField.value = "false";
+            financeField.disabled = true;
+        } else {
+            financeField.disabled = false;
+            financeField.value = financeField.dataset.previousValue || financeField.value || "true";
+        }
+    }
+    warning?.classList.toggle("hidden", !isContract);
 }
 
 function setWorkOrderProductTab(tab) {
@@ -7866,6 +7904,7 @@ function fillWorkOrderForm(item) {
         hora_inicio: item.hora_inicio.slice(0, 5),
         hora_fim: item.hora_fim ? item.hora_fim.slice(0, 5) : "",
         status: item.status,
+        tipo_os: item.tipo_os || "avulsa",
         valor_servico: item.valor_servico,
         observacoes: item.observacoes || "",
         gerar_financeiro: state.finance.some((entry) => entry.os_id === item.id) ? "true" : "false",

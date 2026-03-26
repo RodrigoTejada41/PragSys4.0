@@ -254,6 +254,7 @@ class WorkOrder(Base):
     observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     garantia_ate: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="aberta")
+    tipo_os: Mapped[str] = mapped_column(String(20), nullable=False, default="avulsa", index=True)
     valor_servico: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
     empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(

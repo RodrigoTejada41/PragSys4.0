@@ -50,7 +50,7 @@ from app.application.schemas import (
 from app.application.settings_service import get_boolean_setting
 from app.core.exceptions import BusinessRuleViolation
 from app.core.security import create_access_token, get_password_hash, verify_password
-from app.domain.enums import FinanceStatus
+from app.domain.enums import FinanceStatus, WorkOrderType
 from app.infrastructure.models import (
     CashLedgerEntry,
     Contract,
@@ -348,7 +348,9 @@ def _validate_finance_payload(
         if payload.cliente_id and payload.cliente_id != contract.cliente_id:
             raise BusinessRuleViolation("O cliente do lancamento deve ser o mesmo do contrato vinculado.")
     if payload.os_id:
-        _get_work_order_or_fail(db, payload.os_id, current_user=current_user)
+        work_order = _get_work_order_or_fail(db, payload.os_id, current_user=current_user)
+        if work_order.tipo_os == WorkOrderType.CONTRATO.value:
+            raise BusinessRuleViolation("OS vinculadas a contrato nao permitem lancamentos financeiros avulsos.")
         if _enum_value(payload.tipo) != "receita":
             raise BusinessRuleViolation("Lancamentos vinculados a OS devem ser do tipo receita.")
     if payload.nfe_id:
@@ -1522,6 +1524,10 @@ def _validate_work_order_payload(
     }
 
 
+def _work_order_generates_finance(payload: WorkOrderCreate) -> bool:
+    return payload.gerar_financeiro and payload.tipo_os == WorkOrderType.AVULSA
+
+
 def _generate_work_order_number(db: Session, reference_date: Optional[date] = None) -> str:
     base_date = reference_date or date.today()
     prefix = f"OS-{base_date.year}-"
@@ -1635,6 +1641,7 @@ def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Op
         observacoes=normalized["observacoes"],
         garantia_ate=payload.garantia_ate,
         status=payload.status.value,
+        tipo_os=payload.tipo_os.value,
         valor_servico=payload.valor_servico,
         empresa_prestadora_id=customer.empresa_prestadora_id,
     )
@@ -1643,7 +1650,7 @@ def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Op
 
     _apply_work_order_products(db, work_order, payload.produtos, current_user=current_user)
     _sync_work_order_pests(db, work_order, payload.pragas_ids, current_user=current_user)
-    _sync_work_order_finance(db, work_order, customer, payload.gerar_financeiro, payload.valor_servico)
+    _sync_work_order_finance(db, work_order, customer, _work_order_generates_finance(payload), payload.valor_servico)
     appointment, appointment_created = sync_work_order_appointment(
         db,
         work_order,
@@ -1713,12 +1720,13 @@ def update_work_order(
     work_order.observacoes = normalized["observacoes"]
     work_order.garantia_ate = payload.garantia_ate
     work_order.status = payload.status.value
+    work_order.tipo_os = payload.tipo_os.value
     work_order.valor_servico = payload.valor_servico
     work_order.empresa_prestadora_id = customer.empresa_prestadora_id
 
     _apply_work_order_products(db, work_order, payload.produtos, current_user=current_user)
     _sync_work_order_pests(db, work_order, payload.pragas_ids, current_user=current_user)
-    _sync_work_order_finance(db, work_order, customer, payload.gerar_financeiro, payload.valor_servico)
+    _sync_work_order_finance(db, work_order, customer, _work_order_generates_finance(payload), payload.valor_servico)
     appointment, appointment_created = sync_work_order_appointment(
         db,
         work_order,

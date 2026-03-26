@@ -208,3 +208,44 @@ def test_receipt_pdf_and_controlled_delete_remove_financial_link(client, auth_he
     get_deleted_response = client.get(f"/api/v1/recibos/{receipt['id']}", headers=auth_headers)
     assert get_deleted_response.status_code == 400
     assert "Recibo nao encontrado" in get_deleted_response.json()["detail"]
+
+
+def test_receipt_rejects_contract_work_order_link(client, auth_headers):
+    customer = create_customer(client, auth_headers, "504")
+    technician = create_technician(client, auth_headers, "504")
+    work_order = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "numero": "OS-REC-CONTRATO-504",
+            "cliente_id": customer["id"],
+            "tecnico_id": technician["id"],
+            "data_execucao": "2026-03-23",
+            "hora_inicio": "08:00:00",
+            "local_execucao": "Sala contratual",
+            "garantia_ate": "2026-04-23",
+            "status": "aberta",
+            "tipo_os": "contrato",
+            "valor_servico": "280.00",
+            "produtos": [],
+            "pragas_ids": [],
+            "gerar_financeiro": False,
+            "gerar_agendamento": False,
+        },
+    ).json()
+
+    response = client.post(
+        "/api/v1/recibos",
+        headers=auth_headers,
+        json={
+            "cliente_id": customer["id"],
+            "os_id": work_order["id"],
+            "valor": "280.00",
+            "forma_pagamento": "pix",
+            "descricao": "Tentativa de cobranca avulsa",
+            "data_recebimento": "2026-03-23",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "contrato" in response.json()["detail"].lower()

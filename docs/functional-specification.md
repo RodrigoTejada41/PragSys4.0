@@ -76,7 +76,9 @@ O SysPragas e um sistema operacional para empresas de controle de pragas com foc
 - abertura, edicao, exclusao e conclusao;
 - associacao com cliente, tecnico, pragas e produtos;
 - baixa automatica de estoque;
-- geracao automatica de financeiro quando aplicavel;
+- classificacao explicita entre OS `avulsa` e OS `contrato`;
+- geracao automatica de financeiro apenas para OS `avulsa`, quando aplicavel;
+- manutencao do agendamento operacional para OS `avulsa` e `contrato`;
 - emissao de documentos PDF.
 
 ### Financeiro
@@ -100,7 +102,8 @@ O SysPragas e um sistema operacional para empresas de controle de pragas com foc
 - um usuario precisa estar ativo para autenticar;
 - o papel do usuario define os recursos acessiveis;
 - uma OS nao pode consumir estoque inexistente;
-- uma OS com valor pode gerar lancamento financeiro automaticamente;
+- uma OS `avulsa` com valor pode gerar lancamento financeiro automaticamente;
+- uma OS `contrato` nao pode gerar cobranca, conta a receber ou recibo vinculado;
 - exclusao de OS deve reconciliar estoque e financeiro vinculados;
 - lancamentos vinculados a OS nao devem ser alterados como se fossem manuais;
 - pagamentos parciais devem atualizar saldo e registrar movimento de caixa;

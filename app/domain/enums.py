@@ -41,6 +41,11 @@ class WorkOrderStatus(str, Enum):
     CANCELADA = "cancelada"
 
 
+class WorkOrderType(str, Enum):
+    AVULSA = "avulsa"
+    CONTRATO = "contrato"
+
+
 class LicenseStatus(str, Enum):
     ATIVA = "ativa"
     EXPIRADA = "expirada"

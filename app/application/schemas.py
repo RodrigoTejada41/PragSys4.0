@@ -20,6 +20,7 @@ from app.domain.enums import (
     ReceiptPaymentMethod,
     UserRole,
     WhatsAppDeliveryStatus,
+    WorkOrderType,
     WorkOrderStatus,
 )
 
@@ -618,6 +619,7 @@ class WorkOrderCreate(BaseModel):
     observacoes: Optional[str] = None
     garantia_ate: date
     status: WorkOrderStatus = WorkOrderStatus.ABERTA
+    tipo_os: WorkOrderType = WorkOrderType.AVULSA
     valor_servico: Decimal = Field(default=Decimal("0.00"), ge=0)
     produtos: List[WorkOrderProductCreate] = Field(default_factory=list)
     pragas_ids: List[int] = Field(default_factory=list)
@@ -649,6 +651,7 @@ class WorkOrderRead(BaseModel):
     observacoes: Optional[str] = None
     garantia_ate: date
     status: WorkOrderStatus
+    tipo_os: WorkOrderType
     valor_servico: Decimal
     cliente: CustomerRead
     tecnico: TechnicianRead
