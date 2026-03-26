@@ -158,3 +158,94 @@ def test_contract_maintenance_sends_notification_once_per_status(client, auth_he
     assert second_run.status_code == 200
     assert second_run.json()["email_sent"] == 0
     assert len(sent_messages) == 1
+
+
+def test_contract_maintenance_generates_recurring_charge_once_per_period(client, auth_headers):
+    customer_id = _create_customer(client, auth_headers, "14")
+    today = date.today()
+    response = client.post(
+        f"/api/v1/clientes/{customer_id}/contratos",
+        headers=auth_headers,
+        data={
+            "nome": "Contrato recorrente mensal",
+            "data_inicio": today.replace(day=1).isoformat(),
+            "data_vencimento": (today + timedelta(days=120)).isoformat(),
+            "valor_mensal": "250.00",
+            "tipo_cobranca": "mensal",
+            "dia_vencimento": str(min(today.day, 10)),
+            "gerar_cobranca_automatica": "true",
+            "observacoes": "",
+        },
+    )
+    assert response.status_code == 200
+    contract = response.json()
+    assert contract["gerar_cobranca_automatica"] is True
+
+    first_run = client.post("/api/v1/contratos/rotina/sincronizar", headers=auth_headers)
+    assert first_run.status_code == 200
+    assert first_run.json()["charges_generated"] == 1
+
+    finance = client.get("/api/v1/financeiro", headers=auth_headers)
+    assert finance.status_code == 200
+    charges = [item for item in finance.json() if item["contrato_id"] == contract["id"]]
+    assert len(charges) == 1
+    assert charges[0]["origem"] == "contrato"
+    assert charges[0]["valor"] == "250.00"
+
+    second_run = client.post("/api/v1/contratos/rotina/sincronizar", headers=auth_headers)
+    assert second_run.status_code == 200
+    assert second_run.json()["charges_generated"] == 0
+
+
+def test_contract_reports_filters_and_exports(client, auth_headers):
+    customer_a = _create_customer(client, auth_headers, "15")
+    customer_b = _create_customer(client, auth_headers, "16")
+    today = date.today()
+
+    response_a = client.post(
+        f"/api/v1/clientes/{customer_a}/contratos",
+        headers=auth_headers,
+        data={
+            "nome": "Contrato ativo com cobranca",
+            "data_inicio": today.isoformat(),
+            "data_vencimento": (today + timedelta(days=90)).isoformat(),
+            "valor_mensal": "180.00",
+            "tipo_cobranca": "mensal",
+            "dia_vencimento": "10",
+            "gerar_cobranca_automatica": "true",
+            "observacoes": "",
+        },
+    )
+    assert response_a.status_code == 200
+
+    response_b = client.post(
+        f"/api/v1/clientes/{customer_b}/contratos",
+        headers=auth_headers,
+        data={
+            "nome": "Contrato vencido sem cobranca",
+            "data_inicio": (today - timedelta(days=120)).isoformat(),
+            "data_vencimento": (today - timedelta(days=1)).isoformat(),
+            "valor_mensal": "0",
+            "tipo_cobranca": "personalizado",
+            "gerar_cobranca_automatica": "false",
+            "observacoes": "",
+        },
+    )
+    assert response_b.status_code == 200
+
+    report = client.get("/api/v1/contratos/relatorios?cliente_id=%s&cobranca_ativa=true" % customer_a, headers=auth_headers)
+    assert report.status_code == 200
+    payload = report.json()
+    assert payload["resumo"]["total_contratos"] == 1
+    assert payload["itens"][0]["cliente_id"] == customer_a
+    assert payload["itens"][0]["gerar_cobranca_automatica"] is True
+
+    xlsx_report = client.get("/api/v1/contratos/relatorios.xlsx", headers=auth_headers)
+    assert xlsx_report.status_code == 200
+    assert xlsx_report.headers["content-type"].startswith("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    assert xlsx_report.content.startswith(b"PK")
+
+    pdf_report = client.get("/api/v1/contratos/relatorios.pdf", headers=auth_headers)
+    assert pdf_report.status_code == 200
+    assert pdf_report.headers["content-type"].startswith("application/pdf")
+    assert pdf_report.content.startswith(b"%PDF")

@@ -53,6 +53,7 @@ from app.core.security import create_access_token, get_password_hash, verify_pas
 from app.domain.enums import FinanceStatus
 from app.infrastructure.models import (
     CashLedgerEntry,
+    Contract,
     Customer,
     FinanceEntry,
     License,
@@ -337,6 +338,15 @@ def _validate_finance_payload(
 ) -> None:
     if payload.cliente_id:
         _get_customer_or_fail(db, payload.cliente_id, current_user=current_user)
+    contract = None
+    if payload.contrato_id:
+        contract = _apply_company_scope(db.query(Contract), Contract, current_user).filter(Contract.id == payload.contrato_id).first()
+        if not contract:
+            raise BusinessRuleViolation("Contrato informado nao existe.")
+        if _enum_value(payload.tipo) != "receita":
+            raise BusinessRuleViolation("Lancamentos vinculados a contrato devem ser do tipo receita.")
+        if payload.cliente_id and payload.cliente_id != contract.cliente_id:
+            raise BusinessRuleViolation("O cliente do lancamento deve ser o mesmo do contrato vinculado.")
     if payload.os_id:
         _get_work_order_or_fail(db, payload.os_id, current_user=current_user)
         if _enum_value(payload.tipo) != "receita":
@@ -349,6 +359,10 @@ def _validate_finance_payload(
             raise BusinessRuleViolation("Lancamentos vinculados a NF-e devem ser do tipo receita.")
         if payload.cliente_id and payload.cliente_id != invoice.cliente_id:
             raise BusinessRuleViolation("O cliente do lancamento financeiro deve ser o mesmo da NF-e vinculada.")
+    if payload.contrato_id and payload.os_id:
+        raise BusinessRuleViolation("Um mesmo lancamento nao pode ser vinculado simultaneamente a contrato e OS.")
+    if payload.contrato_id and payload.nfe_id:
+        raise BusinessRuleViolation("Um mesmo lancamento nao pode ser vinculado simultaneamente a contrato e NF-e.")
     if payload.parcela_atual > payload.total_parcelas:
         raise BusinessRuleViolation("A parcela atual nao pode ser maior que o total de parcelas.")
     if current_entry and _money(payload.valor) < _money(current_entry.valor_pago):
@@ -1300,6 +1314,7 @@ def create_finance_entry(db: Session, payload: FinanceEntryCreate, current_user:
             total_parcelas=payload.total_parcelas,
             observacoes=payload.observacoes,
             cliente_id=payload.cliente_id,
+            contrato_id=payload.contrato_id,
             os_id=payload.os_id,
             nfe_id=payload.nfe_id,
             empresa_prestadora_id=_get_new_record_company_id(current_user),
@@ -1361,6 +1376,8 @@ def update_finance_entry(
         raise BusinessRuleViolation("Lancamentos gerados por recibo devem ser alterados pelo proprio recibo.")
     if entry.os_id:
         raise BusinessRuleViolation("Lancamentos gerados por OS devem ser alterados pela propria ordem de servico.")
+    if entry.contrato_id:
+        raise BusinessRuleViolation("Lancamentos gerados por contrato devem ser alterados pelo proprio contrato.")
     if entry.nfe_id:
         raise BusinessRuleViolation("Lancamentos gerados por NF-e devem ser alterados pela propria nota fiscal.")
     _validate_finance_payload(db, payload, current_entry=entry, current_user=current_user)
@@ -1396,6 +1413,8 @@ def delete_finance_entry(db: Session, finance_entry_id: int, current_user: Optio
         raise BusinessRuleViolation("Lancamentos gerados por recibo devem ser excluidos pelo proprio recibo.")
     if entry.os_id:
         raise BusinessRuleViolation("Lancamentos gerados por OS devem ser excluidos pela propria ordem de servico.")
+    if entry.contrato_id:
+        raise BusinessRuleViolation("Lancamentos gerados por contrato devem ser excluidos pelo proprio contrato.")
     if entry.nfe_id:
         raise BusinessRuleViolation("Lancamentos gerados por NF-e devem ser excluidos pela propria nota fiscal.")
     if entry.status == FinanceStatus.PAGO.value or Decimal(entry.valor_pago) > 0:

@@ -1,3 +1,4 @@
+from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
@@ -7,15 +8,25 @@ from sqlalchemy.orm import Session
 from app.application.contracts_service import (
     create_contract,
     delete_contract,
+    export_contract_report_pdf,
+    export_contract_report_xlsx,
     get_contract,
     get_contract_dashboard,
     get_contract_file_content,
+    get_contract_report,
     list_contracts,
     list_customer_contracts,
     run_contract_maintenance,
     update_contract,
 )
-from app.application.schemas import ContractCreate, ContractDashboardRead, ContractMaintenanceRead, ContractRead, ContractUpdate
+from app.application.schemas import (
+    ContractCreate,
+    ContractDashboardRead,
+    ContractMaintenanceRead,
+    ContractRead,
+    ContractReportRead,
+    ContractUpdate,
+)
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
 from app.interfaces.api.deps import require_roles
@@ -27,12 +38,20 @@ def _contract_create_from_form(
     nome: str = Form(...),
     data_inicio: str = Form(...),
     data_vencimento: str = Form(...),
+    valor_mensal: str = Form(default="0"),
+    tipo_cobranca: str = Form(default="mensal"),
+    dia_vencimento: Optional[int] = Form(default=None),
+    gerar_cobranca_automatica: bool = Form(default=False),
     observacoes: Optional[str] = Form(default=None),
 ) -> ContractCreate:
     return ContractCreate(
         nome=nome,
         data_inicio=data_inicio,
         data_vencimento=data_vencimento,
+        valor_mensal=valor_mensal,
+        tipo_cobranca=tipo_cobranca,
+        dia_vencimento=dia_vencimento,
+        gerar_cobranca_automatica=gerar_cobranca_automatica,
         observacoes=observacoes,
     )
 
@@ -41,12 +60,20 @@ def _contract_update_from_form(
     nome: str = Form(...),
     data_inicio: str = Form(...),
     data_vencimento: str = Form(...),
+    valor_mensal: str = Form(default="0"),
+    tipo_cobranca: str = Form(default="mensal"),
+    dia_vencimento: Optional[int] = Form(default=None),
+    gerar_cobranca_automatica: bool = Form(default=False),
     observacoes: Optional[str] = Form(default=None),
 ) -> ContractUpdate:
     return ContractUpdate(
         nome=nome,
         data_inicio=data_inicio,
         data_vencimento=data_vencimento,
+        valor_mensal=valor_mensal,
+        tipo_cobranca=tipo_cobranca,
+        dia_vencimento=dia_vencimento,
+        gerar_cobranca_automatica=gerar_cobranca_automatica,
         observacoes=observacoes,
     )
 
@@ -89,6 +116,94 @@ def get_contracts(
     current_user: User = Depends(require_roles(["master", "admin", "operador"])),
 ) -> List[ContractRead]:
     return list_contracts(db, current_user=current_user)
+
+
+@router.get(
+    "/contratos/relatorios",
+    response_model=ContractReportRead,
+)
+def get_contracts_report(
+    cliente_id: Optional[int] = None,
+    status: Optional[str] = None,
+    data_inicio_de: Optional[date] = None,
+    data_inicio_ate: Optional[date] = None,
+    data_vencimento_de: Optional[date] = None,
+    data_vencimento_ate: Optional[date] = None,
+    cobranca_ativa: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin"])),
+) -> ContractReportRead:
+    return get_contract_report(
+        db,
+        cliente_id=cliente_id,
+        status=status,
+        data_inicio_de=data_inicio_de,
+        data_inicio_ate=data_inicio_ate,
+        data_vencimento_de=data_vencimento_de,
+        data_vencimento_ate=data_vencimento_ate,
+        cobranca_ativa=cobranca_ativa,
+        current_user=current_user,
+    )
+
+
+@router.get("/contratos/relatorios.xlsx")
+def download_contracts_report_xlsx(
+    cliente_id: Optional[int] = None,
+    status: Optional[str] = None,
+    data_inicio_de: Optional[date] = None,
+    data_inicio_ate: Optional[date] = None,
+    data_vencimento_de: Optional[date] = None,
+    data_vencimento_ate: Optional[date] = None,
+    cobranca_ativa: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin"])),
+) -> Response:
+    filename, content = export_contract_report_xlsx(
+        db,
+        cliente_id=cliente_id,
+        status=status,
+        data_inicio_de=data_inicio_de,
+        data_inicio_ate=data_inicio_ate,
+        data_vencimento_de=data_vencimento_de,
+        data_vencimento_ate=data_vencimento_ate,
+        cobranca_ativa=cobranca_ativa,
+        current_user=current_user,
+    )
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/contratos/relatorios.pdf")
+def download_contracts_report_pdf(
+    cliente_id: Optional[int] = None,
+    status: Optional[str] = None,
+    data_inicio_de: Optional[date] = None,
+    data_inicio_ate: Optional[date] = None,
+    data_vencimento_de: Optional[date] = None,
+    data_vencimento_ate: Optional[date] = None,
+    cobranca_ativa: Optional[bool] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin"])),
+) -> Response:
+    filename, content = export_contract_report_pdf(
+        db,
+        cliente_id=cliente_id,
+        status=status,
+        data_inicio_de=data_inicio_de,
+        data_inicio_ate=data_inicio_ate,
+        data_vencimento_de=data_vencimento_de,
+        data_vencimento_ate=data_vencimento_ate,
+        cobranca_ativa=cobranca_ativa,
+        current_user=current_user,
+    )
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get(

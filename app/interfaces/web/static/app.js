@@ -4,6 +4,7 @@ const state = {
     customers: [],
     contracts: [],
     contractDashboard: null,
+    contractReport: null,
     products: [],
     nfeInvoices: [],
     simplesConfigs: [],
@@ -99,6 +100,13 @@ const state = {
         nfeSearch: "",
         nfeStatus: "todos",
         nfeCustomer: "",
+        contractReportCustomer: "",
+        contractReportStatus: "todos",
+        contractReportStartDate: "",
+        contractReportEndDate: "",
+        contractReportDueStartDate: "",
+        contractReportDueEndDate: "",
+        contractReportBillingActive: "todos",
         simplesReferenceMonth: new Date().toISOString().slice(0, 7),
     },
 };
@@ -423,6 +431,33 @@ function openFinanceView(screen = "lancamentos") {
     switchView(`financeiro-${screen}`);
 }
 
+function buildContractReportUrl(basePath = "/api/v1/contratos/relatorios") {
+    const params = new URLSearchParams();
+    if (state.filters.contractReportCustomer) {
+        params.set("cliente_id", state.filters.contractReportCustomer);
+    }
+    if (state.filters.contractReportStatus && state.filters.contractReportStatus !== "todos") {
+        params.set("status", state.filters.contractReportStatus);
+    }
+    if (state.filters.contractReportStartDate) {
+        params.set("data_inicio_de", state.filters.contractReportStartDate);
+    }
+    if (state.filters.contractReportEndDate) {
+        params.set("data_inicio_ate", state.filters.contractReportEndDate);
+    }
+    if (state.filters.contractReportDueStartDate) {
+        params.set("data_vencimento_de", state.filters.contractReportDueStartDate);
+    }
+    if (state.filters.contractReportDueEndDate) {
+        params.set("data_vencimento_ate", state.filters.contractReportDueEndDate);
+    }
+    if (state.filters.contractReportBillingActive === "true" || state.filters.contractReportBillingActive === "false") {
+        params.set("cobranca_ativa", state.filters.contractReportBillingActive);
+    }
+    const query = params.toString();
+    return query ? `${basePath}?${query}` : basePath;
+}
+
 function resolveAppointmentScreenFromView(view) {
     const rawView = String(view || "");
     if (!rawView.startsWith("agenda-")) {
@@ -565,6 +600,7 @@ async function loadAllData() {
         basePromises.push(apiFetch("/api/v1/financeiro"));
         basePromises.push(apiFetch("/api/v1/financeiro/caixa"));
         basePromises.push(apiFetch("/api/v1/financeiro/dashboard"));
+        basePromises.push(apiFetch(buildContractReportUrl()));
         basePromises.push(apiFetch("/api/v1/recibos"));
         basePromises.push(apiFetch("/api/v1/nfe"));
         basePromises.push(apiFetch("/api/v1/nfe/sefaz/readiness"));
@@ -581,14 +617,15 @@ async function loadAllData() {
     const finance = canAccessFinance ? results[11] : [];
     const cashLedger = canAccessFinance ? results[12] : [];
     const financeDashboard = canAccessFinance ? results[13] : null;
-    const receipts = canAccessFinance ? results[14] : [];
-    const nfeInvoices = canAccessFinance ? results[15] : [];
-    const sefazReadiness = canAccessFinance ? results[16] : null;
-    const simplesConfigs = canAccessFinance ? results[17] : [];
-    const cashFlowSummary = canAccessFinance ? results[18] : null;
-    const simplesSummary = canAccessFinance ? results[19] : null;
-    const settingsState = canAccessSettings ? results[20] : null;
-    const whatsappConfig = canAccessSettings ? results[21] : null;
+    const contractReport = canAccessFinance ? results[14] : null;
+    const receipts = canAccessFinance ? results[15] : [];
+    const nfeInvoices = canAccessFinance ? results[16] : [];
+    const sefazReadiness = canAccessFinance ? results[17] : null;
+    const simplesConfigs = canAccessFinance ? results[18] : [];
+    const cashFlowSummary = canAccessFinance ? results[19] : null;
+    const simplesSummary = canAccessFinance ? results[20] : null;
+    const settingsState = canAccessSettings ? results[21] : null;
+    const whatsappConfig = canAccessSettings ? results[22] : null;
 
     state.customers = customers;
     state.contracts = contracts;
@@ -604,6 +641,7 @@ async function loadAllData() {
     state.finance = finance;
     state.cashLedger = cashLedger;
     state.financeDashboard = financeDashboard;
+    state.contractReport = contractReport;
     state.receipts = receipts;
     state.nfeInvoices = nfeInvoices;
     state.sefazReadiness = sefazReadiness;
@@ -1123,13 +1161,28 @@ function buildForms() {
     document.getElementById("contract-form").innerHTML = `
         <div class="section-heading compact">
             <h3>Novo contrato</h3>
-            <p>Cadastre descricao, periodo, observacoes e o arquivo vinculado ao cliente selecionado.</p>
+            <p>Cadastre descricao, periodo, cobranca recorrente, observacoes e o arquivo vinculado ao cliente selecionado.</p>
         </div>
         <div class="form-grid">
             <label class="full-width"><span>Cliente selecionado</span><input name="cliente_nome" readonly placeholder="Selecione um cliente na tabela acima"></label>
             <label class="full-width"><span>Nome ou descricao do contrato</span><input name="nome" required></label>
             <label><span>Data de inicio</span><input name="data_inicio" type="date" required></label>
             <label><span>Data de vencimento</span><input name="data_vencimento" type="date" required></label>
+            <label><span>Valor mensal</span><input name="valor_mensal" type="number" min="0" step="0.01" value="0"></label>
+            <label><span>Tipo de cobranca</span>
+                <select name="tipo_cobranca">
+                    <option value="mensal">Mensal</option>
+                    <option value="anual">Anual</option>
+                    <option value="personalizado">Personalizado</option>
+                </select>
+            </label>
+            <label><span>Dia de vencimento</span><input name="dia_vencimento" type="number" min="1" max="31" placeholder="Ex: 10"></label>
+            <label><span>Gerar cobranca automatica</span>
+                <select name="gerar_cobranca_automatica">
+                    <option value="false">Nao</option>
+                    <option value="true">Sim</option>
+                </select>
+            </label>
             <label class="full-width"><span>Arquivo do contrato</span><input name="arquivo" type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.txt"></label>
             <label class="full-width"><span>Observacoes</span><textarea name="observacoes" rows="4" placeholder="Observacoes internas ou contexto da vigencia"></textarea></label>
         </div>
@@ -2502,6 +2555,10 @@ function bindCrudForms() {
         formData.append("nome", form.querySelector('[name="nome"]').value);
         formData.append("data_inicio", form.querySelector('[name="data_inicio"]').value);
         formData.append("data_vencimento", form.querySelector('[name="data_vencimento"]').value);
+        formData.append("valor_mensal", form.querySelector('[name="valor_mensal"]').value || "0");
+        formData.append("tipo_cobranca", form.querySelector('[name="tipo_cobranca"]').value || "mensal");
+        formData.append("dia_vencimento", form.querySelector('[name="dia_vencimento"]').value || "");
+        formData.append("gerar_cobranca_automatica", form.querySelector('[name="gerar_cobranca_automatica"]').value || "false");
         formData.append("observacoes", form.querySelector('[name="observacoes"]').value || "");
         const fileField = form.querySelector('[name="arquivo"]');
         if (fileField?.files?.[0]) {
@@ -5519,6 +5576,7 @@ function renderCustomerContractsWorkspace() {
     const overdueCount = items.filter((item) => item.status === "vencido").length;
     const dueSoonCount = items.filter((item) => item.status === "a_vencer").length;
     const activeCount = items.filter((item) => item.status === "ativo").length;
+    const autoBillingCount = items.filter((item) => item.gerar_cobranca_automatica).length;
     headingCopy.textContent = `Cliente selecionado: ${customer.razao_social}. Cadastre novos contratos ou acompanhe os existentes abaixo.`;
     fillForm(form, { cliente_nome: customer.razao_social });
 
@@ -5544,16 +5602,23 @@ function renderCustomerContractsWorkspace() {
                 <strong>${overdueCount}</strong>
                 <p class="origin-note">Exigem renovacao ou regularizacao.</p>
             </article>
+            <article class="contract-summary-card">
+                <span>Cobranca automatica</span>
+                <strong>${autoBillingCount}</strong>
+                <p class="origin-note">Contratos com integracao recorrente no financeiro.</p>
+            </article>
         </div>
     `;
 
     setTableContent(
         "customer-contracts-table",
-        ["Contrato", "Inicio", "Vencimento", "Status", "Arquivo", "Acoes"],
+        ["Contrato", "Inicio", "Vencimento", "Cobranca", "Status", "Financeiro", "Arquivo", "Acoes"],
         items.map((item) => [
             `<div>${escapeHtml(item.nome)}<div class="origin-note">${escapeHtml(item.observacoes || "")}</div></div>`,
             formatDate(item.data_inicio),
             formatDate(item.data_vencimento),
+            `<div>${escapeHtml(item.tipo_cobranca.replaceAll("_", " "))}<div class="origin-note">${item.gerar_cobranca_automatica ? `${formatCurrency(item.valor_mensal || 0)} | dia ${item.dia_vencimento || "-"}` : "Sem cobranca automatica"}</div></div>`,
+            `<div>${contractStatusBadge(item.status)}<div class="origin-note">${item.quantidade_cobrancas || 0} cobranca(s) | ${item.quantidade_cobrancas_vencidas || 0} vencida(s)</div></div>`,
             contractStatusBadge(item.status),
             item.arquivo_nome_original ? escapeHtml(item.arquivo_nome_original) : "-",
             actionButtons(
@@ -5566,7 +5631,7 @@ function renderCustomerContractsWorkspace() {
             ),
         ]),
         "Nenhum contrato cadastrado para este cliente.",
-        { nonSortableTargets: [5] },
+        { nonSortableTargets: [7] },
     );
     bindEntityActions("contract");
     bindContractFileActions();
@@ -6411,6 +6476,7 @@ function renderFinance() {
     renderReceiptsTable();
     renderNfeInvoices();
     renderFinanceReportsIssuedInvoices();
+    renderContractReportsPanel();
     renderSimplesNationalPanel();
     renderCashLedger();
     bindEntityActions("finance");
@@ -6422,6 +6488,7 @@ function renderFinance() {
     bindFinanceFilters();
     bindReceiptFilters();
     bindNfeFilters();
+    bindContractReportActions();
     bindSimplesSummaryRefresh();
     bindSimplesConfigActions();
     setFinanceWorkspaceView(state.financeScreen || "lancamentos");
@@ -6536,10 +6603,12 @@ function renderFinanceEntriesTable() {
                 ? `NF-e ${item.nfe_id}`
                 : item.recibo_id
                     ? `Recibo ${item.recibo_id}`
+                : item.contrato_id
+                    ? `Contrato ${item.contrato_id}`
                 : item.os_id
                     ? `OS ${item.os_id}`
                     : item.origem;
-            const actions = item.os_id || item.nfe_id
+            const actions = item.os_id || item.nfe_id || item.contrato_id
                 ? `<div class="toolbar compact-toolbar">
                     <div class="toolbar-group">
                         <span class="origin-note">Gerado por ${escapeHtml(originLabel)}</span>
@@ -6559,6 +6628,8 @@ function renderFinanceEntriesTable() {
                 `<div>${escapeHtml(item.descricao)}${parcelText ? `<div class="origin-note">Parcela ${escapeHtml(parcelText)}</div>` : ""}</div>`,
                 item.nfe_id
                     ? `<div>${escapeHtml(originLabel)}<div class="origin-note">${escapeHtml(item.categoria || "Conta a receber")}</div></div>`
+                    : item.contrato_id
+                        ? `<div>${escapeHtml(originLabel)}<div class="origin-note">${escapeHtml(item.categoria || "Contrato recorrente")}</div></div>`
                     : item.os_id
                         ? `<div>${escapeHtml(originLabel)}<div class="origin-note">${escapeHtml(item.categoria || "Servico")}</div></div>`
                         : item.categoria || item.fornecedor_nome || "-",
@@ -6682,6 +6753,157 @@ function renderFinanceReportsIssuedInvoices() {
         "Nenhuma NF-e emitida encontrada para relatorio.",
         { pageLength: 6 },
     );
+}
+
+function renderContractReportsPanel() {
+    const target = document.getElementById("contract-reports-panel");
+    if (!target) {
+        return;
+    }
+    const report = state.contractReport || {
+        resumo: {
+            total_contratos: 0,
+            ativos: 0,
+            vencidos: 0,
+            a_vencer: 0,
+            com_cobranca_ativa: 0,
+            valor_total_mensal_previsto: 0,
+        },
+        itens: [],
+    };
+
+    target.innerHTML = `
+        <div class="section-heading compact">
+            <h4>Relatorios de contratos</h4>
+            <p>Filtros avancados, exportacao e integracao com cobrancas recorrentes.</p>
+        </div>
+        <div class="finance-filter-grid">
+            <label>
+                <span>Cliente</span>
+                <select id="contract-report-customer-filter">
+                    <option value="">Todos os clientes</option>
+                    ${state.customers.map((item) => `<option value="${item.id}" ${String(item.id) === String(state.filters.contractReportCustomer || "") ? "selected" : ""}>${escapeHtml(item.razao_social)}</option>`).join("")}
+                </select>
+            </label>
+            <label>
+                <span>Status</span>
+                <select id="contract-report-status-filter">
+                    <option value="todos" ${state.filters.contractReportStatus === "todos" ? "selected" : ""}>Todos</option>
+                    <option value="ativo" ${state.filters.contractReportStatus === "ativo" ? "selected" : ""}>Ativo</option>
+                    <option value="a_vencer" ${state.filters.contractReportStatus === "a_vencer" ? "selected" : ""}>A vencer</option>
+                    <option value="vencido" ${state.filters.contractReportStatus === "vencido" ? "selected" : ""}>Vencido</option>
+                </select>
+            </label>
+            <label>
+                <span>Inicio de</span>
+                <input id="contract-report-start-filter" type="date" value="${escapeHtml(state.filters.contractReportStartDate || "")}">
+            </label>
+            <label>
+                <span>Inicio ate</span>
+                <input id="contract-report-end-filter" type="date" value="${escapeHtml(state.filters.contractReportEndDate || "")}">
+            </label>
+            <label>
+                <span>Vencimento de</span>
+                <input id="contract-report-due-start-filter" type="date" value="${escapeHtml(state.filters.contractReportDueStartDate || "")}">
+            </label>
+            <label>
+                <span>Vencimento ate</span>
+                <input id="contract-report-due-end-filter" type="date" value="${escapeHtml(state.filters.contractReportDueEndDate || "")}">
+            </label>
+            <label>
+                <span>Cobranca ativa</span>
+                <select id="contract-report-billing-filter">
+                    <option value="todos" ${state.filters.contractReportBillingActive === "todos" ? "selected" : ""}>Todos</option>
+                    <option value="true" ${state.filters.contractReportBillingActive === "true" ? "selected" : ""}>Sim</option>
+                    <option value="false" ${state.filters.contractReportBillingActive === "false" ? "selected" : ""}>Nao</option>
+                </select>
+            </label>
+            <div class="finance-filter-actions">
+                <button type="button" class="btn btn-success" id="contract-report-refresh">Gerar relatorio</button>
+                <button type="button" class="btn btn-default ghost-button" id="contract-report-export-xlsx">Exportar Excel</button>
+                <button type="button" class="btn btn-default ghost-button" id="contract-report-export-pdf">Exportar PDF</button>
+            </div>
+        </div>
+        <div class="finance-insight-grid compact">
+            <article class="finance-insight-card"><span>Total contratos</span><strong>${report.resumo.total_contratos || 0}</strong></article>
+            <article class="finance-insight-card"><span>Ativos</span><strong>${report.resumo.ativos || 0}</strong></article>
+            <article class="finance-insight-card is-alert"><span>A vencer</span><strong>${report.resumo.a_vencer || 0}</strong></article>
+            <article class="finance-insight-card is-alert"><span>Vencidos</span><strong>${report.resumo.vencidos || 0}</strong></article>
+            <article class="finance-insight-card"><span>Cobranca ativa</span><strong>${report.resumo.com_cobranca_ativa || 0}</strong></article>
+            <article class="finance-insight-card"><span>Valor mensal previsto</span><strong>${formatCurrency(report.resumo.valor_total_mensal_previsto || 0)}</strong></article>
+        </div>
+        <div id="contract-reports-table"></div>
+    `;
+
+    setTableContent(
+        "contract-reports-table",
+        ["Cliente", "Contrato", "Inicio", "Vencimento", "Status", "Valor", "Ultima cobranca", "Financeiro"],
+        (report.itens || []).map((item) => [
+            item.cliente_nome,
+            `<div>${escapeHtml(item.nome)}<div class="origin-note">${escapeHtml(item.tipo_cobranca)} | ${item.gerar_cobranca_automatica ? "Cobranca automatica" : "Manual"}</div></div>`,
+            formatDate(item.data_inicio),
+            formatDate(item.data_vencimento),
+            contractStatusBadge(item.status),
+            formatCurrency(item.valor_mensal || 0),
+            item.ultima_cobranca_gerada_em ? formatDate(item.ultima_cobranca_gerada_em) : "-",
+            `<div>${escapeHtml(item.situacao_financeira)}<div class="origin-note">${item.ultimo_lancamento_id ? `Lancamento #${item.ultimo_lancamento_id}` : "Sem lancamento"}</div></div>`,
+        ]),
+        "Nenhum contrato encontrado para os filtros informados.",
+        { pageLength: 6 },
+    );
+}
+
+function bindContractReportActions() {
+    const refreshButton = document.getElementById("contract-report-refresh");
+    if (refreshButton && refreshButton.dataset.bound !== "true") {
+        refreshButton.dataset.bound = "true";
+        refreshButton.addEventListener("click", refreshContractReport);
+    }
+
+    const exportXlsxButton = document.getElementById("contract-report-export-xlsx");
+    if (exportXlsxButton && exportXlsxButton.dataset.bound !== "true") {
+        exportXlsxButton.dataset.bound = "true";
+        exportXlsxButton.addEventListener("click", async () => {
+            try {
+                const blob = await apiFetch(buildContractReportUrl("/api/v1/contratos/relatorios.xlsx"));
+                downloadBlob(blob, `relatorio_contratos_${todayIso().replaceAll("-", "")}.xlsx`);
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    }
+
+    const exportPdfButton = document.getElementById("contract-report-export-pdf");
+    if (exportPdfButton && exportPdfButton.dataset.bound !== "true") {
+        exportPdfButton.dataset.bound = "true";
+        exportPdfButton.addEventListener("click", async () => {
+            try {
+                const blob = await apiFetch(buildContractReportUrl("/api/v1/contratos/relatorios.pdf"));
+                openBlobPreview(blob, "Relatorio de Contratos");
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    }
+}
+
+async function refreshContractReport() {
+    state.filters.contractReportCustomer = document.getElementById("contract-report-customer-filter")?.value || "";
+    state.filters.contractReportStatus = document.getElementById("contract-report-status-filter")?.value || "todos";
+    state.filters.contractReportStartDate = document.getElementById("contract-report-start-filter")?.value || "";
+    state.filters.contractReportEndDate = document.getElementById("contract-report-end-filter")?.value || "";
+    state.filters.contractReportDueStartDate = document.getElementById("contract-report-due-start-filter")?.value || "";
+    state.filters.contractReportDueEndDate = document.getElementById("contract-report-due-end-filter")?.value || "";
+    state.filters.contractReportBillingActive = document.getElementById("contract-report-billing-filter")?.value || "todos";
+
+    try {
+        state.contractReport = await apiFetch(buildContractReportUrl());
+        renderContractReportsPanel();
+        bindContractReportActions();
+        toast("Relatorio de contratos atualizado.");
+    } catch (error) {
+        toast(error.message);
+    }
 }
 
 function bindReceiptActions() {
@@ -7416,6 +7638,10 @@ function startEditing(kind, id) {
             nome: item.nome,
             data_inicio: item.data_inicio,
             data_vencimento: item.data_vencimento,
+            valor_mensal: item.valor_mensal ?? 0,
+            tipo_cobranca: item.tipo_cobranca || "mensal",
+            dia_vencimento: item.dia_vencimento || "",
+            gerar_cobranca_automatica: String(Boolean(item.gerar_cobranca_automatica)),
             observacoes: item.observacoes || "",
         });
         const fileNote = document.getElementById("contract-file-note");
@@ -7518,7 +7744,13 @@ function resetFormMode(kind) {
     note.textContent = "";
     if (kind === "contract") {
         const customer = getEntityByKind("customer", Number(state.contractWorkspace.customerId || 0));
-        fillForm(form, { cliente_nome: customer?.razao_social || "" });
+        fillForm(form, {
+            cliente_nome: customer?.razao_social || "",
+            valor_mensal: 0,
+            tipo_cobranca: "mensal",
+            dia_vencimento: "",
+            gerar_cobranca_automatica: "false",
+        });
         const fileNote = document.getElementById("contract-file-note");
         if (fileNote) {
             fileNote.textContent = "Anexe PDF, DOC, DOCX, imagem ou TXT ate 10 MB.";

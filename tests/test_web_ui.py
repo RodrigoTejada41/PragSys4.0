@@ -31,6 +31,9 @@ def test_static_app_js_includes_appointment_availability_feedback(client):
     assert "Autenticacao por QR Code" in response.text
     assert "Selecione um cliente antes de salvar um contrato." in response.text
     assert "Contrato salvo com sucesso." in response.text
+    assert "Relatorios de contratos" in response.text
+    assert "Gerar cobranca automatica" in response.text
+    assert "Exportar Excel" in response.text
     assert "Diretorio de armazenamento" in response.text
     assert "Enviar e-mail automaticamente" in response.text
     assert "Reabrir agendamento" in response.text

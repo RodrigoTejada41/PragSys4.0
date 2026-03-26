@@ -43,11 +43,17 @@ O SysPragas e um sistema operacional para empresas de controle de pragas com foc
 
 - multiplos contratos por cliente;
 - cadastro de periodo, descricao e observacoes;
+- configuracao de cobranca por contrato:
+  - valor mensal;
+  - tipo de cobranca;
+  - dia de vencimento;
+  - geracao automatica;
 - upload e substituicao de arquivo contratual;
 - status automatico por vencimento;
 - alertas visuais de contratos a vencer e vencidos;
 - notificacao por e-mail com base em configuracao do sistema;
-- rotina automatica para recalculo diario do status.
+- rotina automatica para recalculo diario do status;
+- relatorios sinteticos e analiticos com exportacao em `.xlsx` e `.pdf`.
 
 ### Produtos
 
@@ -77,6 +83,7 @@ O SysPragas e um sistema operacional para empresas de controle de pragas com foc
 
 - CRUD de lancamentos manuais;
 - conciliacao com ordens de servico;
+- conciliacao com contratos recorrentes;
 - pagamentos parciais;
 - fluxo de caixa derivado dos pagamentos;
 - status pendente, pago e atrasado.
@@ -100,8 +107,11 @@ O SysPragas e um sistema operacional para empresas de controle de pragas com foc
 - importacoes de XML devem rejeitar nota duplicada;
 - dados de CNPJ e CEP devem ser normalizados antes de persistir.
 - contratos nao podem ter vencimento anterior ao inicio.
+- contratos com cobranca automatica exigem valor maior que zero.
 - contratos devem refletir status automaticamente sem edicao manual.
 - notificacoes contratuais nao devem duplicar envio para o mesmo status.
+- cobrancas de contrato nao podem ser duplicadas para a mesma competencia.
+- contratos com cobranca vinculada nao devem ser excluidos para preservar o historico financeiro.
 
 ## Requisitos de qualidade
 

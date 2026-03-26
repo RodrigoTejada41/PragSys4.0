@@ -453,6 +453,39 @@ def _migration_20260326_002_contracts_module(engine: Engine) -> None:
     _create_index_if_missing(engine, "contratos", "ix_contratos_status_vencimento", ["status", "data_vencimento"])
 
 
+def _migration_20260326_003_contract_billing_reporting(engine: Engine) -> None:
+    _add_column_if_missing(engine, "contratos", "valor_mensal", "valor_mensal NUMERIC NOT NULL DEFAULT 0")
+    _add_column_if_missing(
+        engine,
+        "contratos",
+        "tipo_cobranca",
+        "tipo_cobranca VARCHAR(20) NOT NULL DEFAULT 'mensal'",
+    )
+    _add_column_if_missing(engine, "contratos", "dia_vencimento", "dia_vencimento INTEGER")
+    _add_column_if_missing(
+        engine,
+        "contratos",
+        "gerar_cobranca_automatica",
+        "gerar_cobranca_automatica BOOLEAN NOT NULL DEFAULT 0",
+    )
+    _add_column_if_missing(engine, "financeiro", "contrato_id", "contrato_id INTEGER")
+
+    _create_index_if_missing(engine, "contratos", "ix_contratos_tipo_cobranca", ["tipo_cobranca"])
+    _create_index_if_missing(
+        engine,
+        "contratos",
+        "ix_contratos_gerar_cobranca_automatica",
+        ["gerar_cobranca_automatica"],
+    )
+    _create_index_if_missing(
+        engine,
+        "contratos",
+        "ix_contratos_cobranca_automatica_status",
+        ["gerar_cobranca_automatica", "status"],
+    )
+    _create_index_if_missing(engine, "financeiro", "ix_financeiro_contrato_id", ["contrato_id"])
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
@@ -460,6 +493,7 @@ MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260325_003_whatsapp_template_refresh", _migration_20260325_003_whatsapp_template_refresh),
     ("20260326_001_performance_indexes", _migration_20260326_001_performance_indexes),
     ("20260326_002_contracts_module", _migration_20260326_002_contracts_module),
+    ("20260326_003_contract_billing_reporting", _migration_20260326_003_contract_billing_reporting),
 ]
 
 

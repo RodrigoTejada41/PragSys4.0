@@ -53,6 +53,12 @@ class ContractStatus(str, Enum):
     A_VENCER = "a_vencer"
 
 
+class ContractBillingType(str, Enum):
+    MENSAL = "mensal"
+    ANUAL = "anual"
+    PERSONALIZADO = "personalizado"
+
+
 class AppointmentStatus(str, Enum):
     PENDENTE = "pendente"
     CONFIRMADO = "confirmado"

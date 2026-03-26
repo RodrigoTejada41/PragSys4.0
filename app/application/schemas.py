@@ -8,6 +8,7 @@ from app.domain.enums import (
     AppointmentSource,
     AppointmentStatus,
     CashFlowType,
+    ContractBillingType,
     ContractStatus,
     FinanceStatus,
     FinanceType,
@@ -324,6 +325,7 @@ class FinanceEntryBase(BaseModel):
     total_parcelas: int = Field(default=1, ge=1)
     observacoes: Optional[str] = None
     cliente_id: Optional[int] = None
+    contrato_id: Optional[int] = None
     os_id: Optional[int] = None
     nfe_id: Optional[int] = None
 
@@ -887,6 +889,10 @@ class ContractBase(BaseModel):
     nome: str = Field(min_length=3, max_length=180)
     data_inicio: date
     data_vencimento: date
+    valor_mensal: Decimal = Field(default=Decimal("0.00"), ge=0)
+    tipo_cobranca: ContractBillingType = ContractBillingType.MENSAL
+    dia_vencimento: Optional[int] = Field(default=None, ge=1, le=31)
+    gerar_cobranca_automatica: bool = False
     observacoes: Optional[str] = Field(default=None, max_length=4000)
 
     def model_post_init(self, __context) -> None:
@@ -911,6 +917,10 @@ class ContractRead(BaseModel):
     data_inicio: date
     data_vencimento: date
     status: ContractStatus
+    valor_mensal: Decimal
+    tipo_cobranca: ContractBillingType
+    dia_vencimento: Optional[int] = None
+    gerar_cobranca_automatica: bool = False
     observacoes: Optional[str] = None
     arquivo_nome_original: Optional[str] = None
     arquivo_content_type: Optional[str] = None
@@ -919,6 +929,12 @@ class ContractRead(BaseModel):
     dias_para_vencimento: int
     created_at: datetime
     updated_at: datetime
+    ultima_cobranca_gerada_em: Optional[date] = None
+    ultima_cobranca_status: Optional[FinanceStatus] = None
+    ultima_cobranca_valor: Optional[Decimal] = None
+    quantidade_cobrancas: int = 0
+    quantidade_cobrancas_pendentes: int = 0
+    quantidade_cobrancas_vencidas: int = 0
 
 
 class ContractAlertRead(BaseModel):
@@ -939,6 +955,9 @@ class ContractDashboardRead(BaseModel):
     alert_days: int
     vencidos_alertas: List[ContractAlertRead] = Field(default_factory=list)
     a_vencer_alertas: List[ContractAlertRead] = Field(default_factory=list)
+    cobrancas_vencidas: int = 0
+    cobrancas_a_vencer: int = 0
+    valor_mensal_previsto: Decimal = Field(default=Decimal("0.00"))
 
 
 class ContractMaintenanceRead(BaseModel):
@@ -946,6 +965,51 @@ class ContractMaintenanceRead(BaseModel):
     updated_statuses: int
     email_sent: int
     email_failed: int
+    charges_generated: int = 0
+
+
+class ContractReportFiltersRead(BaseModel):
+    cliente_id: Optional[int] = None
+    status: Optional[ContractStatus] = None
+    data_inicio_de: Optional[date] = None
+    data_inicio_ate: Optional[date] = None
+    data_vencimento_de: Optional[date] = None
+    data_vencimento_ate: Optional[date] = None
+    cobranca_ativa: Optional[bool] = None
+
+
+class ContractReportSummaryRead(BaseModel):
+    total_contratos: int
+    ativos: int
+    vencidos: int
+    a_vencer: int
+    com_cobranca_ativa: int
+    valor_total_mensal_previsto: Decimal
+
+
+class ContractReportItemRead(BaseModel):
+    contrato_id: int
+    cliente_id: int
+    cliente_nome: str
+    nome: str
+    data_inicio: date
+    data_vencimento: date
+    status: ContractStatus
+    valor_mensal: Decimal
+    tipo_cobranca: ContractBillingType
+    gerar_cobranca_automatica: bool
+    ultima_cobranca_gerada_em: Optional[date] = None
+    situacao_financeira: str
+    ultimo_lancamento_id: Optional[int] = None
+    ultimo_lancamento_status: Optional[FinanceStatus] = None
+    ultimo_lancamento_valor: Optional[Decimal] = None
+    total_cobrancas: int = 0
+
+
+class ContractReportRead(BaseModel):
+    filtros: ContractReportFiltersRead
+    resumo: ContractReportSummaryRead
+    itens: List[ContractReportItemRead] = Field(default_factory=list)
 
 
 UserCreate.model_rebuild()

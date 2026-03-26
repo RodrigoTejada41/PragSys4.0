@@ -46,6 +46,9 @@ Observacoes:
 
 - `GET /contratos`
 - `GET /contratos/dashboard`
+- `GET /contratos/relatorios`
+- `GET /contratos/relatorios.xlsx`
+- `GET /contratos/relatorios.pdf`
 - `GET /contratos/{id}`
 - `PUT /contratos/{id}`
 - `DELETE /contratos/{id}`
@@ -58,6 +61,12 @@ Observacoes:
 
 - criacao e edicao de contratos usam `multipart/form-data`;
 - o arquivo do contrato e opcional;
+- o payload de contrato tambem aceita:
+  - `valor_mensal`
+  - `tipo_cobranca`
+  - `dia_vencimento`
+  - `gerar_cobranca_automatica`
+- os endpoints de relatorio aceitam filtros por cliente, status, periodos e cobranca ativa;
 - downloads e visualizacao retornam binario com `Content-Disposition` apropriado.
 
 ### Empresas prestadoras
@@ -99,12 +108,18 @@ Observacoes:
 ### Financeiro
 
 - `GET /financeiro`
-- `GET /financeiro/resumo`
 - `GET /financeiro/caixa`
+- `GET /financeiro/dashboard`
 - `POST /financeiro`
 - `PUT /financeiro/{id}`
 - `POST /financeiro/{id}/pagar`
 - `DELETE /financeiro/{id}`
+
+Observacoes:
+
+- lancamentos financeiros agora podem carregar `contrato_id`;
+- registros com `origem = contrato` sao gerados automaticamente pela rotina contratual;
+- cobrancas recorrentes entram no mesmo fluxo de contas a receber e baixa ja existente.
 
 ### Ordens de servico
 

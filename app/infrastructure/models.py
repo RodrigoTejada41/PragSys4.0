@@ -127,6 +127,7 @@ class Contract(Base):
     __table_args__ = (
         Index("ix_contratos_cliente_status", "cliente_id", "status"),
         Index("ix_contratos_status_vencimento", "status", "data_vencimento"),
+        Index("ix_contratos_cobranca_automatica_status", "gerar_cobranca_automatica", "status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -135,6 +136,10 @@ class Contract(Base):
     data_inicio: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     data_vencimento: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ativo", index=True)
+    valor_mensal: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    tipo_cobranca: Mapped[str] = mapped_column(String(20), nullable=False, default="mensal", index=True)
+    dia_vencimento: Mapped[Optional[int]] = mapped_column(nullable=True)
+    gerar_cobranca_automatica: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     arquivo_nome_original: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     arquivo_nome_armazenado: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)
@@ -153,6 +158,7 @@ class Contract(Base):
     )
 
     cliente: Mapped["Customer"] = relationship(back_populates="contratos")
+    financeiros: Mapped[List["FinanceEntry"]] = relationship(back_populates="contrato")
 
 
 class NcmTaxProfile(Base):
@@ -447,6 +453,7 @@ class FinanceEntry(Base):
     observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
     cliente_id: Mapped[Optional[int]] = mapped_column(ForeignKey("clientes.id"), nullable=True, index=True)
+    contrato_id: Mapped[Optional[int]] = mapped_column(ForeignKey("contratos.id"), nullable=True, index=True)
     os_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ordens_servico.id"), nullable=True, index=True)
     nfe_id: Mapped[Optional[int]] = mapped_column(ForeignKey("notas_fiscais.id"), nullable=True, index=True)
     recibo_id: Mapped[Optional[int]] = mapped_column(ForeignKey("recibos.id"), nullable=True, index=True)
@@ -457,6 +464,7 @@ class FinanceEntry(Base):
     )
 
     cliente: Mapped[Optional["Customer"]] = relationship(back_populates="financeiros")
+    contrato: Mapped[Optional["Contract"]] = relationship(back_populates="financeiros")
     ordem_servico: Mapped[Optional["WorkOrder"]] = relationship(back_populates="financeiros")
     nota_fiscal: Mapped[Optional["NfeInvoice"]] = relationship(back_populates="financeiro")
     recibo: Mapped[Optional["Receipt"]] = relationship(back_populates="financeiro")

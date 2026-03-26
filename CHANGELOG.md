@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.1.2] - 2026-03-26
+
+- Modulo de contratos expandido com cobranca recorrente por contrato, incluindo `valor_mensal`, `tipo_cobranca`, `dia_vencimento` e chave para geracao automatica.
+- Integracao direta com o financeiro existente adicionada via `financeiro.contrato_id`, preservando contas a receber, baixa e fluxo de caixa no mesmo agregado.
+- Rotina diaria de contratos passou a gerar cobrancas automaticamente sem duplicar competencia ja emitida.
+- Relatorios de contratos adicionados com filtros por cliente, status, periodos e cobranca ativa.
+- Exportacoes profissionais de contratos adicionadas em `.xlsx` e `.pdf`.
+- Interface web expandida na area de clientes e no painel financeiro para exibir resumo financeiro do contrato e tela de relatorios contratuais.
+- Suite revalidada apos a entrega com `86 passed in 48.82s`.
+
 ## [4.1.1] - 2026-03-26
 
 - Modulo de contratos integrado ao cadastro de clientes com entidade propria, relacionamento `1:N`, status automatico e dashboard de alertas.
