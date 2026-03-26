@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SysPragas 3.1</title>
+    {% include "components/head_assets.html" %}
+</head>
+<body class="hold-transition sidebar-mini layout-fixed layout-navbar-fixed">
+    {% include "components/login_screen.html" %}
+
+    <div class="wrapper app-shell hidden" id="app-shell">
+        {% include "components/navbar.html" %}
+        {% include "components/sidebar.html" %}
+
+        <div class="content-wrapper">
+            <section class="content-header syspragas-header">
+                <div class="container-fluid">
+                    <div class="header-copy header-copy-shell">
+                        <div>
+                            <p class="eyebrow">Centro de operacoes</p>
+                            <h1>Controle comercial, tecnico e documental em uma unica interface.</h1>
+                            <p class="header-description">
+                                A interface foi reorganizada em templates com AdminLTE local, DataTables e widgets
+                                nativos para facilitar manutencao e evolucao do painel.
+                            </p>
+                        </div>
+                        <div class="header-contact-card">
+                            <span class="header-contact-title">Contato MoviSys</span>
+                            <a href="tel:+5511933799278">11 93379-9278</a>
+                            <a href="mailto:contatomovisystecnologia@gmail.com">contatomovisystecnologia@gmail.com</a>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="content">
+                <div class="container-fluid">
+                    {% block content %}{% endblock %}
+                </div>
+            </section>
+        </div>
+
+        {% include "components/footer.html" %}
+    </div>
+
+    <div class="toast hidden" id="toast"></div>
+
+    <script src="/static/vendor/jquery/jquery.min.js"></script>
+    <script src="/static/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/vendor/datatables/js/jquery.dataTables.min.js"></script>
+    <script src="/static/vendor/datatables/js/dataTables.bootstrap4.min.js"></script>
+    <script src="/static/vendor/chart.js/chart.min.js"></script>
+    <script src="/static/vendor/adminlte/js/adminlte.min.js"></script>
+    <script src="/static/app.js?v={{ app_js_version }}"></script>
+</body>
+</html>

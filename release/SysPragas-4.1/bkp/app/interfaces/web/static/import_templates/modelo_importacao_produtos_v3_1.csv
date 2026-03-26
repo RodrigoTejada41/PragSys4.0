@@ -1,0 +1,3 @@
+﻿nome;principio_ativo;grupo_quimico;toxicidade;concentracao;registro_ms;quantidade_entrada;estoque_minimo;custo_total;fornecedor_nome;referencia;data_entrada;categoria_financeira;observacoes;registrar_financeiro
+Inseticida Profissional;Permetrina;Piretroide;Moderada;2%;CSV-001;5.00;1.00;150.00;Fornecedor Exemplo Ltda;NF-0001;2026-03-21;Compra de estoque;Entrada inicial por CSV;true
+Gel Baraticida;Fipronil;Fenilpirazol;Baixa;1%;CSV-002;2.50;0.50;80.00;Fornecedor Exemplo Ltda;NF-0002;2026-03-21;Reposicao;Produto ja existente pode ter o estoque somado;true
