@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import json
-from datetime import date, datetime, time, timedelta
-from typing import Iterable, Optional
-from urllib import parse
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo
+from datetime import date, datetime, time, timedelta, timezone
+from typing import Iterable, Optional, Union
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session, joinedload
 
@@ -16,10 +12,12 @@ from app.application.schemas import (
     AppointmentStatusUpdate,
     AppointmentUpdate,
 )
+from app.application.google_calendar_service import google_calendar_request
+from app.application.settings_service import get_boolean_setting
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
 from app.domain.enums import AppointmentSource, AppointmentStatus, GoogleSyncStatus, WorkOrderStatus
-from app.infrastructure.models import Appointment, AppointmentHistory, Customer, Technician, User, WorkOrder
+from app.infrastructure.models import Appointment, AppointmentHistory, AppointmentWhatsAppLog, Customer, Technician, User, WorkOrder
 
 ACTIVE_APPOINTMENT_STATUSES = {
     AppointmentStatus.PENDENTE.value,
@@ -30,7 +28,6 @@ ACTIVE_APPOINTMENT_STATUSES = {
 
 FINISHED_APPOINTMENT_STATUSES = {
     AppointmentStatus.CONCLUIDO.value,
-    AppointmentStatus.REAGENDADO.value,
     AppointmentStatus.CANCELADO.value,
     AppointmentStatus.NAO_REALIZADO.value,
 }
@@ -44,6 +41,7 @@ def _appointment_query(db: Session):
         joinedload(Appointment.usuario_responsavel),
         joinedload(Appointment.usuario_ultima_atualizacao),
         joinedload(Appointment.historico).joinedload(AppointmentHistory.usuario),
+        joinedload(Appointment.whatsapp_logs).joinedload(AppointmentWhatsAppLog.usuario),
     )
 
 
@@ -113,6 +111,11 @@ def _serialize_history_entry(entry: AppointmentHistory) -> AppointmentHistory:
     return entry
 
 
+def _serialize_whatsapp_log(entry: AppointmentWhatsAppLog) -> AppointmentWhatsAppLog:
+    entry.usuario_nome = entry.usuario.nome if entry.usuario else None
+    return entry
+
+
 def _serialize_appointment(appointment: Appointment) -> Appointment:
     appointment.cliente_nome = appointment.cliente.razao_social
     appointment.os_numero = appointment.ordem_servico.numero if appointment.ordem_servico else None
@@ -122,6 +125,7 @@ def _serialize_appointment(appointment: Appointment) -> Appointment:
         appointment.usuario_ultima_atualizacao.nome if appointment.usuario_ultima_atualizacao else None
     )
     appointment.historico = [_serialize_history_entry(entry) for entry in appointment.historico]
+    appointment.whatsapp_logs = [_serialize_whatsapp_log(entry) for entry in appointment.whatsapp_logs]
     return appointment
 
 
@@ -129,6 +133,10 @@ def _appointment_interval(appointment_date: date, appointment_time: time, durati
     start = datetime.combine(appointment_date, appointment_time)
     end = start + timedelta(minutes=duration_minutes)
     return start, end
+
+
+def _format_interval(start: datetime, end: datetime) -> str:
+    return f"{start.strftime('%H:%M')} ate {end.strftime('%H:%M')}"
 
 
 def _assert_technician_availability(
@@ -160,7 +168,8 @@ def _assert_technician_availability(
         if candidate_start < other_end and candidate_end > other_start:
             raise BusinessRuleViolation(
                 f"Conflito de horario para o tecnico '{other.tecnico.nome if other.tecnico else technician_id}' "
-                f"com o agendamento #{other.id} ({other.cliente.razao_social} as {other.hora_agendamento.strftime('%H:%M')})."
+                f"com o agendamento #{other.id} ({other.cliente.razao_social}, {_format_interval(other_start, other_end)}). "
+                f"Horario solicitado: {_format_interval(candidate_start, candidate_end)}."
             )
 
 
@@ -187,15 +196,27 @@ def _log_appointment_history(
 
 def _build_google_event_payload(appointment: Appointment) -> dict:
     settings = get_settings()
-    timezone = ZoneInfo(settings.company_timezone)
-    start_dt = datetime.combine(appointment.data_agendamento, appointment.hora_agendamento, tzinfo=timezone)
+    try:
+        company_timezone = ZoneInfo(settings.company_timezone)
+    except ZoneInfoNotFoundError:
+        company_timezone = timezone.utc
+    start_dt = datetime.combine(appointment.data_agendamento, appointment.hora_agendamento, tzinfo=company_timezone)
     end_dt = start_dt + timedelta(minutes=appointment.duracao_prevista_minutos)
+    schedule_label = f"{start_dt.strftime('%d/%m/%Y %H:%M')} ate {end_dt.strftime('%H:%M')}"
+    summary_parts = [appointment.cliente_nome]
+    if appointment.tecnico_nome:
+        summary_parts.append(appointment.tecnico_nome)
+    summary_parts.append(start_dt.strftime("%H:%M"))
     description_lines = [
         f"Cliente: {appointment.cliente_nome}",
         f"Telefone: {appointment.telefone}",
         f"Endereco: {appointment.endereco_completo}",
+        f"Horario: {schedule_label}",
+        f"Duracao prevista: {appointment.duracao_prevista_minutos} minutos",
         f"Tipo de servico: {appointment.tipo_servico}",
     ]
+    if appointment.tecnico_nome:
+        description_lines.append(f"Tecnico: {appointment.tecnico_nome}")
     if appointment.os_numero:
         description_lines.append(f"OS vinculada: {appointment.os_numero}")
     if appointment.observacoes:
@@ -208,16 +229,16 @@ def _build_google_event_payload(appointment: Appointment) -> dict:
         description_lines.append(f"Retorno/Revisita: {appointment.retorno_revisita}")
 
     return {
-        "summary": f"{appointment.cliente_nome} | {appointment.tipo_servico}",
+        "summary": " | ".join(filter(None, summary_parts)),
         "location": appointment.endereco_completo,
         "description": "\n".join(description_lines),
         "start": {
             "dateTime": start_dt.isoformat(),
-            "timeZone": settings.company_timezone,
+            "timeZone": settings.company_timezone if str(company_timezone) != "UTC" else "UTC",
         },
         "end": {
             "dateTime": end_dt.isoformat(),
-            "timeZone": settings.company_timezone,
+            "timeZone": settings.company_timezone if str(company_timezone) != "UTC" else "UTC",
         },
         "extendedProperties": {
             "private": {
@@ -229,45 +250,21 @@ def _build_google_event_payload(appointment: Appointment) -> dict:
     }
 
 
-def _google_request(method: str, path: str, payload: Optional[dict] = None) -> dict | None:
-    settings = get_settings()
-    if not settings.google_calendar_enabled or not settings.google_calendar_id or not settings.google_calendar_access_token:
-        raise BusinessRuleViolation(
-            "Integracao com Google Agenda nao configurada. Defina GOOGLE_CALENDAR_ENABLED, "
-            "GOOGLE_CALENDAR_ID e GOOGLE_CALENDAR_ACCESS_TOKEN."
-        )
-
-    url = (
-        "https://www.googleapis.com/calendar/v3/calendars/"
-        f"{parse.quote(settings.google_calendar_id, safe='')}/{path}"
-    )
-    headers = {
-        "Authorization": f"Bearer {settings.google_calendar_access_token}",
-        "Content-Type": "application/json",
-    }
-    body = json.dumps(payload).encode("utf-8") if payload is not None else None
-    request_obj = Request(url, data=body, headers=headers, method=method)
-    try:
-        with urlopen(request_obj, timeout=15) as response:
-            raw = response.read().decode("utf-8")
-            return json.loads(raw) if raw else None
-    except HTTPError as exc:
-        message = exc.read().decode("utf-8", errors="ignore") if hasattr(exc, "read") else str(exc)
-        raise BusinessRuleViolation(f"Falha ao sincronizar com Google Agenda: {message or exc.reason}") from exc
-    except (URLError, TimeoutError) as exc:
-        raise BusinessRuleViolation("Falha de comunicacao com Google Agenda.") from exc
-
-
 def _set_google_sync_state(
     appointment: Appointment,
     status: GoogleSyncStatus,
+    calendar_id: Optional[str] = None,
     message: Optional[str] = None,
     event_id: Optional[str] = None,
+    *,
+    clear_event_id: bool = False,
 ) -> None:
-    settings = get_settings()
     appointment.google_sync_status = status.value
     appointment.google_sync_message = _clean_optional_text(message)
-    appointment.google_calendar_id = settings.google_calendar_id
+    if calendar_id is not None:
+        appointment.google_calendar_id = calendar_id
+    if clear_event_id:
+        appointment.google_calendar_event_id = None
     if event_id is not None:
         appointment.google_calendar_event_id = event_id
 
@@ -280,34 +277,70 @@ def _sync_google_for_appointment(
     raise_on_error: bool = False,
     user_id: Optional[int] = None,
 ) -> Appointment:
-    if not appointment.sincronizar_google:
-        _set_google_sync_state(appointment, GoogleSyncStatus.DESCONECTADO, "Sincronizacao com Google Agenda desabilitada.")
-        db.flush()
-        return appointment
-
     try:
+        integration_user_id = user_id or appointment.usuario_ultima_atualizacao_id or appointment.usuario_responsavel_id
         if remove_event and appointment.google_calendar_event_id:
-            _google_request("DELETE", f"events/{appointment.google_calendar_event_id}")
-            _set_google_sync_state(appointment, GoogleSyncStatus.SINCRONIZADO, "Evento removido do Google Agenda.", "")
+            _, calendar_id = google_calendar_request(
+                db,
+                integration_user_id,
+                "DELETE",
+                f"events/{appointment.google_calendar_event_id}",
+            )
+            sync_status = GoogleSyncStatus.DESCONECTADO if not appointment.sincronizar_google else GoogleSyncStatus.SINCRONIZADO
+            sync_message = (
+                "Evento removido do Google Agenda e sincronizacao desabilitada."
+                if not appointment.sincronizar_google
+                else "Evento removido do Google Agenda."
+            )
+            _set_google_sync_state(
+                appointment,
+                sync_status,
+                calendar_id,
+                sync_message,
+                clear_event_id=True,
+            )
             _log_appointment_history(db, appointment, user_id, "google_delete", "Evento removido da agenda Google.")
+            db.flush()
+            return appointment
+
+        if not appointment.sincronizar_google:
+            _set_google_sync_state(
+                appointment,
+                GoogleSyncStatus.DESCONECTADO,
+                appointment.google_calendar_id,
+                "Sincronizacao com Google Agenda desabilitada.",
+            )
             db.flush()
             return appointment
 
         payload = _build_google_event_payload(_serialize_appointment(appointment))
         if appointment.google_calendar_event_id:
-            response = _google_request("PATCH", f"events/{appointment.google_calendar_event_id}", payload)
+            response, calendar_id = google_calendar_request(
+                db,
+                integration_user_id,
+                "PATCH",
+                f"events/{appointment.google_calendar_event_id}",
+                payload,
+            )
         else:
-            response = _google_request("POST", "events", payload)
+            response, calendar_id = google_calendar_request(
+                db,
+                integration_user_id,
+                "POST",
+                "events",
+                payload,
+            )
         _set_google_sync_state(
             appointment,
             GoogleSyncStatus.SINCRONIZADO,
+            calendar_id,
             "Evento sincronizado com Google Agenda.",
             response.get("id") if response else appointment.google_calendar_event_id,
         )
         _log_appointment_history(db, appointment, user_id, "google_sync", "Agendamento sincronizado com Google Agenda.")
         db.flush()
     except BusinessRuleViolation as exc:
-        _set_google_sync_state(appointment, GoogleSyncStatus.FALHA, exc.message)
+        _set_google_sync_state(appointment, GoogleSyncStatus.FALHA, appointment.google_calendar_id, exc.message)
         _log_appointment_history(db, appointment, user_id, "google_sync_fail", exc.message)
         db.flush()
         if raise_on_error:
@@ -317,7 +350,7 @@ def _sync_google_for_appointment(
 
 def _validate_appointment_payload(
     db: Session,
-    payload: AppointmentCreate | AppointmentUpdate,
+    payload: Union[AppointmentCreate, AppointmentUpdate],
     current_appointment_id: Optional[int] = None,
 ) -> tuple[Customer, Optional[Technician], Optional[WorkOrder], dict]:
     customer = _get_customer_or_fail(db, payload.cliente_id)
@@ -405,6 +438,8 @@ def create_appointment(
     *,
     sync_google_after_commit: bool = True,
 ) -> Appointment:
+    from app.modules.whatsapp.service import send_appointment_whatsapp_message
+
     _get_user_or_fail(db, current_user_id)
     customer, _, _, normalized = _validate_appointment_payload(db, payload)
     appointment = Appointment(
@@ -444,6 +479,19 @@ def create_appointment(
     )
     db.commit()
     appointment = get_appointment(db, appointment.id)
+    if (
+        payload.enviar_whatsapp
+        and
+        get_boolean_setting(db, "whatsapp_enabled", fallback=get_settings().whatsapp_enabled)
+        and get_boolean_setting(db, "whatsapp_auto_send", fallback=True)
+        and appointment.status not in {AppointmentStatus.CANCELADO.value, AppointmentStatus.NAO_REALIZADO.value}
+    ):
+        appointment = send_appointment_whatsapp_message(
+            db,
+            appointment.id,
+            current_user_id=current_user_id,
+            automatic=True,
+        )
     if sync_google_after_commit and appointment.sincronizar_google:
         _sync_google_for_appointment(db, appointment, user_id=current_user_id)
         db.commit()
@@ -464,6 +512,7 @@ def update_appointment(
     previous_status = appointment.status
     previous_date = appointment.data_agendamento
     previous_time = appointment.hora_agendamento
+    previous_google_event_id = appointment.google_calendar_event_id
 
     appointment.cliente_id = customer.id
     appointment.os_id = payload.os_id
@@ -503,10 +552,35 @@ def update_appointment(
     _log_appointment_history(db, appointment, current_user_id, history_action, details, previous_status, appointment.status)
     db.commit()
     appointment = get_appointment(db, appointment.id)
-    if sync_google_after_commit and appointment.sincronizar_google:
-        _sync_google_for_appointment(db, appointment, user_id=current_user_id)
+    should_remove_google_event = bool(
+        previous_google_event_id and (
+            not appointment.sincronizar_google
+            or appointment.status in {AppointmentStatus.CANCELADO.value, AppointmentStatus.NAO_REALIZADO.value}
+        )
+    )
+    if sync_google_after_commit and (appointment.sincronizar_google or should_remove_google_event):
+        _sync_google_for_appointment(
+            db,
+            appointment,
+            remove_event=should_remove_google_event,
+            user_id=current_user_id,
+        )
         db.commit()
         appointment = get_appointment(db, appointment.id)
+    if (
+        payload.enviar_whatsapp
+        and get_boolean_setting(db, "whatsapp_enabled", fallback=get_settings().whatsapp_enabled)
+        and get_boolean_setting(db, "whatsapp_auto_send", fallback=True)
+        and appointment.status not in {AppointmentStatus.CANCELADO.value, AppointmentStatus.NAO_REALIZADO.value}
+    ):
+        from app.modules.whatsapp.service import send_appointment_whatsapp_message
+
+        appointment = send_appointment_whatsapp_message(
+            db,
+            appointment.id,
+            current_user_id=current_user_id,
+            automatic=True,
+        )
     return appointment
 
 
@@ -517,7 +591,7 @@ def update_appointment_status(
     current_user_id: Optional[int] = None,
     *,
     sync_google_after_commit: bool = True,
-) -> Appointment:
+    ) -> Appointment:
     appointment = get_appointment(db, appointment_id)
     previous_status = appointment.status
     appointment.status = payload.status.value
@@ -550,6 +624,39 @@ def update_appointment_status(
     return appointment
 
 
+def reopen_appointment(
+    db: Session,
+    appointment_id: int,
+    current_user_id: Optional[int] = None,
+    *,
+    sync_google_after_commit: bool = True,
+) -> Appointment:
+    appointment = get_appointment(db, appointment_id)
+    previous_status = appointment.status
+    if previous_status == AppointmentStatus.PENDENTE.value:
+        return appointment
+
+    appointment.status = AppointmentStatus.PENDENTE.value
+    appointment.usuario_ultima_atualizacao_id = current_user_id
+    _log_appointment_history(
+        db,
+        appointment,
+        current_user_id,
+        "reopen",
+        "Agendamento reaberto para acompanhamento operacional.",
+        previous_status,
+        appointment.status,
+    )
+    _sync_linked_work_order_from_appointment(appointment)
+    db.commit()
+    appointment = get_appointment(db, appointment.id)
+    if sync_google_after_commit and appointment.sincronizar_google:
+        _sync_google_for_appointment(db, appointment, user_id=current_user_id)
+        db.commit()
+        appointment = get_appointment(db, appointment.id)
+    return appointment
+
+
 def get_appointment_dashboard(db: Session) -> AppointmentDashboardRead:
     appointments = list_appointments(db)
     counts = {status.value: 0 for status in AppointmentStatus}
@@ -570,6 +677,10 @@ def get_appointment_dashboard(db: Session) -> AppointmentDashboardRead:
 
 def sync_appointment_google_event(db: Session, appointment_id: int, current_user_id: Optional[int] = None) -> Appointment:
     appointment = get_appointment(db, appointment_id)
+    if not appointment.sincronizar_google:
+        raise BusinessRuleViolation(
+            "Ative a sincronizacao com Google Agenda neste agendamento antes de usar a sincronizacao manual."
+        )
     _sync_google_for_appointment(db, appointment, raise_on_error=True, user_id=current_user_id)
     db.commit()
     return get_appointment(db, appointment_id)
@@ -587,7 +698,7 @@ def sync_work_order_appointment(
     technical_instructions: Optional[str],
     follow_up_notes: Optional[str],
     sync_google: bool,
-) -> Optional[Appointment]:
+) -> tuple[Optional[Appointment], bool]:
     appointment = (
         _appointment_query(db)
         .filter(
@@ -613,7 +724,7 @@ def sync_work_order_appointment(
                 previous_status,
                 appointment.status,
             )
-        return appointment
+        return appointment, False
 
     customer = _get_customer_or_fail(db, work_order.cliente_id)
     _get_technician_or_fail(db, work_order.tecnico_id, require_active=True)
@@ -658,7 +769,7 @@ def sync_work_order_appointment(
             f"Agendamento automatico criado a partir da OS {work_order.numero}.",
             new_status=appointment.status,
         )
-        return appointment
+        return appointment, True
 
     previous_status = appointment.status
     date_changed = appointment.data_agendamento != work_order.data_execucao or appointment.hora_agendamento != work_order.hora_inicio
@@ -694,4 +805,4 @@ def sync_work_order_appointment(
         previous_status,
         appointment.status,
     )
-    return appointment
+    return appointment, False

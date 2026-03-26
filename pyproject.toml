@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "syspragas"
-version = "3.2.5"
+version = "4.1.0"
 description = "MVP do sistema SysPragas com FastAPI, JWT e controle operacional"
 requires-python = ">=3.9"
 dependencies = [
@@ -35,3 +35,9 @@ exclude = ["assets*", "build*", "dist*", "output*", "tmp*", "tests*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "unit: testes unitarios ou quase unitarios",
+    "integration: testes de integracao com app, banco ou HTTP local",
+    "documents: testes focados em geracao de documentos e PDFs",
+    "external: testes com contratos de integracoes externas simuladas",
+]

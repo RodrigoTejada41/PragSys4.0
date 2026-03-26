@@ -1,7 +1,9 @@
 import csv
 import json
+import logging
+import re
 from calendar import monthrange
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from io import BytesIO
 from io import StringIO
@@ -12,13 +14,14 @@ from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.config import get_settings
+from app.application.certificate_assets import resolve_certificate_model_path, resolve_technical_signature_path
 from app.application.schemas import (
     AddressLookupRead,
     CustomerCnpjLookupRead,
@@ -44,6 +47,7 @@ from app.application.schemas import (
     WorkOrderCreate,
     WorkOrderUpdate,
 )
+from app.application.settings_service import get_boolean_setting
 from app.core.exceptions import BusinessRuleViolation
 from app.core.security import create_access_token, get_password_hash, verify_password
 from app.domain.enums import FinanceStatus
@@ -72,11 +76,46 @@ ALLOWED_WORK_ORDER_PHOTO_TYPES = {
     "image/webp",
 }
 
+LOGGER = logging.getLogger(__name__)
+
 
 def _money(value: Decimal) -> Decimal:
     if value is None:
         return Decimal("0.00")
     return Decimal(value).quantize(MONEY_QUANTIZER)
+
+
+def _run_document_generation(document_kind: str, work_order_id: int, builder) -> bytes:
+    LOGGER.info(
+        "document_generation_started document_kind=%s work_order_id=%s",
+        document_kind,
+        work_order_id,
+    )
+    try:
+        payload = builder()
+    except BusinessRuleViolation:
+        LOGGER.warning(
+            "document_generation_blocked document_kind=%s work_order_id=%s",
+            document_kind,
+            work_order_id,
+            exc_info=True,
+        )
+        raise
+    except Exception:
+        LOGGER.exception(
+            "document_generation_failed document_kind=%s work_order_id=%s",
+            document_kind,
+            work_order_id,
+        )
+        raise
+
+    LOGGER.info(
+        "document_generation_completed document_kind=%s work_order_id=%s bytes=%s",
+        document_kind,
+        work_order_id,
+        len(payload),
+    )
+    return payload
 
 
 def _enum_value(value):
@@ -110,6 +149,38 @@ def _normalize_customer_payload(payload) -> dict:
     data["cep"] = _normalize_cep(data.get("cep"))
     data["estado"] = data.get("estado", "").upper()
     return data
+
+
+def _is_master_user(current_user: Optional[User]) -> bool:
+    return bool(current_user and current_user.role == "master")
+
+
+def _require_company_scope(current_user: Optional[User]) -> int:
+    if current_user is None or _is_master_user(current_user):
+        raise BusinessRuleViolation("Contexto de empresa nao disponivel para esta operacao.")
+    if current_user.empresa_prestadora_id is None:
+        raise BusinessRuleViolation("Usuario sem empresa prestadora vinculada.")
+    return current_user.empresa_prestadora_id
+
+
+def _apply_company_scope(query, model, current_user: Optional[User]):
+    session = query.session
+    if session is not None and not get_boolean_setting(session, "multiempresa_enabled", fallback=True):
+        return query
+    if current_user is None or _is_master_user(current_user):
+        return query
+    company_id = _require_company_scope(current_user)
+    return query.filter(model.empresa_prestadora_id == company_id)
+
+
+def _get_new_record_company_id(current_user: Optional[User], fallback_company_id: Optional[int] = None) -> Optional[int]:
+    if fallback_company_id is not None:
+        return fallback_company_id
+    if current_user is None:
+        return None
+    if _is_master_user(current_user):
+        return current_user.empresa_prestadora_id
+    return _require_company_scope(current_user)
 
 
 def _fetch_json(url: str) -> dict:
@@ -153,6 +224,9 @@ def _serialize_license(license_entry: License) -> License:
 def _serialize_provider_company(provider_company: ProviderCompany) -> ProviderCompany:
     provider_company.usuarios_vinculados_ids = [user.id for user in provider_company.usuarios]
     provider_company.usuarios_vinculados_nomes = [user.nome for user in provider_company.usuarios]
+    provider_company.google_connected = bool(
+        provider_company.google_refresh_token or provider_company.google_access_token
+    )
     return provider_company
 
 
@@ -258,13 +332,22 @@ def _validate_finance_payload(
     db: Session,
     payload: FinanceEntryCreate,
     current_entry: Optional[FinanceEntry] = None,
+    current_user: Optional[User] = None,
 ) -> None:
     if payload.cliente_id:
-        _get_customer_or_fail(db, payload.cliente_id)
+        _get_customer_or_fail(db, payload.cliente_id, current_user=current_user)
     if payload.os_id:
-        _get_work_order_or_fail(db, payload.os_id)
+        _get_work_order_or_fail(db, payload.os_id, current_user=current_user)
         if _enum_value(payload.tipo) != "receita":
             raise BusinessRuleViolation("Lancamentos vinculados a OS devem ser do tipo receita.")
+    if payload.nfe_id:
+        from app.application.fiscal_services import _get_nfe_or_fail
+
+        invoice = _get_nfe_or_fail(db, payload.nfe_id)
+        if _enum_value(payload.tipo) != "receita":
+            raise BusinessRuleViolation("Lancamentos vinculados a NF-e devem ser do tipo receita.")
+        if payload.cliente_id and payload.cliente_id != invoice.cliente_id:
+            raise BusinessRuleViolation("O cliente do lancamento financeiro deve ser o mesmo da NF-e vinculada.")
     if payload.parcela_atual > payload.total_parcelas:
         raise BusinessRuleViolation("A parcela atual nao pode ser maior que o total de parcelas.")
     if current_entry and _money(payload.valor) < _money(current_entry.valor_pago):
@@ -276,7 +359,7 @@ def authenticate_user(db: Session, username: str, password: str) -> str:
     if not user or not verify_password(password, user.password_hash):
         raise BusinessRuleViolation("Credenciais invalidas.")
     ensure_license_allows_access(db, user)
-    return create_access_token(subject=str(user.id), role=user.role)
+    return create_access_token(subject=str(user.id), role=user.role, company_id=user.empresa_prestadora_id)
 
 
 def get_user_by_id(db: Session, user_id: int) -> User:
@@ -320,15 +403,15 @@ def ensure_license_allows_access(db: Session, user: User) -> None:
         raise BusinessRuleViolation("Licenca do sistema inativa, suspensa ou expirada.")
 
 
-def _get_customer_or_fail(db: Session, customer_id: int) -> Customer:
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+def _get_customer_or_fail(db: Session, customer_id: int, current_user: Optional[User] = None) -> Customer:
+    customer = _apply_company_scope(db.query(Customer), Customer, current_user).filter(Customer.id == customer_id).first()
     if not customer:
         raise BusinessRuleViolation("Cliente informado nao existe.")
     return customer
 
 
-def _get_product_or_fail(db: Session, product_id: int) -> Product:
-    product = db.query(Product).filter(Product.id == product_id).first()
+def _get_product_or_fail(db: Session, product_id: int, current_user: Optional[User] = None) -> Product:
+    product = _apply_company_scope(db.query(Product), Product, current_user).filter(Product.id == product_id).first()
     if not product:
         raise BusinessRuleViolation(f"Produto {product_id} nao encontrado.")
     return product
@@ -502,15 +585,20 @@ def _find_product_for_import(db: Session, registro_ms: str, nome: str) -> Option
     return product
 
 
-def _get_pest_or_fail(db: Session, pest_id: int) -> Pest:
-    pest = db.query(Pest).filter(Pest.id == pest_id).first()
+def _get_pest_or_fail(db: Session, pest_id: int, current_user: Optional[User] = None) -> Pest:
+    pest = _apply_company_scope(db.query(Pest), Pest, current_user).filter(Pest.id == pest_id).first()
     if not pest:
         raise BusinessRuleViolation(f"Praga {pest_id} nao encontrada.")
     return pest
 
 
-def _get_technician_or_fail(db: Session, technician_id: int, require_active: bool = False) -> Technician:
-    query = db.query(Technician).filter(Technician.id == technician_id)
+def _get_technician_or_fail(
+    db: Session,
+    technician_id: int,
+    require_active: bool = False,
+    current_user: Optional[User] = None,
+) -> Technician:
+    query = _apply_company_scope(db.query(Technician), Technician, current_user).filter(Technician.id == technician_id)
     if require_active:
         query = query.filter(Technician.ativo.is_(True))
     technician = query.first()
@@ -519,8 +607,8 @@ def _get_technician_or_fail(db: Session, technician_id: int, require_active: boo
     return technician
 
 
-def _get_finance_entry_or_fail(db: Session, finance_entry_id: int) -> FinanceEntry:
-    entry = db.query(FinanceEntry).filter(FinanceEntry.id == finance_entry_id).first()
+def _get_finance_entry_or_fail(db: Session, finance_entry_id: int, current_user: Optional[User] = None) -> FinanceEntry:
+    entry = _apply_company_scope(db.query(FinanceEntry), FinanceEntry, current_user).filter(FinanceEntry.id == finance_entry_id).first()
     if not entry:
         raise BusinessRuleViolation("Lancamento financeiro nao encontrado.")
     _sync_finance_status(entry)
@@ -660,11 +748,12 @@ def lookup_address_by_cep(cep: str) -> AddressLookupRead:
     )
 
 
-def create_customer(db: Session, payload: CustomerCreate) -> Customer:
+def create_customer(db: Session, payload: CustomerCreate, current_user: Optional[User] = None) -> Customer:
     data = _normalize_customer_payload(payload)
     duplicate = db.query(Customer).filter(Customer.cpf_cnpj == data["cpf_cnpj"]).first()
     if duplicate:
         raise BusinessRuleViolation("Ja existe cliente com este CPF/CNPJ.")
+    data["empresa_prestadora_id"] = _get_new_record_company_id(current_user)
     customer = Customer(**data)
     db.add(customer)
     db.commit()
@@ -672,8 +761,11 @@ def create_customer(db: Session, payload: CustomerCreate) -> Customer:
     return customer
 
 
-def list_users(db: Session) -> List[User]:
-    return [_serialize_user(item) for item in db.query(User).order_by(User.created_at.desc(), User.nome.asc()).all()]
+def list_users(db: Session, current_user: Optional[User] = None) -> List[User]:
+    query = db.query(User)
+    if current_user and not _is_master_user(current_user):
+        query = query.filter(User.empresa_prestadora_id == _require_company_scope(current_user))
+    return [_serialize_user(item) for item in query.order_by(User.created_at.desc(), User.nome.asc()).all()]
 
 
 def create_user(db: Session, payload: UserCreate) -> User:
@@ -807,12 +899,12 @@ def delete_license(db: Session, license_id: int) -> None:
     db.commit()
 
 
-def list_customers(db: Session) -> List[Customer]:
-    return db.query(Customer).order_by(Customer.razao_social.asc()).all()
+def list_customers(db: Session, current_user: Optional[User] = None) -> List[Customer]:
+    return _apply_company_scope(db.query(Customer), Customer, current_user).order_by(Customer.razao_social.asc()).all()
 
 
-def update_customer(db: Session, customer_id: int, payload: CustomerUpdate) -> Customer:
-    customer = _get_customer_or_fail(db, customer_id)
+def update_customer(db: Session, customer_id: int, payload: CustomerUpdate, current_user: Optional[User] = None) -> Customer:
+    customer = _get_customer_or_fail(db, customer_id, current_user=current_user)
     data = _normalize_customer_payload(payload)
     duplicate = (
         db.query(Customer)
@@ -828,37 +920,55 @@ def update_customer(db: Session, customer_id: int, payload: CustomerUpdate) -> C
     return customer
 
 
-def delete_customer(db: Session, customer_id: int) -> None:
-    customer = _get_customer_or_fail(db, customer_id)
+def delete_customer(db: Session, customer_id: int, current_user: Optional[User] = None) -> None:
+    customer = _get_customer_or_fail(db, customer_id, current_user=current_user)
     if customer.ordens_servico or customer.financeiros:
         raise BusinessRuleViolation("Nao e possivel excluir cliente com movimentacao vinculada.")
     db.delete(customer)
     db.commit()
 
 
-def create_product(db: Session, payload: ProductCreate) -> Product:
-    product = Product(**payload.model_dump())
+def create_product(db: Session, payload: ProductCreate, current_user: Optional[User] = None) -> Product:
+    from app.application.fiscal_services import apply_tax_profile_to_product
+
+    product = Product(**payload.model_dump(), empresa_prestadora_id=_get_new_record_company_id(current_user))
+    apply_tax_profile_to_product(
+        db,
+        product,
+        ncm_code=payload.ncm,
+        manual_override=payload.override_tributacao,
+        manual_rates=payload.model_dump(),
+    )
     db.add(product)
     db.commit()
     db.refresh(product)
     return product
 
 
-def list_products(db: Session) -> List[Product]:
-    return db.query(Product).order_by(Product.nome.asc()).all()
+def list_products(db: Session, current_user: Optional[User] = None) -> List[Product]:
+    return _apply_company_scope(db.query(Product), Product, current_user).order_by(Product.nome.asc()).all()
 
 
-def update_product(db: Session, product_id: int, payload: ProductUpdate) -> Product:
-    product = _get_product_or_fail(db, product_id)
+def update_product(db: Session, product_id: int, payload: ProductUpdate, current_user: Optional[User] = None) -> Product:
+    from app.application.fiscal_services import apply_tax_profile_to_product
+
+    product = _get_product_or_fail(db, product_id, current_user=current_user)
     for field, value in payload.model_dump().items():
         setattr(product, field, value)
+    apply_tax_profile_to_product(
+        db,
+        product,
+        ncm_code=payload.ncm,
+        manual_override=payload.override_tributacao,
+        manual_rates=payload.model_dump(),
+    )
     db.commit()
     db.refresh(product)
     return product
 
 
-def delete_product(db: Session, product_id: int) -> None:
-    product = _get_product_or_fail(db, product_id)
+def delete_product(db: Session, product_id: int, current_user: Optional[User] = None) -> None:
+    product = _get_product_or_fail(db, product_id, current_user=current_user)
     if product.itens_ordem_servico:
         raise BusinessRuleViolation("Nao e possivel excluir produto ja utilizado em OS.")
     db.delete(product)
@@ -869,6 +979,7 @@ def import_products_from_invoice_xml(
     db: Session,
     xml_content: bytes,
     create_finance_entry: bool = True,
+    current_user: Optional[User] = None,
 ) -> ProductXmlImportResult:
     invoice_data = _parse_invoice_xml(xml_content)
     reference = invoice_data["chave_acesso"] or f"NFE-{invoice_data['nota_numero']}"
@@ -882,10 +993,11 @@ def import_products_from_invoice_xml(
 
     for index, item in enumerate(invoice_data["items"], start=1):
         product = None
+        product_query = _apply_company_scope(db.query(Product), Product, current_user)
         if item["codigo"]:
-            product = db.query(Product).filter(Product.registro_ms == item["codigo"]).first()
+            product = product_query.filter(Product.registro_ms == item["codigo"]).first()
         if product is None:
-            product = db.query(Product).filter(Product.nome == item["nome"]).first()
+            product = product_query.filter(Product.nome == item["nome"]).first()
 
         action = "atualizado"
         if product is None:
@@ -896,8 +1008,10 @@ def import_products_from_invoice_xml(
                 toxicidade="Nao informado",
                 concentracao="Nao informado",
                 registro_ms=item["codigo"] or item["codigo_barras"] or f"XML-{invoice_data['nota_numero']}-{index}",
+                ncm=item["ncm"] or None,
                 estoque_atual=Decimal("0.00"),
                 estoque_minimo=Decimal("0.00"),
+                empresa_prestadora_id=_get_new_record_company_id(current_user),
             )
             db.add(product)
             db.flush()
@@ -905,6 +1019,14 @@ def import_products_from_invoice_xml(
             action = "criado"
         else:
             updated_count += 1
+
+        if item.get("ncm"):
+            try:
+                from app.application.fiscal_services import apply_tax_profile_to_product
+
+                apply_tax_profile_to_product(db, product, ncm_code=item["ncm"], manual_override=False)
+            except BusinessRuleViolation:
+                product.ncm = item["ncm"]
 
         product.estoque_atual = _money(Decimal(product.estoque_atual) + Decimal(item["quantidade"]))
 
@@ -934,6 +1056,7 @@ def import_products_from_invoice_xml(
             total_parcelas=1,
             parcela_atual=1,
             observacoes=f"Importado automaticamente do XML da NF {invoice_data['nota_numero']}.",
+            empresa_prestadora_id=_get_new_record_company_id(current_user),
         )
         db.add(finance_entry)
         db.flush()
@@ -961,6 +1084,7 @@ def import_products_from_csv(
     db: Session,
     csv_content: bytes,
     create_finance_entry: bool = True,
+    current_user: Optional[User] = None,
 ) -> ProductCsvImportResult:
     parsed = _parse_products_csv(csv_content)
     created_count = 0
@@ -986,6 +1110,9 @@ def import_products_from_csv(
         observacoes = row.get("observacoes") or None
 
         product = _find_product_for_import(db, registro_ms, nome)
+        if product and current_user and not _is_master_user(current_user):
+            if product.empresa_prestadora_id != _require_company_scope(current_user):
+                product = None
         action = "atualizado"
         if product is None:
             product = Product(
@@ -995,8 +1122,10 @@ def import_products_from_csv(
                 toxicidade=row.get("toxicidade") or "Nao informado",
                 concentracao=row.get("concentracao") or "Nao informado",
                 registro_ms=registro_ms,
+                ncm=row.get("ncm") or None,
                 estoque_atual=Decimal("0.00"),
                 estoque_minimo=estoque_minimo,
+                empresa_prestadora_id=_get_new_record_company_id(current_user),
             )
             db.add(product)
             db.flush()
@@ -1013,6 +1142,14 @@ def import_products_from_csv(
             if row.get("concentracao"):
                 product.concentracao = row["concentracao"]
             product.estoque_minimo = estoque_minimo
+
+        if row.get("ncm"):
+            try:
+                from app.application.fiscal_services import apply_tax_profile_to_product
+
+                apply_tax_profile_to_product(db, product, ncm_code=row.get("ncm"), manual_override=False)
+            except BusinessRuleViolation:
+                product.ncm = row.get("ncm")
 
         product.estoque_atual = _money(Decimal(product.estoque_atual) + quantidade_entrada)
 
@@ -1032,6 +1169,7 @@ def import_products_from_csv(
                 total_parcelas=1,
                 parcela_atual=1,
                 observacoes=observacoes or f"Importado por CSV na linha {line_number}.",
+                empresa_prestadora_id=_get_new_record_company_id(current_user),
             )
             db.add(finance_entry)
             db.flush()
@@ -1071,20 +1209,20 @@ def import_products_from_csv(
     )
 
 
-def create_pest(db: Session, payload: PestCreate) -> Pest:
-    pest = Pest(**payload.model_dump())
+def create_pest(db: Session, payload: PestCreate, current_user: Optional[User] = None) -> Pest:
+    pest = Pest(**payload.model_dump(), empresa_prestadora_id=_get_new_record_company_id(current_user))
     db.add(pest)
     db.commit()
     db.refresh(pest)
     return pest
 
 
-def list_pests(db: Session) -> List[Pest]:
-    return db.query(Pest).order_by(Pest.nome_comum.asc()).all()
+def list_pests(db: Session, current_user: Optional[User] = None) -> List[Pest]:
+    return _apply_company_scope(db.query(Pest), Pest, current_user).order_by(Pest.nome_comum.asc()).all()
 
 
-def update_pest(db: Session, pest_id: int, payload: PestUpdate) -> Pest:
-    pest = _get_pest_or_fail(db, pest_id)
+def update_pest(db: Session, pest_id: int, payload: PestUpdate, current_user: Optional[User] = None) -> Pest:
+    pest = _get_pest_or_fail(db, pest_id, current_user=current_user)
     for field, value in payload.model_dump().items():
         setattr(pest, field, value)
     db.commit()
@@ -1092,33 +1230,33 @@ def update_pest(db: Session, pest_id: int, payload: PestUpdate) -> Pest:
     return pest
 
 
-def delete_pest(db: Session, pest_id: int) -> None:
-    pest = _get_pest_or_fail(db, pest_id)
+def delete_pest(db: Session, pest_id: int, current_user: Optional[User] = None) -> None:
+    pest = _get_pest_or_fail(db, pest_id, current_user=current_user)
     if pest.ordens_servico:
         raise BusinessRuleViolation("Nao e possivel excluir praga vinculada a OS.")
     db.delete(pest)
     db.commit()
 
 
-def create_technician(db: Session, payload: TechnicianCreate) -> Technician:
-    duplicate = db.query(Technician).filter(Technician.registro == payload.registro).first()
+def create_technician(db: Session, payload: TechnicianCreate, current_user: Optional[User] = None) -> Technician:
+    duplicate = _apply_company_scope(db.query(Technician), Technician, current_user).filter(Technician.registro == payload.registro).first()
     if duplicate:
         raise BusinessRuleViolation("Ja existe tecnico com este registro.")
-    technician = Technician(**payload.model_dump())
+    technician = Technician(**payload.model_dump(), empresa_prestadora_id=_get_new_record_company_id(current_user))
     db.add(technician)
     db.commit()
     db.refresh(technician)
     return technician
 
 
-def list_technicians(db: Session) -> List[Technician]:
-    return db.query(Technician).order_by(Technician.nome.asc()).all()
+def list_technicians(db: Session, current_user: Optional[User] = None) -> List[Technician]:
+    return _apply_company_scope(db.query(Technician), Technician, current_user).order_by(Technician.nome.asc()).all()
 
 
-def update_technician(db: Session, technician_id: int, payload: TechnicianUpdate) -> Technician:
-    technician = _get_technician_or_fail(db, technician_id)
+def update_technician(db: Session, technician_id: int, payload: TechnicianUpdate, current_user: Optional[User] = None) -> Technician:
+    technician = _get_technician_or_fail(db, technician_id, current_user=current_user)
     duplicate = (
-        db.query(Technician)
+        _apply_company_scope(db.query(Technician), Technician, current_user)
         .filter(Technician.registro == payload.registro, Technician.id != technician_id)
         .first()
     )
@@ -1131,17 +1269,17 @@ def update_technician(db: Session, technician_id: int, payload: TechnicianUpdate
     return technician
 
 
-def delete_technician(db: Session, technician_id: int) -> None:
-    technician = _get_technician_or_fail(db, technician_id)
+def delete_technician(db: Session, technician_id: int, current_user: Optional[User] = None) -> None:
+    technician = _get_technician_or_fail(db, technician_id, current_user=current_user)
     if technician.ordens_servico:
         raise BusinessRuleViolation("Nao e possivel excluir tecnico com OS vinculada.")
     db.delete(technician)
     db.commit()
 
 
-def create_finance_entry(db: Session, payload: FinanceEntryCreate) -> FinanceEntry:
-    _validate_finance_payload(db, payload)
-    reference = payload.referencia or f"FIN-{int(datetime.utcnow().timestamp())}"
+def create_finance_entry(db: Session, payload: FinanceEntryCreate, current_user: Optional[User] = None) -> FinanceEntry:
+    _validate_finance_payload(db, payload, current_user=current_user)
+    reference = payload.referencia or f"FIN-{int(datetime.now(timezone.utc).timestamp())}"
     installments = _split_installments(payload.valor, payload.total_parcelas)
     created_entries: List[FinanceEntry] = []
 
@@ -1162,6 +1300,8 @@ def create_finance_entry(db: Session, payload: FinanceEntryCreate) -> FinanceEnt
             observacoes=payload.observacoes,
             cliente_id=payload.cliente_id,
             os_id=payload.os_id,
+            nfe_id=payload.nfe_id,
+            empresa_prestadora_id=_get_new_record_company_id(current_user),
         )
         db.add(entry)
         created_entries.append(entry)
@@ -1178,13 +1318,15 @@ def create_finance_entry(db: Session, payload: FinanceEntryCreate) -> FinanceEnt
 
 def list_finance_entries(
     db: Session,
+    current_user: Optional[User] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     cliente_id: Optional[int] = None,
     status_filter: Optional[str] = None,
     tipo: Optional[str] = None,
+    search: Optional[str] = None,
 ) -> List[FinanceEntry]:
-    query = db.query(FinanceEntry)
+    query = _apply_company_scope(db.query(FinanceEntry), FinanceEntry, current_user)
     if start_date:
         query = query.filter(FinanceEntry.vencimento >= start_date)
     if end_date:
@@ -1195,16 +1337,32 @@ def list_finance_entries(
         query = query.filter(FinanceEntry.status == status_filter)
     if tipo:
         query = query.filter(FinanceEntry.tipo == tipo)
+    if search:
+        lookup = search.strip()
+        query = query.filter(
+            (FinanceEntry.descricao.ilike(f"%{lookup}%"))
+            | (FinanceEntry.referencia.ilike(f"%{lookup}%"))
+            | (FinanceEntry.fornecedor_nome.ilike(f"%{lookup}%"))
+        )
     entries = query.order_by(FinanceEntry.vencimento.asc(), FinanceEntry.id.desc()).all()
     _sync_finance_statuses(db, entries)
     return entries
 
 
-def update_finance_entry(db: Session, finance_entry_id: int, payload: FinanceEntryUpdate) -> FinanceEntry:
-    entry = _get_finance_entry_or_fail(db, finance_entry_id)
+def update_finance_entry(
+    db: Session,
+    finance_entry_id: int,
+    payload: FinanceEntryUpdate,
+    current_user: Optional[User] = None,
+) -> FinanceEntry:
+    entry = _get_finance_entry_or_fail(db, finance_entry_id, current_user=current_user)
+    if entry.recibo_id:
+        raise BusinessRuleViolation("Lancamentos gerados por recibo devem ser alterados pelo proprio recibo.")
     if entry.os_id:
         raise BusinessRuleViolation("Lancamentos gerados por OS devem ser alterados pela propria ordem de servico.")
-    _validate_finance_payload(db, payload, current_entry=entry)
+    if entry.nfe_id:
+        raise BusinessRuleViolation("Lancamentos gerados por NF-e devem ser alterados pela propria nota fiscal.")
+    _validate_finance_payload(db, payload, current_entry=entry, current_user=current_user)
     requested_status = _enum_value(payload.status)
     for field, value in payload.model_dump().items():
         setattr(entry, field, _enum_value(value))
@@ -1221,8 +1379,9 @@ def mark_finance_entry_as_paid(
     db: Session,
     finance_entry_id: int,
     payload: Optional[FinancePaymentRequest] = None,
+    current_user: Optional[User] = None,
 ) -> FinanceEntry:
-    entry = _get_finance_entry_or_fail(db, finance_entry_id)
+    entry = _get_finance_entry_or_fail(db, finance_entry_id, current_user=current_user)
     payment_payload = payload or FinancePaymentRequest()
     _apply_finance_payment(db, entry, payment_payload.valor, payment_payload.data_pagamento)
     db.commit()
@@ -1230,24 +1389,31 @@ def mark_finance_entry_as_paid(
     return entry
 
 
-def delete_finance_entry(db: Session, finance_entry_id: int) -> None:
-    entry = _get_finance_entry_or_fail(db, finance_entry_id)
+def delete_finance_entry(db: Session, finance_entry_id: int, current_user: Optional[User] = None) -> None:
+    entry = _get_finance_entry_or_fail(db, finance_entry_id, current_user=current_user)
+    if entry.recibo_id:
+        raise BusinessRuleViolation("Lancamentos gerados por recibo devem ser excluidos pelo proprio recibo.")
     if entry.os_id:
         raise BusinessRuleViolation("Lancamentos gerados por OS devem ser excluidos pela propria ordem de servico.")
+    if entry.nfe_id:
+        raise BusinessRuleViolation("Lancamentos gerados por NF-e devem ser excluidos pela propria nota fiscal.")
     if entry.status == FinanceStatus.PAGO.value or Decimal(entry.valor_pago) > 0:
         raise BusinessRuleViolation("Nao e permitido excluir registros financeiros pagos ou com baixa parcial.")
     db.delete(entry)
     db.commit()
 
 
-def list_cash_ledger_entries(db: Session) -> List[CashLedgerEntry]:
-    return db.query(CashLedgerEntry).order_by(CashLedgerEntry.data_movimento.desc(), CashLedgerEntry.id.desc()).all()
+def list_cash_ledger_entries(db: Session, current_user: Optional[User] = None) -> List[CashLedgerEntry]:
+    query = db.query(CashLedgerEntry).join(FinanceEntry, FinanceEntry.id == CashLedgerEntry.finance_entry_id)
+    if current_user and not _is_master_user(current_user):
+        query = query.filter(FinanceEntry.empresa_prestadora_id == _require_company_scope(current_user))
+    return query.order_by(CashLedgerEntry.data_movimento.desc(), CashLedgerEntry.id.desc()).all()
 
 
-def get_finance_dashboard(db: Session) -> dict:
-    entries = db.query(FinanceEntry).order_by(FinanceEntry.id.asc()).all()
+def get_finance_dashboard(db: Session, current_user: Optional[User] = None) -> dict:
+    entries = _apply_company_scope(db.query(FinanceEntry), FinanceEntry, current_user).order_by(FinanceEntry.id.asc()).all()
     _sync_finance_statuses(db, entries)
-    ledger_entries = list_cash_ledger_entries(db)
+    ledger_entries = list_cash_ledger_entries(db, current_user=current_user)
 
     total_a_receber = sum(
         (_money(Decimal(entry.valor) - Decimal(entry.valor_pago)) for entry in entries if entry.tipo == "receita"),
@@ -1274,19 +1440,20 @@ def get_finance_dashboard(db: Session) -> dict:
     }
 
 
-def _work_order_query(db: Session):
-    return db.query(WorkOrder).options(
+def _work_order_query(db: Session, current_user: Optional[User] = None):
+    query = db.query(WorkOrder).options(
         joinedload(WorkOrder.cliente),
         joinedload(WorkOrder.tecnico),
-        joinedload(WorkOrder.produtos).joinedload(WorkOrderProduct.produto),
-        joinedload(WorkOrder.pragas).joinedload(WorkOrderPest.praga),
-        joinedload(WorkOrder.fotos),
-        joinedload(WorkOrder.financeiros),
+        selectinload(WorkOrder.produtos).joinedload(WorkOrderProduct.produto),
+        selectinload(WorkOrder.pragas).joinedload(WorkOrderPest.praga),
+        selectinload(WorkOrder.fotos),
+        selectinload(WorkOrder.financeiros),
     )
+    return _apply_company_scope(query, WorkOrder, current_user)
 
 
-def _get_work_order_or_fail(db: Session, work_order_id: int) -> WorkOrder:
-    work_order = _work_order_query(db).filter(WorkOrder.id == work_order_id).first()
+def _get_work_order_or_fail(db: Session, work_order_id: int, current_user: Optional[User] = None) -> WorkOrder:
+    work_order = _work_order_query(db, current_user=current_user).filter(WorkOrder.id == work_order_id).first()
     if not work_order:
         raise BusinessRuleViolation("Ordem de servico nao encontrada.")
     return work_order
@@ -1295,9 +1462,9 @@ def _get_work_order_or_fail(db: Session, work_order_id: int) -> WorkOrder:
 def _validate_work_order_payload(
     db: Session,
     payload: WorkOrderCreate,
+    current_user: Optional[User] = None,
     current_work_order_id: Optional[int] = None,
 ) -> tuple[Customer, dict]:
-    normalized_number = _clean_required_text(payload.numero, "Informe o numero da ordem de servico.")
     normalized_location = _clean_required_text(payload.local_execucao, "Informe o local de execucao da ordem de servico.")
     normalized_notes = _clean_optional_text(payload.observacoes)
 
@@ -1306,17 +1473,14 @@ def _validate_work_order_payload(
     if payload.hora_fim and payload.hora_fim <= payload.hora_inicio:
         raise BusinessRuleViolation("A hora final deve ser posterior a hora inicial.")
 
-    duplicate_query = db.query(WorkOrder).filter(WorkOrder.numero == normalized_number)
-    if current_work_order_id is not None:
-        duplicate_query = duplicate_query.filter(WorkOrder.id != current_work_order_id)
-    if duplicate_query.first():
-        raise BusinessRuleViolation("Ja existe ordem de servico com este numero.")
+    customer = _get_customer_or_fail(db, payload.cliente_id, current_user=current_user)
+    _get_technician_or_fail(db, payload.tecnico_id, require_active=True, current_user=current_user)
 
-    customer = _get_customer_or_fail(db, payload.cliente_id)
-    _get_technician_or_fail(db, payload.tecnico_id, require_active=True)
-
-    if not payload.produtos:
-        raise BusinessRuleViolation("A OS deve possuir ao menos um produto utilizado.")
+    target_status = _enum_value(payload.status)
+    if not payload.produtos and target_status in {"em_execucao", "concluida"}:
+        raise BusinessRuleViolation(
+            "A OS precisa possuir ao menos um produto antes de ser marcada como em execucao ou concluida."
+        )
 
     seen_product_ids = set()
     for item in payload.produtos:
@@ -1330,13 +1494,35 @@ def _validate_work_order_payload(
         if pest_id in seen_pest_ids:
             raise BusinessRuleViolation("A mesma praga nao pode ser selecionada mais de uma vez.")
         seen_pest_ids.add(pest_id)
-        _get_pest_or_fail(db, pest_id)
+        _get_pest_or_fail(db, pest_id, current_user=current_user)
 
     return customer, {
-        "numero": normalized_number,
         "local_execucao": normalized_location,
         "observacoes": normalized_notes,
     }
+
+
+def _generate_work_order_number(db: Session, reference_date: Optional[date] = None) -> str:
+    base_date = reference_date or date.today()
+    prefix = f"OS-{base_date.year}-"
+    last_work_order = (
+        db.query(WorkOrder)
+        .filter(WorkOrder.numero.like(f"{prefix}%"))
+        .order_by(WorkOrder.id.desc())
+        .first()
+    )
+    sequence = 1
+    if last_work_order and last_work_order.numero.startswith(prefix):
+        try:
+            sequence = int(last_work_order.numero.replace(prefix, "")) + 1
+        except ValueError:
+            sequence = 1
+
+    candidate = f"{prefix}{sequence:06d}"
+    while db.query(WorkOrder).filter(WorkOrder.numero == candidate).first():
+        sequence += 1
+        candidate = f"{prefix}{sequence:06d}"
+    return candidate
 
 
 def _restore_stock(work_order: WorkOrder) -> None:
@@ -1348,9 +1534,10 @@ def _apply_work_order_products(
     db: Session,
     work_order: WorkOrder,
     product_items: Iterable,
+    current_user: Optional[User] = None,
 ) -> None:
     for item in product_items:
-        product = _get_product_or_fail(db, item.produto_id)
+        product = _get_product_or_fail(db, item.produto_id, current_user=current_user)
         if Decimal(product.estoque_atual) < item.quantidade:
             raise BusinessRuleViolation(f"Estoque insuficiente para o produto '{product.nome}'.")
         product.estoque_atual = Decimal(product.estoque_atual) - item.quantidade
@@ -1364,12 +1551,12 @@ def _apply_work_order_products(
         )
 
 
-def _sync_work_order_pests(db: Session, work_order: WorkOrder, pest_ids: List[int]) -> None:
+def _sync_work_order_pests(db: Session, work_order: WorkOrder, pest_ids: List[int], current_user: Optional[User] = None) -> None:
     for item in list(work_order.pragas):
         db.delete(item)
     db.flush()
     for pest_id in pest_ids:
-        _get_pest_or_fail(db, pest_id)
+        _get_pest_or_fail(db, pest_id, current_user=current_user)
         db.add(WorkOrderPest(os_id=work_order.id, praga_id=pest_id))
 
 
@@ -1395,6 +1582,7 @@ def _sync_work_order_finance(
         entry.referencia = f"OS-{work_order.numero}"
         entry.cliente_id = customer.id
         entry.os_id = work_order.id
+        entry.empresa_prestadora_id = work_order.empresa_prestadora_id
         _sync_finance_status(entry)
         db.add(entry)
         for extra in linked_entries[1:]:
@@ -1411,11 +1599,13 @@ def _sync_work_order_finance(
 def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Optional[int] = None) -> WorkOrder:
     from app.application.scheduling_services import _sync_google_for_appointment, get_appointment, sync_work_order_appointment
     from app.domain.enums import AppointmentStatus
+    from app.modules.whatsapp.service import send_appointment_whatsapp_message
 
-    customer, normalized = _validate_work_order_payload(db, payload)
+    current_user = _get_user_record_or_fail(db, current_user_id) if current_user_id else None
+    customer, normalized = _validate_work_order_payload(db, payload, current_user=current_user)
 
     work_order = WorkOrder(
-        numero=normalized["numero"],
+        numero=_generate_work_order_number(db),
         cliente_id=payload.cliente_id,
         tecnico_id=payload.tecnico_id,
         data_execucao=payload.data_execucao,
@@ -1426,14 +1616,15 @@ def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Op
         garantia_ate=payload.garantia_ate,
         status=payload.status.value,
         valor_servico=payload.valor_servico,
+        empresa_prestadora_id=customer.empresa_prestadora_id,
     )
     db.add(work_order)
     db.flush()
 
-    _apply_work_order_products(db, work_order, payload.produtos)
-    _sync_work_order_pests(db, work_order, payload.pragas_ids)
+    _apply_work_order_products(db, work_order, payload.produtos, current_user=current_user)
+    _sync_work_order_pests(db, work_order, payload.pragas_ids, current_user=current_user)
     _sync_work_order_finance(db, work_order, customer, payload.gerar_financeiro, payload.valor_servico)
-    appointment = sync_work_order_appointment(
+    appointment, appointment_created = sync_work_order_appointment(
         db,
         work_order,
         current_user_id=current_user_id,
@@ -1447,6 +1638,13 @@ def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Op
     )
 
     db.commit()
+    if get_settings().whatsapp_enabled and appointment_created and appointment:
+        appointment = send_appointment_whatsapp_message(
+            db,
+            appointment.id,
+            current_user_id=current_user_id,
+            automatic=True,
+        )
     if appointment and appointment.sincronizar_google:
         appointment = get_appointment(db, appointment.id)
         _sync_google_for_appointment(
@@ -1456,15 +1654,15 @@ def create_work_order(db: Session, payload: WorkOrderCreate, current_user_id: Op
             user_id=current_user_id,
         )
         db.commit()
-    return get_work_order(db, work_order.id)
+    return get_work_order(db, work_order.id, current_user=current_user)
 
 
-def list_work_orders(db: Session) -> List[WorkOrder]:
-    return _work_order_query(db).order_by(WorkOrder.data_execucao.desc(), WorkOrder.numero.desc()).all()
+def list_work_orders(db: Session, current_user: Optional[User] = None) -> List[WorkOrder]:
+    return _work_order_query(db, current_user=current_user).order_by(WorkOrder.data_execucao.desc(), WorkOrder.numero.desc()).all()
 
 
-def get_work_order(db: Session, work_order_id: int) -> WorkOrder:
-    return _get_work_order_or_fail(db, work_order_id)
+def get_work_order(db: Session, work_order_id: int, current_user: Optional[User] = None) -> WorkOrder:
+    return _get_work_order_or_fail(db, work_order_id, current_user=current_user)
 
 
 def update_work_order(
@@ -1475,16 +1673,17 @@ def update_work_order(
 ) -> WorkOrder:
     from app.application.scheduling_services import _sync_google_for_appointment, get_appointment, sync_work_order_appointment
     from app.domain.enums import AppointmentStatus
+    from app.modules.whatsapp.service import send_appointment_whatsapp_message
 
-    work_order = _get_work_order_or_fail(db, work_order_id)
-    customer, normalized = _validate_work_order_payload(db, payload, current_work_order_id=work_order_id)
+    current_user = _get_user_record_or_fail(db, current_user_id) if current_user_id else None
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
+    customer, normalized = _validate_work_order_payload(db, payload, current_user=current_user, current_work_order_id=work_order_id)
 
     _restore_stock(work_order)
     for item in list(work_order.produtos):
         db.delete(item)
     db.flush()
 
-    work_order.numero = normalized["numero"]
     work_order.cliente_id = payload.cliente_id
     work_order.tecnico_id = payload.tecnico_id
     work_order.data_execucao = payload.data_execucao
@@ -1495,11 +1694,12 @@ def update_work_order(
     work_order.garantia_ate = payload.garantia_ate
     work_order.status = payload.status.value
     work_order.valor_servico = payload.valor_servico
+    work_order.empresa_prestadora_id = customer.empresa_prestadora_id
 
-    _apply_work_order_products(db, work_order, payload.produtos)
-    _sync_work_order_pests(db, work_order, payload.pragas_ids)
+    _apply_work_order_products(db, work_order, payload.produtos, current_user=current_user)
+    _sync_work_order_pests(db, work_order, payload.pragas_ids, current_user=current_user)
     _sync_work_order_finance(db, work_order, customer, payload.gerar_financeiro, payload.valor_servico)
-    appointment = sync_work_order_appointment(
+    appointment, appointment_created = sync_work_order_appointment(
         db,
         work_order,
         current_user_id=current_user_id,
@@ -1513,6 +1713,13 @@ def update_work_order(
     )
 
     db.commit()
+    if get_settings().whatsapp_enabled and appointment_created and appointment:
+        appointment = send_appointment_whatsapp_message(
+            db,
+            appointment.id,
+            current_user_id=current_user_id,
+            automatic=True,
+        )
     if appointment and appointment.sincronizar_google:
         appointment = get_appointment(db, appointment.id)
         _sync_google_for_appointment(
@@ -1522,11 +1729,11 @@ def update_work_order(
             user_id=current_user_id,
         )
         db.commit()
-    return get_work_order(db, work_order.id)
+    return get_work_order(db, work_order.id, current_user=current_user)
 
 
-def delete_work_order(db: Session, work_order_id: int) -> None:
-    work_order = _get_work_order_or_fail(db, work_order_id)
+def delete_work_order(db: Session, work_order_id: int, current_user: Optional[User] = None) -> None:
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
     _restore_stock(work_order)
     for entry in list(work_order.financeiros):
         if Decimal(entry.valor_pago) > 0:
@@ -1542,7 +1749,8 @@ def mark_work_order_as_completed(db: Session, work_order_id: int, current_user_i
     from app.domain.enums import AppointmentSource, AppointmentStatus
     from app.infrastructure.models import Appointment
 
-    work_order = _get_work_order_or_fail(db, work_order_id)
+    current_user = _get_user_record_or_fail(db, current_user_id) if current_user_id else None
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
     if work_order.status == "cancelada":
         raise BusinessRuleViolation("Nao e possivel efetuar uma OS cancelada.")
     work_order.status = "concluida"
@@ -1567,7 +1775,7 @@ def mark_work_order_as_completed(db: Session, work_order_id: int, current_user_i
             ),
             current_user_id=current_user_id,
         )
-    return get_work_order(db, work_order.id)
+    return get_work_order(db, work_order.id, current_user=current_user)
 
 
 def settle_work_order(db: Session, work_order_id: int, current_user_id: Optional[int] = None) -> WorkOrder:
@@ -1576,7 +1784,8 @@ def settle_work_order(db: Session, work_order_id: int, current_user_id: Optional
     from app.domain.enums import AppointmentSource, AppointmentStatus
     from app.infrastructure.models import Appointment
 
-    work_order = _get_work_order_or_fail(db, work_order_id)
+    current_user = _get_user_record_or_fail(db, current_user_id) if current_user_id else None
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
     if work_order.status == "cancelada":
         raise BusinessRuleViolation("Nao e possivel dar baixa em uma OS cancelada.")
     work_order.status = "concluida"
@@ -1604,18 +1813,68 @@ def settle_work_order(db: Session, work_order_id: int, current_user_id: Optional
             ),
             current_user_id=current_user_id,
         )
-    return get_work_order(db, work_order.id)
+    return get_work_order(db, work_order.id, current_user=current_user)
 
 
-def _get_work_order_photo_or_fail(db: Session, photo_id: int) -> WorkOrderPhoto:
-    photo = db.query(WorkOrderPhoto).filter(WorkOrderPhoto.id == photo_id).first()
+def reopen_work_order(db: Session, work_order_id: int, current_user_id: Optional[int] = None) -> WorkOrder:
+    from app.application.schemas import AppointmentStatusUpdate
+    from app.application.scheduling_services import update_appointment_status
+    from app.domain.enums import AppointmentSource, AppointmentStatus, WorkOrderStatus
+    from app.infrastructure.models import Appointment
+
+    current_user = _get_user_record_or_fail(db, current_user_id) if current_user_id else None
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
+    previous_status = work_order.status
+    work_order.status = WorkOrderStatus.ABERTA.value
+    db.commit()
+
+    appointment = (
+        db.query(Appointment)
+        .filter(
+            Appointment.os_id == work_order_id,
+            Appointment.origem == AppointmentSource.ORDEM_SERVICO.value,
+            Appointment.agendamento_pai_id.is_(None),
+        )
+        .order_by(Appointment.id.desc())
+        .first()
+    )
+    if appointment and appointment.status in {
+        AppointmentStatus.CONCLUIDO.value,
+        AppointmentStatus.CANCELADO.value,
+        AppointmentStatus.NAO_REALIZADO.value,
+    }:
+        update_appointment_status(
+            db,
+            appointment.id,
+            AppointmentStatusUpdate(
+                status=AppointmentStatus.PENDENTE,
+                detalhes=(
+                    f"OS {work_order.numero} reaberta para novo acompanhamento operacional "
+                    f"(status anterior: {previous_status})."
+                ),
+            ),
+            current_user_id=current_user_id,
+        )
+    return get_work_order(db, work_order.id, current_user=current_user)
+
+
+def _get_work_order_photo_or_fail(db: Session, photo_id: int, current_user: Optional[User] = None) -> WorkOrderPhoto:
+    query = db.query(WorkOrderPhoto).join(WorkOrder, WorkOrder.id == WorkOrderPhoto.os_id)
+    if current_user and not _is_master_user(current_user):
+        query = query.filter(WorkOrder.empresa_prestadora_id == _require_company_scope(current_user))
+    photo = query.filter(WorkOrderPhoto.id == photo_id).first()
     if not photo:
         raise BusinessRuleViolation("Foto da ordem de servico nao encontrada.")
     return photo
 
 
-def add_work_order_photos(db: Session, work_order_id: int, files: Iterable[tuple[str, str, bytes]]) -> WorkOrder:
-    work_order = _get_work_order_or_fail(db, work_order_id)
+def add_work_order_photos(
+    db: Session,
+    work_order_id: int,
+    files: Iterable[tuple[str, str, bytes]],
+    current_user: Optional[User] = None,
+) -> WorkOrder:
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
     prepared_files = list(files)
     if not prepared_files:
         raise BusinessRuleViolation("Selecione pelo menos uma foto para anexar na ordem de servico.")
@@ -1643,22 +1902,22 @@ def add_work_order_photos(db: Session, work_order_id: int, files: Iterable[tuple
 
     db.commit()
     db.expire_all()
-    return get_work_order(db, work_order.id)
+    return get_work_order(db, work_order.id, current_user=current_user)
 
 
-def delete_work_order_photo(db: Session, work_order_id: int, photo_id: int) -> WorkOrder:
-    work_order = _get_work_order_or_fail(db, work_order_id)
-    photo = _get_work_order_photo_or_fail(db, photo_id)
+def delete_work_order_photo(db: Session, work_order_id: int, photo_id: int, current_user: Optional[User] = None) -> WorkOrder:
+    work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
+    photo = _get_work_order_photo_or_fail(db, photo_id, current_user=current_user)
     if photo.os_id != work_order.id:
         raise BusinessRuleViolation("A foto informada nao pertence a esta ordem de servico.")
     db.delete(photo)
     db.commit()
     db.expire_all()
-    return get_work_order(db, work_order.id)
+    return get_work_order(db, work_order.id, current_user=current_user)
 
 
-def get_work_order_photo_content(db: Session, photo_id: int) -> tuple[str, str, bytes]:
-    photo = _get_work_order_photo_or_fail(db, photo_id)
+def get_work_order_photo_content(db: Session, photo_id: int, current_user: Optional[User] = None) -> tuple[str, str, bytes]:
+    photo = _get_work_order_photo_or_fail(db, photo_id, current_user=current_user)
     return photo.filename, photo.content_type, photo.image_data
 
 
@@ -1685,39 +1944,71 @@ def _draw_section_title(pdf: canvas.Canvas, y: float, title: str) -> float:
     return y - 8 * mm
 
 
-def _draw_key_values(pdf: canvas.Canvas, y: float, items: List[tuple]) -> float:
+def _draw_key_values(
+    pdf: canvas.Canvas,
+    y: float,
+    items: List[tuple],
+    *,
+    value_x: float = 58 * mm,
+    font_size: float = 10,
+    row_height: float = 6 * mm,
+    value_width_chars: Optional[int] = None,
+) -> float:
+    import textwrap
+
     pdf.setFillColor(colors.black)
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont("Helvetica", font_size)
     for label, value in items:
-        pdf.setFont("Helvetica-Bold", 10)
+        pdf.setFont("Helvetica-Bold", font_size)
         pdf.drawString(20 * mm, y, f"{label}:")
-        pdf.setFont("Helvetica", 10)
-        pdf.drawString(58 * mm, y, str(value))
-        y -= 6 * mm
+        pdf.setFont("Helvetica", font_size)
+        wrapped_values = textwrap.wrap(str(value), width=value_width_chars) if value_width_chars else [str(value)]
+        wrapped_values = wrapped_values or [""]
+        pdf.drawString(value_x, y, wrapped_values[0])
+        y -= row_height
+        for extra_line in wrapped_values[1:]:
+            pdf.drawString(value_x, y, extra_line)
+            y -= row_height
     return y
 
 
-def _draw_paragraph(pdf: canvas.Canvas, y: float, text: str, width_chars: int = 92) -> float:
+def _draw_paragraph(
+    pdf: canvas.Canvas,
+    y: float,
+    text: str,
+    width_chars: int = 92,
+    *,
+    font_size: float = 10,
+    line_height: float = 5 * mm,
+) -> float:
     import textwrap
 
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont("Helvetica", font_size)
     for line in textwrap.wrap(text or "", width=width_chars):
         pdf.drawString(20 * mm, y, line)
-        y -= 5 * mm
+        y -= line_height
     return y
 
 
-def _draw_bullets(pdf: canvas.Canvas, y: float, items: List[str], width_chars: int = 88) -> float:
+def _draw_bullets(
+    pdf: canvas.Canvas,
+    y: float,
+    items: List[str],
+    width_chars: int = 88,
+    *,
+    font_size: float = 10,
+    line_height: float = 5 * mm,
+) -> float:
     import textwrap
 
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont("Helvetica", font_size)
     for item in items:
         wrapped = textwrap.wrap(item, width=width_chars) or [""]
         pdf.drawString(22 * mm, y, f"- {wrapped[0]}")
-        y -= 5 * mm
+        y -= line_height
         for line in wrapped[1:]:
             pdf.drawString(28 * mm, y, line)
-            y -= 5 * mm
+            y -= line_height
     return y
 
 
@@ -1808,161 +2099,651 @@ def _company_identification_lines() -> List[str]:
     ]
 
 
-def generate_work_order_pdf(db: Session, work_order_id: int) -> bytes:
-    work_order = get_work_order(db, work_order_id)
+def _company_identification_summary_lines() -> List[str]:
     settings = get_settings()
-    buffer = BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=A4)
-    y = _draw_document_frame(
-        pdf,
-        "Comprovante de Execucao / Ordem de Servico",
-        "Conforme requisitos aplicaveis da RDC 622/2022",
-    )
-
-    y = _draw_section_title(pdf, y, "Identificacao do atendimento")
-    y = _draw_key_values(
-        pdf,
-        y,
-        [
-            ("Cliente", work_order.cliente.razao_social),
-            ("Endereco do imovel", f"{work_order.cliente.endereco} - {work_order.cliente.cidade}/{work_order.cliente.estado}"),
-            ("Praga(s) alvo", ", ".join([item.praga.nome_comum for item in work_order.pragas]) if work_order.pragas else "Nao informada"),
-            ("Data de execucao", work_order.data_execucao.strftime("%d/%m/%Y")),
-            ("Prazo de assistencia tecnica", _assistance_text(work_order)),
-            ("Horario", f"{work_order.hora_inicio} ate {work_order.hora_fim or '--:--'}"),
-            ("Local", work_order.local_execucao),
-            ("Responsavel tecnico", f"{settings.technical_responsible_name} - {settings.technical_responsible_registry}"),
-            ("Centro de Informacao Toxicologica", settings.toxicology_center_phone),
-            ("Valor", f"R$ {Decimal(work_order.valor_servico):.2f}"),
-        ],
-    )
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Produtos aplicados")
-    y = _draw_bullets(
-        pdf,
-        y,
-        [
-            f"{item.produto.nome} | Grupo quimico: {item.produto.grupo_quimico} | Concentracao de uso: {item.produto.concentracao} | Quantidade: {item.quantidade} | Diluicao: {item.diluicao}"
-            for item in work_order.produtos
-        ],
-    )
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Orientacoes pertinentes ao servico executado")
-    y = _draw_bullets(
-        pdf,
-        y,
-        [
-            "Manter pessoas e animais afastados das areas tratadas durante o periodo de seguranca definido pela empresa.",
-            "Nao remover residuos de barreiras quimicas ou iscas tecnicas sem orientacao profissional.",
-            "Em caso de intercorrencia com o produto utilizado, contatar imediatamente o Centro de Informacao Toxicologica informado neste comprovante.",
-        ],
-    )
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Observacoes")
-    y = _draw_paragraph(pdf, y, work_order.observacoes or "Sem observacoes registradas.")
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Identificacao da empresa prestadora")
-    y = _draw_bullets(pdf, y, _company_identification_lines(), width_chars=84)
-
-    pdf.setFont("Helvetica", 10)
-    pdf.drawString(20 * mm, 24 * mm, "Assinatura do tecnico: ______________________________")
-    pdf.drawRightString(190 * mm, 24 * mm, "Assinatura do cliente: ______________________________")
-    pdf.showPage()
-    pdf.save()
-    return buffer.getvalue()
-
-
-def generate_technical_report_pdf(db: Session, work_order_id: int) -> bytes:
-    work_order = get_work_order(db, work_order_id)
-    settings = get_settings()
-    buffer = BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=A4)
-    y = _draw_document_frame(
-        pdf,
-        "Relatorio Tecnico",
-        "Estruturado com base nos requisitos aplicaveis da RDC 622/2022",
-    )
-
-    y = _draw_section_title(pdf, y, "Resumo tecnico")
-    y = _draw_key_values(
-        pdf,
-        y,
-        [
-            ("OS", work_order.numero),
-            ("Cliente", work_order.cliente.razao_social),
-            ("Tecnico executor", work_order.tecnico.nome),
-            ("Responsavel tecnico", f"{settings.technical_responsible_name} - {settings.technical_responsible_registry}"),
-            ("Data da vistoria", work_order.data_execucao.isoformat()),
-            ("Status da OS", work_order.status.replace("_", " ")),
-            ("Garantia", work_order.garantia_ate.isoformat()),
-        ],
-    )
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Diagnostico")
-    diagnostic = (
-        f"Foram avaliadas as condicoes do local '{work_order.local_execucao}' para controle de vetores e pragas urbanas. "
-        f"O atendimento foi executado conforme os dados operacionais registrados na OS {work_order.numero}."
-    )
-    y = _draw_paragraph(pdf, y, diagnostic)
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Pragas e riscos observados")
-    pest_items = [f"{item.praga.nome_comum} ({item.praga.nome_cientifico})" for item in work_order.pragas]
-    if not pest_items:
-        pest_items = ["Nao houve praga especifica registrada; manter monitoramento preventivo."]
-    y = _draw_bullets(pdf, y, pest_items)
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Produtos e metodologia")
-    y = _draw_bullets(
-        pdf,
-        y,
-        [
-            f"{item.produto.nome} com principio ativo {item.produto.principio_ativo}, quantidade {item.quantidade} e diluicao {item.diluicao}"
-            for item in work_order.produtos
-        ],
-    )
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Recomendacoes")
-    recommendations = [
-        "Manter o ambiente higienizado, sem aculo de residuos e umidade excessiva.",
-        "Reforcar vedacao de acessos, ralos, frestas e pontos de abrigo identificados.",
-        f"Agendar reavaliacao antes do termino da garantia em {work_order.garantia_ate.isoformat()}.",
+    return [
+        f"Empresa especializada: {settings.company_trade_name} | {settings.company_legal_name}",
+        f"Endereco e contato: {settings.company_address} | Telefone: {settings.company_phone}",
+        f"Licenca sanitaria: {settings.sanitary_license_number} | validade: {settings.sanitary_license_expiry}",
+        f"Licenca ambiental: {settings.environmental_license_number} | validade: {settings.environmental_license_expiry}",
     ]
-    y = _draw_bullets(pdf, y, recommendations)
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Observacoes complementares")
-    y = _draw_paragraph(pdf, y, work_order.observacoes or "Sem observacoes complementares.")
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Dados regulatorios da empresa")
-    y = _draw_bullets(pdf, y, _company_identification_lines(), width_chars=84)
-
-    pdf.setFont("Helvetica", 10)
-    pdf.drawString(20 * mm, 24 * mm, "Responsavel tecnico: ______________________________")
-    pdf.drawRightString(190 * mm, 24 * mm, "Cliente/ciente: ______________________________")
-    pdf.showPage()
-    pdf.save()
-    return buffer.getvalue()
 
 
-def generate_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
-    work_order = get_work_order(db, work_order_id)
+def _resolve_sanitary_certificate_template_path() -> Optional[Path]:
+    try:
+        return require_certificate_model_path()
+    except BusinessRuleViolation:
+        return None
+
+
+def _split_text_to_width(pdf: canvas.Canvas, text: str, font_name: str, font_size: float, max_width: float) -> List[str]:
+    words = str(text or "").split()
+    if not words:
+        return []
+
+    lines: List[str] = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if pdf.stringWidth(candidate, font_name, font_size) <= max_width:
+            current = candidate
+            continue
+        lines.append(current)
+        current = word
+    lines.append(current)
+    return lines
+
+
+def _draw_centered_text_to_fit(
+    pdf: canvas.Canvas,
+    text: str,
+    *,
+    center_x: float,
+    baseline_y: float,
+    max_width: float,
+    font_name: str,
+    initial_size: float,
+    min_size: float,
+) -> float:
+    size = initial_size
+    while size > min_size and pdf.stringWidth(text, font_name, size) > max_width:
+        size -= 0.5
+    pdf.setFont(font_name, size)
+    pdf.drawCentredString(center_x, baseline_y, text)
+    return size
+
+
+def _draw_centered_paragraph(
+    pdf: canvas.Canvas,
+    text: str,
+    *,
+    center_x: float,
+    top_y: float,
+    max_width: float,
+    font_name: str,
+    font_size: float,
+    leading: float,
+) -> None:
+    lines = _split_text_to_width(pdf, text, font_name, font_size, max_width)
+    if not lines:
+        return
+
+    pdf.setFont(font_name, font_size)
+    current_y = top_y
+    for line in lines:
+        pdf.drawCentredString(center_x, current_y, line)
+        current_y -= leading
+
+
+def _draw_template_certificate_background(pdf: canvas.Canvas, template_path: Path, page_width: float, page_height: float) -> None:
+    pdf.drawImage(ImageReader(str(template_path)), 0, 0, width=page_width, height=page_height, mask="auto")
+
+
+def _sanitize_document_filename_part(value: Optional[str]) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower())
+    normalized = normalized.strip("_")
+    return normalized or "cliente"
+
+
+def _compose_customer_full_address(customer: Customer) -> str:
+    street_parts = [customer.endereco]
+    if customer.numero:
+        street_parts.append(customer.numero)
+    if customer.complemento:
+        street_parts.append(customer.complemento)
+    street_line = ", ".join(part for part in street_parts if part)
+
+    locality_parts = [customer.bairro, customer.cidade]
+    locality = " - ".join(part for part in locality_parts if part)
+    state_zip = " / ".join(part for part in [customer.estado, customer.cep] if part)
+    tail = ", ".join(part for part in [locality, state_zip] if part)
+    return ", ".join(part for part in [street_line, tail] if part)
+
+
+def _resolve_work_order_provider_company(db: Session, work_order: WorkOrder) -> Optional[ProviderCompany]:
+    if work_order.empresa_prestadora_id is None:
+        return None
+    return db.query(ProviderCompany).filter(ProviderCompany.id == work_order.empresa_prestadora_id).first()
+
+
+def _resolve_guarantee_company_data(db: Session, work_order: WorkOrder) -> dict[str, str]:
+    settings = get_settings()
+    provider_company = _resolve_work_order_provider_company(db, work_order)
+    company_name = (
+        (provider_company.nome_fantasia if provider_company and provider_company.nome_fantasia else None)
+        or (provider_company.razao_social if provider_company else None)
+        or settings.company_trade_name
+        or settings.company_name
+    )
+    company_cnpj = (provider_company.cnpj if provider_company else None) or settings.company_cnpj or ""
+    company_email = (provider_company.email if provider_company else None) or getattr(settings, "company_email", "") or ""
+    phone_1 = (provider_company.telefone if provider_company else None) or settings.company_phone or ""
+    phone_2 = getattr(settings, "company_phone_secondary", "") or ""
+    company_site = getattr(settings, "company_website", "") or ""
+    return {
+        "empresa_nome": company_name,
+        "empresa_cnpj": company_cnpj,
+        "empresa_site": company_site,
+        "empresa_email": company_email,
+        "empresa_telefone_1": phone_1,
+        "empresa_telefone_2": phone_2,
+    }
+
+
+def _guarantee_certificate_filename_for_work_order(work_order: WorkOrder) -> str:
+    customer_name = getattr(getattr(work_order, "cliente", None), "razao_social", "") or ""
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(customer_name).strip().lower()).strip("_")
+    return f"certificado_{normalized or 'cliente'}.pdf"
+
+
+def _resolve_guarantee_template_path_from_dirs(
+    certificate_models_path: Path,
+    legacy_models_path: Optional[Path],
+) -> Optional[Path]:
+    preferred_candidates = [
+        certificate_models_path / "modelo.png",
+        certificate_models_path / "modelo.jpg",
+        certificate_models_path / "modelo.jpeg",
+    ]
+    for candidate in preferred_candidates:
+        if candidate.exists():
+            return candidate
+
+    searchable_dirs = [legacy_models_path, certificate_models_path]
+    ranked_keywords = ("garantia", "certificado", "modelo")
+    found_candidates: list[tuple[int, Path]] = []
+    for directory in searchable_dirs:
+        if not directory or not directory.exists():
+            continue
+        for path in directory.iterdir():
+            if not path.is_file() or path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+                continue
+            path_name = path.stem.lower()
+            score = sum(1 for keyword in ranked_keywords if keyword in path_name)
+            found_candidates.append((score, path))
+    if not found_candidates:
+        return None
+    found_candidates.sort(key=lambda item: (-item[0], str(item[1]).lower()))
+    return found_candidates[0][1]
+
+
+def _resolve_guarantee_template_path() -> Optional[Path]:
+    settings = get_settings()
+    resolved = _resolve_guarantee_template_path_from_dirs(
+        settings.certificate_models_path,
+        settings.legacy_certificate_models_path,
+    )
+    LOGGER.info(
+        "guarantee_template_path_resolved certificate_models_path=%s legacy_models_path=%s found=%s",
+        settings.certificate_models_path,
+        settings.legacy_certificate_models_path,
+        resolved,
+    )
+    return resolved
+
+
+def _resolve_guarantee_service_text(work_order: WorkOrder) -> str:
+    if work_order.pragas:
+        return ", ".join(item.praga.nome_comum for item in work_order.pragas)
+    if work_order.produtos:
+        return "Controle de pragas com aplicacao tecnica monitorada"
+    return "Controle integrado de pragas urbanas"
+
+
+def _resolve_guarantee_dilution_text(work_order: WorkOrder) -> str:
+    dilutions = [str(item.diluicao).strip() for item in work_order.produtos if str(item.diluicao or "").strip()]
+    unique_values: list[str] = []
+    for value in dilutions:
+        if value not in unique_values:
+            unique_values.append(value)
+    return ", ".join(unique_values) if unique_values else "Conforme receituario tecnico"
+
+
+def _resolve_guarantee_validity_text(work_order: WorkOrder) -> str:
+    return work_order.garantia_ate.strftime("%d/%m/%Y")
+
+
+def _resolve_guarantee_term_text(work_order: WorkOrder) -> str:
+    delta = max((work_order.garantia_ate - work_order.data_execucao).days, 0)
+    return f"{delta} DIAS" if delta else "CONFORME CONTRATO"
+
+
+def _draw_guarantee_certificate_field(
+    pdf: canvas.Canvas,
+    *,
+    x: float,
+    y: float,
+    width: float,
+    value: str,
+    font_name: str = "Helvetica-Bold",
+    font_size: float = 11,
+    min_font_size: float = 8,
+    color=colors.HexColor("#343434"),
+) -> None:
+    pdf.setFillColor(colors.white)
+    pdf.rect(x - 1.2 * mm, y - 3.3 * mm, width + 2.4 * mm, 5.4 * mm, stroke=0, fill=1)
+    pdf.setFillColor(color)
+    _draw_centered_text_to_fit(
+        pdf,
+        value,
+        center_x=x + (width / 2),
+        baseline_y=y,
+        max_width=width,
+        font_name=font_name,
+        initial_size=font_size,
+        min_size=min_font_size,
+    )
+
+
+def _draw_guarantee_footer_block(
+    pdf: canvas.Canvas,
+    *,
+    x: float,
+    y: float,
+    lines: list[str],
+    width: float,
+    align: str = "left",
+    text_color=colors.HexColor("#198f43"),
+) -> None:
+    box_height = max(16 * mm, (len(lines) * 5.2 * mm) + 4 * mm)
+    pdf.setFillColor(colors.white)
+    pdf.rect(x, y - 3 * mm, width, box_height, stroke=0, fill=1)
+    pdf.setFillColor(text_color)
+    pdf.setFont("Helvetica-Bold", 10.2)
+    current_y = y + box_height - 8 * mm
+    for line in lines:
+        if align == "center":
+            pdf.drawCentredString(x + (width / 2), current_y, line)
+        else:
+            pdf.drawString(x + 2 * mm, current_y, line)
+        current_y -= 5.2 * mm
+
+
+def _resolve_responsible_name(settings, work_order: WorkOrder) -> str:
+    responsible_name = settings.technical_responsible_name
+    if responsible_name == "Responsavel tecnico nao configurado":
+        responsible_name = work_order.tecnico.nome
+    return responsible_name
+
+
+def _draw_signature_stamp(
+    pdf: canvas.Canvas,
+    *,
+    signature_path: Optional[Path],
+    center_x: float,
+    line_y: float,
+    label: str,
+    name: str,
+    max_width: float = 40 * mm,
+    max_height: float = 14 * mm,
+) -> None:
+    if signature_path:
+        image = ImageReader(str(signature_path))
+        image_width, image_height = image.getSize()
+        scale = min(max_width / image_width, max_height / image_height)
+        draw_width = image_width * scale
+        draw_height = image_height * scale
+        pdf.drawImage(
+            image,
+            center_x - (draw_width / 2),
+            line_y + 2 * mm,
+            width=draw_width,
+            height=draw_height,
+            preserveAspectRatio=True,
+            mask="auto",
+        )
+    else:
+        pdf.setFont("Helvetica-Oblique", 7.4)
+        pdf.drawCentredString(center_x, line_y + 5.4 * mm, "Assinatura tecnica pendente no cadastro")
+    pdf.line(center_x - (max_width / 2), line_y, center_x + (max_width / 2), line_y)
+    _draw_centered_text_to_fit(
+        pdf,
+        name,
+        center_x=center_x,
+        baseline_y=line_y - 5.2 * mm,
+        max_width=max_width,
+        font_name="Helvetica",
+        initial_size=8.4,
+        min_size=7.0,
+    )
+    pdf.setFont("Helvetica-Oblique", 7.8)
+    pdf.drawCentredString(center_x, line_y - 9.1 * mm, label)
+
+
+def _classify_food_risk_environment(work_order: WorkOrder) -> str:
+    context_fragments = [
+        str(work_order.local_execucao or ""),
+        str(work_order.observacoes or ""),
+    ]
+    context = " ".join(fragment.lower() for fragment in context_fragments if fragment)
+
+    if any(keyword in context for keyword in ("armaz", "estoq", "deposit", "doca", "exped", "logist")):
+        return "armazenagem e logistica de alimentos, insumos ou embalagens"
+    if any(keyword in context for keyword in ("cozinha", "preparo", "manip", "produc", "refeic", "fracion")):
+        return "manipulacao, preparo ou fracionamento de alimentos"
+    return "potencial de armazenamento, logistica, manipulacao ou circulacao de alimentos"
+
+
+def _short_food_risk_environment_label(risk_environment: str) -> str:
+    if "armazenagem e logistica" in risk_environment:
+        return "armazenagem/logistica de alimentos"
+    if "manipulacao, preparo ou fracionamento" in risk_environment:
+        return "manipulacao/preparo de alimentos"
+    return "ambiente com risco alimentar"
+
+
+def _summarize_certificate_pests(work_order: WorkOrder) -> str:
+    pest_names = [item.praga.nome_comum for item in work_order.pragas if getattr(item, "praga", None) and item.praga.nome_comum]
+    unique_names: List[str] = []
+    for pest_name in pest_names:
+        if pest_name not in unique_names:
+            unique_names.append(pest_name)
+
+    if not unique_names:
+        return "monitoramento preventivo sem praga especifica registrada"
+    if len(unique_names) == 1:
+        return unique_names[0]
+    if len(unique_names) == 2:
+        return f"{unique_names[0]} e {unique_names[1]}"
+    return f"{', '.join(unique_names[:2])} e outros vetores monitorados"
+
+
+def _build_framed_sanitary_certificate_text(work_order: WorkOrder) -> str:
+    risk_environment = _classify_food_risk_environment(work_order)
+    return (
+        "Certificamos, para fins de evidencia sanitaria e rastreabilidade operacional, que o estabelecimento acima "
+        f"identificado, inserido em ambiente com {risk_environment}, recebeu servico especializado de controle de "
+        "vetores e pragas urbanas em conformidade com a RDC 622/2022 e em alinhamento as Boas Praticas Sanitarias "
+        "previstas nas RDC 216/2004 e RDC 275/2002, com foco na seguranca dos alimentos, no controle de contaminacao, "
+        "na minimizacao de riscos a saude e na seguranca ambiental."
+    )
+
+
+def _build_standard_sanitary_certificate_text(work_order: WorkOrder) -> str:
+    risk_environment = _classify_food_risk_environment(work_order)
+    return (
+        f"Certificamos que o estabelecimento de {work_order.cliente.razao_social}, inserido em ambiente com "
+        f"{risk_environment}, recebeu servico tecnico especializado de controle de vetores e pragas urbanas, em "
+        "conformidade com a RDC 622/2022, com foco na seguranca dos alimentos, no controle de contaminacao e na "
+        "minimizacao de riscos a saude."
+    )
+
+
+def _build_standard_sanitary_declaration(work_order: WorkOrder) -> str:
+    return (
+        "Este certificado deve permanecer disponivel para verificacoes internas, auditorias e fiscalizacoes sanitarias, "
+        "como evidencia de rastreabilidade do servico, em alinhamento as boas praticas sanitarias das RDC 216/2004 e "
+        "RDC 275/2002 e as medidas de seguranca ambiental aplicaveis."
+    )
+
+
+def _draw_certificate_corner(pdf: canvas.Canvas, x: float, y: float, *, size: float, mirrored_x: bool = False, mirrored_y: bool = False) -> None:
+    direction_x = -1 if mirrored_x else 1
+    direction_y = -1 if mirrored_y else 1
+    path = pdf.beginPath()
+    path.moveTo(x, y)
+    path.curveTo(
+        x + direction_x * size * 0.18,
+        y + direction_y * size * 0.44,
+        x + direction_x * size * 0.56,
+        y + direction_y * size * 0.58,
+        x + direction_x * size * 0.9,
+        y + direction_y * size * 0.24,
+    )
+    path.moveTo(x + direction_x * size * 0.12, y + direction_y * size * 0.1)
+    path.curveTo(
+        x + direction_x * size * 0.32,
+        y + direction_y * size * 0.02,
+        x + direction_x * size * 0.48,
+        y + direction_y * size * 0.1,
+        x + direction_x * size * 0.5,
+        y + direction_y * size * 0.3,
+    )
+    pdf.drawPath(path)
+    pdf.circle(x + direction_x * size * 0.26, y + direction_y * size * 0.18, size * 0.04, stroke=1, fill=0)
+
+
+def _draw_certificate_flourish(pdf: canvas.Canvas, center_x: float, y: float, span: float) -> None:
+    pdf.line(center_x - span, y, center_x - 20 * mm, y)
+    pdf.line(center_x + 20 * mm, y, center_x + span, y)
+    pdf.circle(center_x, y, 1.4 * mm, stroke=1, fill=0)
+    pdf.circle(center_x - 5 * mm, y, 0.9 * mm, stroke=1, fill=0)
+    pdf.circle(center_x + 5 * mm, y, 0.9 * mm, stroke=1, fill=0)
+    path = pdf.beginPath()
+    path.moveTo(center_x - 14 * mm, y)
+    path.curveTo(center_x - 10 * mm, y + 2 * mm, center_x - 7 * mm, y + 2 * mm, center_x - 4 * mm, y)
+    path.moveTo(center_x + 14 * mm, y)
+    path.curveTo(center_x + 10 * mm, y + 2 * mm, center_x + 7 * mm, y + 2 * mm, center_x + 4 * mm, y)
+    pdf.drawPath(path)
+
+
+def _draw_certificate_info_box(
+    pdf: canvas.Canvas,
+    *,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    title: str,
+    lines: List[str],
+) -> None:
+    pdf.setStrokeColor(colors.HexColor("#c8a75d"))
+    pdf.setFillColor(colors.HexColor("#f8f1e5"))
+    pdf.roundRect(x, y, width, height, 4 * mm, stroke=1, fill=1)
+    pdf.setFillColor(colors.HexColor("#6f5521"))
+    pdf.setFont("Times-Bold", 11)
+    pdf.drawCentredString(x + width / 2, y + height - 7 * mm, title)
+    pdf.setStrokeColor(colors.HexColor("#dcc288"))
+    pdf.line(x + 8 * mm, y + height - 10 * mm, x + width - 8 * mm, y + height - 10 * mm)
+
+    font_name = "Times-Roman"
+    font_size = 9.6
+    leading = 4.2 * mm
+    max_width = width - 16 * mm
+    wrapped_lines: List[str] = []
+    for line in lines:
+        split_lines = _split_text_to_width(pdf, line, font_name, font_size, max_width)
+        wrapped_lines.extend(split_lines or [""])
+
+    max_lines = max(1, int((height - 18 * mm) // leading))
+    if len(wrapped_lines) > max_lines:
+        wrapped_lines = wrapped_lines[:max_lines]
+        last_line = wrapped_lines[-1].rstrip(". ")
+        while last_line and pdf.stringWidth(f"{last_line}...", font_name, font_size) > max_width:
+            last_line = last_line[:-1]
+        wrapped_lines[-1] = f"{last_line.rstrip() or '...'}..."
+
+    text = pdf.beginText(x + 8 * mm, y + height - 15.5 * mm)
+    text.setFont(font_name, font_size)
+    text.setLeading(leading)
+    text.setFillColor(colors.HexColor("#3f3527"))
+    for line in wrapped_lines:
+        text.textLine(line)
+    pdf.drawText(text)
+
+
+def _draw_certificate_badge(pdf: canvas.Canvas, center_x: float, center_y: float, radius: float) -> None:
+    pdf.setFillColor(colors.HexColor("#1f3556"))
+    pdf.setStrokeColor(colors.HexColor("#b3873a"))
+    pdf.setLineWidth(2)
+    pdf.circle(center_x, center_y, radius, stroke=1, fill=1)
+    pdf.setLineWidth(1.2)
+    pdf.setStrokeColor(colors.HexColor("#d7b56b"))
+    pdf.circle(center_x, center_y, radius - 3 * mm, stroke=1, fill=0)
+    pdf.setFillColor(colors.HexColor("#f1d48f"))
+    pdf.setFont("Times-Bold", 8.2)
+    pdf.drawCentredString(center_x, center_y + 4.6 * mm, "VETORES E")
+    pdf.drawCentredString(center_x, center_y + 0.7 * mm, "PRAGAS")
+    pdf.drawCentredString(center_x, center_y - 3.2 * mm, "URBANAS")
+    pdf.setFont("Helvetica-Bold", 5.8)
+    pdf.drawCentredString(center_x, center_y - 8.4 * mm, "RDC 622/2022")
+    pdf.setFillColor(colors.HexColor("#d7b56b"))
+    for offset in (-10 * mm, -5 * mm, 0, 5 * mm, 10 * mm):
+        pdf.circle(center_x + offset, center_y + radius - 7 * mm, 0.8 * mm, stroke=0, fill=1)
+
+
+def generate_work_order_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
+    def _builder() -> bytes:
+        work_order = get_work_order(db, work_order_id, current_user=current_user)
+        settings = get_settings()
+        buffer = BytesIO()
+        pdf = canvas.Canvas(buffer, pagesize=A4)
+        y = _draw_document_frame(
+            pdf,
+            "Comprovante de Execucao / Ordem de Servico",
+            "Conforme requisitos aplicaveis da RDC 622/2022",
+        )
+
+        y = _draw_section_title(pdf, y, "Identificacao do atendimento")
+        y = _draw_key_values(
+            pdf,
+            y,
+            [
+                ("Cliente", work_order.cliente.razao_social),
+                ("Endereco do imovel", f"{work_order.cliente.endereco} - {work_order.cliente.cidade}/{work_order.cliente.estado}"),
+                ("Praga(s) alvo", ", ".join([item.praga.nome_comum for item in work_order.pragas]) if work_order.pragas else "Nao informada"),
+                ("Data de execucao", work_order.data_execucao.strftime("%d/%m/%Y")),
+                ("Prazo de assistencia tecnica", _assistance_text(work_order)),
+                ("Horario", f"{work_order.hora_inicio} ate {work_order.hora_fim or '--:--'}"),
+                ("Local", work_order.local_execucao),
+                ("Responsavel tecnico", f"{settings.technical_responsible_name} - {settings.technical_responsible_registry}"),
+                ("Centro de Informacao Toxicologica", settings.toxicology_center_phone),
+                ("Valor", f"R$ {Decimal(work_order.valor_servico):.2f}"),
+            ],
+        )
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Produtos aplicados")
+        y = _draw_bullets(
+            pdf,
+            y,
+            [
+                f"{item.produto.nome} | Grupo quimico: {item.produto.grupo_quimico} | Concentracao de uso: {item.produto.concentracao} | Quantidade: {item.quantidade} | Diluicao: {item.diluicao}"
+                for item in work_order.produtos
+            ],
+        )
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Orientacoes pertinentes ao servico executado")
+        y = _draw_bullets(
+            pdf,
+            y,
+            [
+                "Manter pessoas e animais afastados das areas tratadas durante o periodo de seguranca definido pela empresa.",
+                "Nao remover residuos de barreiras quimicas ou iscas tecnicas sem orientacao profissional.",
+                "Em caso de intercorrencia com o produto utilizado, contatar imediatamente o Centro de Informacao Toxicologica informado neste comprovante.",
+            ],
+        )
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Observacoes")
+        y = _draw_paragraph(pdf, y, work_order.observacoes or "Sem observacoes registradas.")
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Identificacao da empresa prestadora")
+        y = _draw_bullets(pdf, y, _company_identification_lines(), width_chars=84)
+
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(20 * mm, 24 * mm, "Assinatura do tecnico: ______________________________")
+        pdf.drawRightString(190 * mm, 24 * mm, "Assinatura do cliente: ______________________________")
+        pdf.showPage()
+        pdf.save()
+        return buffer.getvalue()
+
+    return _run_document_generation("work_order_pdf", work_order_id, _builder)
+
+
+def generate_technical_report_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
+    def _builder() -> bytes:
+        work_order = get_work_order(db, work_order_id, current_user=current_user)
+        settings = get_settings()
+        buffer = BytesIO()
+        pdf = canvas.Canvas(buffer, pagesize=A4)
+        y = _draw_document_frame(
+            pdf,
+            "Relatorio Tecnico",
+            "Estruturado com base nos requisitos aplicaveis da RDC 622/2022",
+        )
+
+        y = _draw_section_title(pdf, y, "Resumo tecnico")
+        y = _draw_key_values(
+            pdf,
+            y,
+            [
+                ("OS", work_order.numero),
+                ("Cliente", work_order.cliente.razao_social),
+                ("Tecnico executor", work_order.tecnico.nome),
+                ("Responsavel tecnico", f"{settings.technical_responsible_name} - {settings.technical_responsible_registry}"),
+                ("Data da vistoria", work_order.data_execucao.isoformat()),
+                ("Status da OS", work_order.status.replace("_", " ")),
+                ("Garantia", work_order.garantia_ate.isoformat()),
+            ],
+        )
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Diagnostico")
+        diagnostic = (
+            f"Foram avaliadas as condicoes do local '{work_order.local_execucao}' para controle de vetores e pragas urbanas. "
+            f"O atendimento foi executado conforme os dados operacionais registrados na OS {work_order.numero}."
+        )
+        y = _draw_paragraph(pdf, y, diagnostic)
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Pragas e riscos observados")
+        pest_items = [f"{item.praga.nome_comum} ({item.praga.nome_cientifico})" for item in work_order.pragas]
+        if not pest_items:
+            pest_items = ["Nao houve praga especifica registrada; manter monitoramento preventivo."]
+        y = _draw_bullets(pdf, y, pest_items)
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Produtos e metodologia")
+        y = _draw_bullets(
+            pdf,
+            y,
+            [
+                f"{item.produto.nome} com principio ativo {item.produto.principio_ativo}, quantidade {item.quantidade} e diluicao {item.diluicao}"
+                for item in work_order.produtos
+            ],
+        )
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Recomendacoes")
+        recommendations = [
+            "Manter o ambiente higienizado, sem aculo de residuos e umidade excessiva.",
+            "Reforcar vedacao de acessos, ralos, frestas e pontos de abrigo identificados.",
+            f"Agendar reavaliacao antes do termino da garantia em {work_order.garantia_ate.isoformat()}.",
+        ]
+        y = _draw_bullets(pdf, y, recommendations)
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Observacoes complementares")
+        y = _draw_paragraph(pdf, y, work_order.observacoes or "Sem observacoes complementares.")
+
+        y = _draw_section_title(pdf, y - 2 * mm, "Dados regulatorios da empresa")
+        y = _draw_bullets(pdf, y, _company_identification_lines(), width_chars=84)
+
+        pdf.setFont("Helvetica", 10)
+        pdf.drawString(20 * mm, 24 * mm, "Responsavel tecnico: ______________________________")
+        pdf.drawRightString(190 * mm, 24 * mm, "Cliente/ciente: ______________________________")
+        pdf.showPage()
+        pdf.save()
+        return buffer.getvalue()
+
+    return _run_document_generation("technical_report_pdf", work_order_id, _builder)
+
+
+def _generate_standard_sanitary_certificate_pdf(
+    db: Session,
+    work_order_id: int,
+    current_user: Optional[User] = None,
+) -> bytes:
+    work_order = get_work_order(db, work_order_id, current_user=current_user)
     settings = get_settings()
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     y = _draw_document_frame(
         pdf,
         "Certificado Sanitario",
-        "Documento interno emitido conforme requisitos aplicaveis da RDC 622/2022",
+        "Conformidade sanitaria e rastreabilidade operacional",
     )
 
     y = _draw_section_title(pdf, y, "Certificacao")
-    certificate_text = (
-        f"Certificamos que o local atendido para o cliente {work_order.cliente.razao_social} recebeu servico tecnico "
-        f"de controle de pragas urbanas em {work_order.data_execucao.isoformat()}, com acompanhamento do tecnico "
-        f"{work_order.tecnico.nome}, conforme a Ordem de Servico {work_order.numero}."
-    )
-    y = _draw_paragraph(pdf, y, certificate_text)
+    risk_environment = _classify_food_risk_environment(work_order)
+    certificate_text = _build_standard_sanitary_certificate_text(work_order)
+    y = _draw_paragraph(pdf, y, certificate_text, width_chars=108, font_size=9.0, line_height=4.0 * mm)
 
-    y = _draw_section_title(pdf, y - 2 * mm, "Dados do estabelecimento")
+    y = _draw_section_title(pdf, y - 1 * mm, "Dados do estabelecimento")
     y = _draw_key_values(
         pdf,
         y,
@@ -1971,39 +2752,359 @@ def generate_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
             ("CPF/CNPJ", work_order.cliente.cpf_cnpj),
             ("Endereco", f"{work_order.cliente.endereco} - {work_order.cliente.cidade}/{work_order.cliente.estado}"),
             ("Area atendida", work_order.local_execucao),
-            ("Validade tecnica", work_order.garantia_ate.isoformat()),
+            ("Referencia sanitaria", _short_food_risk_environment_label(risk_environment)),
+            ("Data do servico", work_order.data_execucao.strftime("%d/%m/%Y")),
+            ("Validade tecnica", work_order.garantia_ate.strftime("%d/%m/%Y")),
             ("Responsavel tecnico", f"{settings.technical_responsible_name} - {settings.technical_responsible_registry}"),
         ],
+        value_x=55 * mm,
+        font_size=8.8,
+        row_height=4.8 * mm,
+        value_width_chars=48,
     )
 
-    y = _draw_section_title(pdf, y - 2 * mm, "Produtos e pragas cobertas")
+    y = _draw_section_title(pdf, y - 1 * mm, "Escopo e base normativa")
     covered_items = [f"Produto: {item.produto.nome} | Registro MS: {item.produto.registro_ms}" for item in work_order.produtos]
     if work_order.pragas:
         covered_items.extend([f"Praga controlada: {item.praga.nome_comum}" for item in work_order.pragas])
-    y = _draw_bullets(pdf, y, covered_items)
-
-    y = _draw_section_title(pdf, y - 2 * mm, "Declaracao")
-    declaration = (
-        "Este certificado confirma a execucao do servico registrado nesta OS e deve permanecer disponivel "
-        "para fins de controle interno e apresentacao em auditorias ou fiscalizacoes, quando aplicavel."
+    covered_items.extend(
+        [
+            "Escopo sanitario: controle de vetores e pragas urbanas com foco em seguranca alimentar.",
+            "Base normativa: RDC 622/2022, RDC 216/2004 e RDC 275/2002.",
+        ]
     )
-    y = _draw_paragraph(pdf, y, declaration)
+    y = _draw_bullets(pdf, y, covered_items, width_chars=102, font_size=8.9, line_height=4.0 * mm)
 
-    y = _draw_section_title(pdf, y - 2 * mm, "Identificacao da empresa especializada")
-    y = _draw_bullets(pdf, y, _company_identification_lines(), width_chars=84)
+    y = _draw_section_title(pdf, y - 1 * mm, "Declaracao sanitaria")
+    declaration = _build_standard_sanitary_declaration(work_order)
+    y = _draw_paragraph(pdf, y, declaration, width_chars=108, font_size=8.9, line_height=4.0 * mm)
 
-    pdf.setFont("Helvetica-Bold", 12)
+    y = _draw_section_title(pdf, y - 1 * mm, "Empresa especializada")
+    y = _draw_bullets(pdf, y, _company_identification_summary_lines(), width_chars=106, font_size=8.8, line_height=4.0 * mm)
+
+    emission_date = date.today().strftime("%d/%m/%Y")
+    responsible_name = settings.technical_responsible_name
+    if responsible_name == "Responsavel tecnico nao configurado":
+        responsible_name = work_order.tecnico.nome
+
+    pdf.setFillColor(colors.HexColor("#273431"))
+    pdf.setFont("Helvetica-Bold", 10.5)
     pdf.drawCentredString(105 * mm, 38 * mm, "DOCUMENTO EMITIDO PELO SISTEMA SYSPRAGAS")
-    pdf.setFont("Helvetica", 10)
-    pdf.drawString(20 * mm, 24 * mm, "Assinatura do responsavel tecnico: ______________________________")
-    pdf.drawRightString(190 * mm, 24 * mm, "Data de emissao: ______________________________")
+    pdf.setStrokeColor(colors.HexColor("#7f8d86"))
+    pdf.line(26 * mm, 28 * mm, 91 * mm, 28 * mm)
+    pdf.line(119 * mm, 28 * mm, 184 * mm, 28 * mm)
+    pdf.setFillColor(colors.black)
+    _draw_centered_text_to_fit(
+        pdf,
+        responsible_name,
+        center_x=58.5 * mm,
+        baseline_y=21.5 * mm,
+        max_width=60 * mm,
+        font_name="Helvetica",
+        initial_size=8.6,
+        min_size=7.0,
+    )
+    pdf.setFont("Helvetica", 8.6)
+    pdf.drawCentredString(151.5 * mm, 21.5 * mm, emission_date)
+    pdf.setFont("Helvetica-Oblique", 8.1)
+    pdf.drawCentredString(58.5 * mm, 15.2 * mm, "Responsavel tecnico")
+    pdf.drawCentredString(151.5 * mm, 15.2 * mm, "Data de emissao")
     pdf.showPage()
     pdf.save()
     return buffer.getvalue()
 
 
-def generate_framed_sanitary_certificate_pdf(db: Session, work_order_id: int) -> bytes:
+def _generate_template_sanitary_certificate_pdf(db: Session, work_order_id: int, template_path: Path) -> bytes:
     work_order = get_work_order(db, work_order_id)
+    settings = get_settings()
+    buffer = BytesIO()
+    page_width, page_height = landscape(A4)
+    pdf = canvas.Canvas(buffer, pagesize=(page_width, page_height))
+    pdf.setTitle("Certificado Sanitario")
+
+    _draw_template_certificate_background(pdf, template_path, page_width, page_height)
+
+    overlay_color = colors.HexColor("#f7f1e6")
+    overlay_boxes = [
+        (44 * mm, 118 * mm, 210 * mm, 18 * mm),
+        (44 * mm, 79 * mm, 210 * mm, 38 * mm),
+        (72 * mm, 55 * mm, 74 * mm, 31 * mm),
+        (146 * mm, 55 * mm, 10 * mm, 31 * mm),
+        (160 * mm, 55 * mm, 92 * mm, 31 * mm),
+        (84 * mm, 13 * mm, 54 * mm, 14 * mm),
+        (186 * mm, 13 * mm, 66 * mm, 14 * mm),
+    ]
+    pdf.setFillColor(overlay_color)
+    for x, y, width, height in overlay_boxes:
+        pdf.roundRect(x, y, width, height, 2 * mm, stroke=0, fill=1)
+
+    client_name = str(work_order.cliente.razao_social or "").upper()
+    pdf.setFillColor(colors.HexColor("#3e3732"))
+    _draw_centered_text_to_fit(
+        pdf,
+        client_name,
+        center_x=page_width / 2,
+        baseline_y=126.5 * mm,
+        max_width=200 * mm,
+        font_name="Times-Bold",
+        initial_size=18,
+        min_size=11,
+    )
+
+    certificate_text = (
+        "Certificamos que o estabelecimento acima identificado recebeu servico tecnico "
+        "especializado de controle de pragas urbanas, executado em conformidade com os "
+        "requisitos sanitarios aplicaveis, conforme registro da ordem de servico emitida."
+    )
+    _draw_centered_paragraph(
+        pdf,
+        certificate_text,
+        center_x=page_width / 2,
+        top_y=103 * mm,
+        max_width=180 * mm,
+        font_name="Times-Roman",
+        font_size=11.5,
+        leading=5.2 * mm,
+    )
+
+    left_info_lines = [
+        f"CNPJ/CPF: {work_order.cliente.cpf_cnpj}",
+        f"Endereco: {work_order.cliente.endereco}",
+        f"{work_order.cliente.cidade}/{work_order.cliente.estado}",
+    ]
+    right_info_lines = [
+        f"Data do servico: {work_order.data_execucao.strftime('%d/%m/%Y')}",
+        f"Validade tecnica: {work_order.garantia_ate.strftime('%d/%m/%Y')}",
+        f"Ordem de Servico: {work_order.numero}",
+    ]
+
+    pdf.setFillColor(colors.HexColor("#4b433d"))
+    left_text = pdf.beginText(81 * mm, 67.5 * mm)
+    left_text.setFont("Times-Roman", 10.6)
+    left_text.setLeading(4.7 * mm)
+    for line in left_info_lines:
+        left_text.textLine(line)
+    pdf.drawText(left_text)
+
+    right_text = pdf.beginText(171 * mm, 67.5 * mm)
+    right_text.setFont("Times-Roman", 10.6)
+    right_text.setLeading(4.7 * mm)
+    for line in right_info_lines:
+        right_text.textLine(line)
+    pdf.drawText(right_text)
+
+    emission_date = date.today().strftime("%d/%m/%Y")
+    responsible_name = settings.technical_responsible_name
+    if responsible_name == "Responsavel tecnico nao configurado":
+        responsible_name = work_order.tecnico.nome
+
+    pdf.setFillColor(colors.HexColor("#3e3732"))
+    pdf.setFont("Times-Roman", 11)
+    pdf.drawCentredString(111 * mm, 18.5 * mm, emission_date)
+    _draw_centered_text_to_fit(
+        pdf,
+        responsible_name,
+        center_x=219 * mm,
+        baseline_y=18.5 * mm,
+        max_width=58 * mm,
+        font_name="Times-Roman",
+        initial_size=11,
+        min_size=8,
+    )
+
+    pdf.showPage()
+    pdf.save()
+    return buffer.getvalue()
+
+
+def _generate_official_sanitary_certificate_pdf(
+    db: Session,
+    work_order_id: int,
+    *,
+    framed: bool,
+    current_user: Optional[User] = None,
+) -> bytes:
+    work_order = get_work_order(db, work_order_id, current_user=current_user)
+    settings = get_settings()
+    signature_path = resolve_technical_signature_path(work_order.tecnico)
+    if signature_path is None:
+        LOGGER.warning(
+            "technical_signature_missing work_order_id=%s technician_id=%s technician_name=%s",
+            work_order_id,
+            getattr(work_order.tecnico, "id", None),
+            getattr(work_order.tecnico, "nome", None),
+        )
+    template_path = resolve_certificate_model_path()
+    if template_path is None:
+        LOGGER.warning(
+            "certificate_template_missing work_order_id=%s framed=%s",
+            work_order_id,
+            framed,
+        )
+        if framed:
+            return _generate_premium_framed_sanitary_certificate_pdf(
+                db,
+                work_order_id,
+                current_user=current_user,
+            )
+        return _generate_standard_sanitary_certificate_pdf(
+            db,
+            work_order_id,
+            current_user=current_user,
+        )
+    buffer = BytesIO()
+    width, height = landscape(A4)
+    pdf = canvas.Canvas(buffer, pagesize=(width, height))
+    pdf.setTitle("Certificado Sanitario")
+
+    _draw_template_certificate_background(pdf, template_path, width, height)
+
+    ink = colors.HexColor("#2f2720")
+    accent = colors.HexColor("#8e6b2d")
+    panel_fill = colors.HexColor("#f7f1e7")
+    line_color = colors.HexColor("#d8c39b")
+
+    pdf.setFillColor(panel_fill)
+    pdf.setStrokeColor(line_color)
+    pdf.roundRect(29 * mm, height - 38 * mm, width - 58 * mm, 12 * mm, 3 * mm, stroke=1, fill=1)
+    pdf.roundRect(33 * mm, 34 * mm, width - 66 * mm, 92 * mm, 4 * mm, stroke=1, fill=1)
+    pdf.roundRect(33 * mm, 18 * mm, width - 66 * mm, 12 * mm, 3 * mm, stroke=1, fill=1)
+
+    company_name = (settings.company_trade_name or settings.company_name or settings.company_legal_name).upper()
+    pdf.setFillColor(accent)
+    pdf.setFont("Times-Bold", 15)
+    pdf.drawCentredString(width / 2, height - 31.5 * mm, company_name[:64])
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Bold", 28)
+    pdf.drawCentredString(width / 2, height - 47 * mm, "CERTIFICADO SANITARIO")
+    pdf.setFillColor(accent)
+    pdf.setFont("Times-Italic", 12)
+    pdf.drawCentredString(
+        width / 2,
+        height - 55 * mm,
+        "Modelo oficial para impressao e moldura" if framed else "Modelo oficial de conformidade sanitaria",
+    )
+
+    pdf.setFillColor(colors.HexColor("#fffaf1"))
+    pdf.roundRect(48 * mm, height - 78 * mm, width - 96 * mm, 13 * mm, 3 * mm, stroke=0, fill=1)
+    pdf.setFillColor(ink)
+    _draw_centered_text_to_fit(
+        pdf,
+        str(work_order.cliente.razao_social or "").upper(),
+        center_x=width / 2,
+        baseline_y=height - 72.5 * mm,
+        max_width=width - 110 * mm,
+        font_name="Times-Bold",
+        initial_size=18,
+        min_size=11,
+    )
+
+    body_text = _build_framed_sanitary_certificate_text(work_order)
+    if not framed:
+        body_text = f"{_build_standard_sanitary_certificate_text(work_order)} {_build_standard_sanitary_declaration(work_order)}"
+    pdf.setFillColor(ink)
+    _draw_centered_paragraph(
+        pdf,
+        body_text,
+        center_x=width / 2,
+        top_y=height - 88 * mm,
+        max_width=182 * mm,
+        font_name="Times-Roman",
+        font_size=10.2,
+        leading=4.55 * mm,
+    )
+
+    risk_environment = _classify_food_risk_environment(work_order)
+    left_lines = [
+        f"CNPJ/CPF: {work_order.cliente.cpf_cnpj}",
+        f"Endereco: {work_order.cliente.endereco}, {work_order.cliente.cidade}/{work_order.cliente.estado}",
+        f"Area atendida: {work_order.local_execucao}",
+        f"Ambiente: {_short_food_risk_environment_label(risk_environment)}",
+    ]
+    right_lines = [
+        f"Data do servico: {work_order.data_execucao.strftime('%d/%m/%Y')}",
+        f"Validade tecnica: {work_order.garantia_ate.strftime('%d/%m/%Y')}",
+        f"OS: {work_order.numero}",
+        f"Tecnico executor: {work_order.tecnico.nome}",
+    ]
+    company_lines = _company_identification_summary_lines()
+
+    _draw_certificate_info_box(
+        pdf,
+        x=41 * mm,
+        y=52 * mm,
+        width=83 * mm,
+        height=40 * mm,
+        title="Estabelecimento atendido",
+        lines=left_lines,
+    )
+    _draw_certificate_info_box(
+        pdf,
+        x=129 * mm,
+        y=52 * mm,
+        width=63 * mm,
+        height=40 * mm,
+        title="Rastreabilidade tecnica",
+        lines=right_lines,
+    )
+    _draw_certificate_info_box(
+        pdf,
+        x=197 * mm,
+        y=52 * mm,
+        width=55 * mm,
+        height=40 * mm,
+        title="Empresa especializada",
+        lines=company_lines[:4],
+    )
+
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Italic", 9)
+    pdf.drawCentredString(
+        width / 2,
+        25.2 * mm,
+        "Documento tecnico emitido com assinatura do responsavel e base normativa sanitaria aplicavel.",
+    )
+
+    responsible_name = _resolve_responsible_name(settings, work_order)
+    emission_date = date.today().strftime("%d/%m/%Y")
+    _draw_signature_stamp(
+        pdf,
+        signature_path=signature_path,
+        center_x=97 * mm,
+        line_y=16 * mm,
+        label="Responsavel tecnico",
+        name=responsible_name,
+    )
+    pdf.line(178 * mm, 16 * mm, 232 * mm, 16 * mm)
+    pdf.setFont("Helvetica", 8.4)
+    pdf.drawCentredString(205 * mm, 10.8 * mm, emission_date)
+    pdf.setFont("Helvetica-Oblique", 7.8)
+    pdf.drawCentredString(205 * mm, 6.7 * mm, "Data de emissao")
+
+    pdf.showPage()
+    pdf.save()
+    return buffer.getvalue()
+
+
+def generate_sanitary_certificate_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
+    return _run_document_generation(
+        "sanitary_certificate_pdf",
+        work_order_id,
+        lambda: _generate_official_sanitary_certificate_pdf(
+            db,
+            work_order_id,
+            framed=False,
+            current_user=current_user,
+        ),
+    )
+
+
+def _generate_ornamental_sanitary_certificate_pdf(
+    db: Session,
+    work_order_id: int,
+    current_user: Optional[User] = None,
+) -> bytes:
+    work_order = get_work_order(db, work_order_id, current_user=current_user)
     settings = get_settings()
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -2077,3 +3178,312 @@ def generate_framed_sanitary_certificate_pdf(db: Session, work_order_id: int) ->
     pdf.showPage()
     pdf.save()
     return buffer.getvalue()
+
+
+def _generate_premium_framed_sanitary_certificate_pdf(
+    db: Session,
+    work_order_id: int,
+    current_user: Optional[User] = None,
+) -> bytes:
+    work_order = get_work_order(db, work_order_id, current_user=current_user)
+    settings = get_settings()
+    buffer = BytesIO()
+    width, height = landscape(A4)
+    pdf = canvas.Canvas(buffer, pagesize=(width, height))
+    pdf.setTitle("Certificado Sanitario para Moldura")
+
+    paper = colors.HexColor("#f6efe1")
+    gold = colors.HexColor("#a97821")
+    gold_soft = colors.HexColor("#d7b15d")
+    ink = colors.HexColor("#3a2d22")
+    accent = colors.HexColor("#8a6420")
+
+    pdf.setFillColor(paper)
+    pdf.rect(0, 0, width, height, stroke=0, fill=1)
+
+    pdf.setStrokeColor(gold)
+    pdf.setLineWidth(3)
+    pdf.rect(8 * mm, 8 * mm, width - 16 * mm, height - 16 * mm, stroke=1, fill=0)
+    pdf.setLineWidth(1.2)
+    pdf.rect(13 * mm, 13 * mm, width - 26 * mm, height - 26 * mm, stroke=1, fill=0)
+    pdf.setLineWidth(0.8)
+    pdf.rect(18 * mm, 18 * mm, width - 36 * mm, height - 36 * mm, stroke=1, fill=0)
+
+    pdf.setStrokeColor(gold)
+    _draw_certificate_corner(pdf, 24 * mm, height - 24 * mm, size=20 * mm)
+    _draw_certificate_corner(pdf, width - 24 * mm, height - 24 * mm, size=20 * mm, mirrored_x=True)
+    _draw_certificate_corner(pdf, 24 * mm, 24 * mm, size=20 * mm, mirrored_y=True)
+    _draw_certificate_corner(pdf, width - 24 * mm, 24 * mm, size=20 * mm, mirrored_x=True, mirrored_y=True)
+
+    pdf.setStrokeColor(gold_soft)
+    _draw_certificate_flourish(pdf, width / 2, height - 27 * mm, 78 * mm)
+    _draw_certificate_flourish(pdf, width / 2, 27 * mm, 78 * mm)
+
+    company_name = (settings.company_name or settings.company_trade_name or settings.company_legal_name).upper()
+    pdf.setFillColor(accent)
+    pdf.setFont("Times-Bold", 16)
+    pdf.drawCentredString(width / 2, height - 38 * mm, company_name[:48])
+
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Bold", 30)
+    pdf.drawCentredString(width / 2, height - 55 * mm, "CERTIFICADO SANITARIO")
+    pdf.setFillColor(gold)
+    pdf.setFont("Times-Italic", 14)
+    pdf.drawCentredString(width / 2, height - 66 * mm, "Certificado de Conformidade Sanitaria")
+
+    pdf.setStrokeColor(gold_soft)
+    pdf.line(66 * mm, height - 73 * mm, width - 66 * mm, height - 73 * mm)
+
+    pdf.setFillColor(colors.HexColor("#fbf7ee"))
+    pdf.setStrokeColor(colors.HexColor("#ead3a4"))
+    pdf.roundRect(41 * mm, height - 101 * mm, width - 82 * mm, 15 * mm, 3 * mm, stroke=1, fill=1)
+    pdf.setFillColor(ink)
+    _draw_centered_text_to_fit(
+        pdf,
+        str(work_order.cliente.razao_social or "").upper(),
+        center_x=width / 2,
+        baseline_y=height - 94 * mm,
+        max_width=width - 96 * mm,
+        font_name="Times-Bold",
+        initial_size=20,
+        min_size=12,
+    )
+
+    risk_environment = _classify_food_risk_environment(work_order)
+    certificate_text = _build_framed_sanitary_certificate_text(work_order)
+    pdf.setFillColor(ink)
+    _draw_centered_paragraph(
+        pdf,
+        certificate_text,
+        center_x=width / 2,
+        top_y=height - 109 * mm,
+        max_width=181 * mm,
+        font_name="Times-Roman",
+        font_size=10.4,
+        leading=4.7 * mm,
+    )
+
+    _draw_certificate_badge(pdf, 47 * mm, 58 * mm, 15.8 * mm)
+
+    left_lines = [
+        f"CNPJ/CPF: {work_order.cliente.cpf_cnpj}",
+        f"Endereco: {work_order.cliente.endereco}, {work_order.cliente.cidade}/{work_order.cliente.estado}",
+        f"Area atendida: {work_order.local_execucao}",
+        f"Ambiente critico: {risk_environment}",
+    ]
+    right_lines = [
+        "Escopo: controle de vetores e pragas urbanas",
+        f"Alvos monitorados: {_summarize_certificate_pests(work_order)}",
+        "Base legal: RDC 622/2022, RDC 216/2004 e RDC 275/2002",
+        f"Execucao: {work_order.data_execucao.strftime('%d/%m/%Y')} | OS: {work_order.numero}",
+        f"Tecnico executor: {work_order.tecnico.nome}",
+        f"Validade tecnica: {work_order.garantia_ate.strftime('%d/%m/%Y')}",
+    ]
+
+    _draw_certificate_info_box(
+        pdf,
+        x=74 * mm,
+        y=40 * mm,
+        width=82 * mm,
+        height=42 * mm,
+        title="Enquadramento Sanitario",
+        lines=left_lines,
+    )
+    _draw_certificate_info_box(
+        pdf,
+        x=163 * mm,
+        y=40 * mm,
+        width=87 * mm,
+        height=42 * mm,
+        title="Rastreabilidade Tecnica",
+        lines=right_lines,
+    )
+
+    pdf.setStrokeColor(gold_soft)
+    pdf.line(74 * mm, 40 * mm, width - 31 * mm, 40 * mm)
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Italic", 9.6)
+    pdf.drawCentredString(
+        width / 2,
+        35 * mm,
+        "Seguranca dos alimentos, controle de contaminacao, minimizacao de riscos a saude e seguranca ambiental.",
+    )
+    pdf.setFont("Times-Roman", 8.9)
+    pdf.drawCentredString(
+        width / 2,
+        29 * mm,
+        (
+            f"Licenca sanitaria: {settings.sanitary_license_number} | "
+            f"Licenca ambiental: {settings.environmental_license_number} | "
+            "Documento tecnico sem implicar endosso oficial."
+        ),
+    )
+
+    emission_date = date.today().strftime("%d/%m/%Y")
+    responsible_name = settings.technical_responsible_name
+    if responsible_name == "Responsavel tecnico nao configurado":
+        responsible_name = work_order.tecnico.nome
+
+    pdf.setStrokeColor(colors.HexColor("#8f7650"))
+    pdf.line(84 * mm, 31 * mm, 132 * mm, 31 * mm)
+    pdf.line(width - 116 * mm, 31 * mm, width - 56 * mm, 31 * mm)
+    pdf.setFillColor(ink)
+    pdf.setFont("Times-Roman", 10)
+    pdf.drawCentredString(108 * mm, 24 * mm, emission_date)
+    pdf.setFont("Times-Italic", 9.6)
+    pdf.drawCentredString(108 * mm, 10.5 * mm, "Data de emissao")
+    _draw_centered_text_to_fit(
+        pdf,
+        responsible_name,
+        center_x=width - 86 * mm,
+        baseline_y=24 * mm,
+        max_width=52 * mm,
+        font_name="Times-Roman",
+        initial_size=10.5,
+        min_size=8,
+    )
+    pdf.setFont("Times-Italic", 9.6)
+    pdf.drawCentredString(width - 86 * mm, 10.5 * mm, "Responsavel tecnico")
+
+    pdf.showPage()
+    pdf.save()
+    return buffer.getvalue()
+
+
+def generate_framed_sanitary_certificate_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
+    return _run_document_generation(
+        "framed_sanitary_certificate_pdf",
+        work_order_id,
+        lambda: _generate_official_sanitary_certificate_pdf(
+            db,
+            work_order_id,
+            framed=True,
+            current_user=current_user,
+        ),
+    )
+
+
+def generate_guarantee_certificate_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
+    def _builder() -> bytes:
+        work_order = get_work_order(db, work_order_id, current_user=current_user)
+        settings = get_settings()
+        template_path = _resolve_guarantee_template_path()
+        if template_path is None:
+            LOGGER.warning("guarantee_certificate_template_missing work_order_id=%s", work_order_id)
+            return _generate_standard_sanitary_certificate_pdf(
+                db,
+                work_order_id,
+                current_user=current_user,
+            )
+
+        buffer = BytesIO()
+        page_width, page_height = landscape(A4)
+        pdf = canvas.Canvas(buffer, pagesize=(page_width, page_height))
+        pdf.setTitle("Certificado de Garantia")
+        _draw_template_certificate_background(pdf, template_path, page_width, page_height)
+
+        company_data = _resolve_guarantee_company_data(db, work_order)
+        customer_address = _compose_customer_full_address(work_order.cliente)
+        service_text = _resolve_guarantee_service_text(work_order)
+        location_text = work_order.local_execucao or "Conforme ordem de servico"
+        application_date = work_order.data_execucao.strftime("%d/%m/%Y")
+        guarantee_term = _resolve_guarantee_term_text(work_order)
+        dilution_text = _resolve_guarantee_dilution_text(work_order)
+        validity_text = _resolve_guarantee_validity_text(work_order)
+        responsible_name = _resolve_responsible_name(settings, work_order)
+        applicator_name = work_order.tecnico.nome
+        signature_path = resolve_technical_signature_path(work_order.tecnico)
+
+        pdf.setFillColor(colors.HexColor("#43a047"))
+        pdf.setFont("Helvetica-Bold", 26)
+        pdf.drawString(32 * mm, 160 * mm, "CERTIFICADO DE GARANTIA")
+
+        pdf.setFillColor(colors.HexColor("#4f7e41"))
+        pdf.setFont("Helvetica-Bold", 11)
+        pdf.drawString(2 * mm, 143 * mm, "Certificamos que o(a):")
+        _draw_guarantee_certificate_field(pdf, x=62 * mm, y=143 * mm, width=116 * mm, value=work_order.cliente.razao_social.upper(), font_size=12)
+
+        pdf.drawString(2 * mm, 133 * mm, "Situado(a) na:")
+        _draw_guarantee_certificate_field(pdf, x=42 * mm, y=133 * mm, width=136 * mm, value=customer_address.upper(), font_size=10.5, min_font_size=7.5)
+
+        pdf.drawString(2 * mm, 123 * mm, "Efetuou o controle de pragas em suas dependencias, atraves da Ordem de Servico:")
+        _draw_guarantee_certificate_field(pdf, x=180 * mm, y=123 * mm, width=28 * mm, value=work_order.numero, font_size=11.5, min_font_size=8.5)
+
+        pdf.drawString(2 * mm, 112 * mm, "Servicos realizados:")
+        _draw_guarantee_certificate_field(pdf, x=50 * mm, y=112 * mm, width=128 * mm, value=service_text.upper(), font_size=10.8, min_font_size=7.5)
+
+        pdf.drawString(2 * mm, 102 * mm, "Locais tratados:")
+        _draw_guarantee_certificate_field(pdf, x=40 * mm, y=102 * mm, width=138 * mm, value=location_text.upper(), font_size=10.8, min_font_size=7.5)
+
+        pdf.setFont("Helvetica-Bold", 11)
+        pdf.drawString(2 * mm, 89 * mm, "Data da aplicacao:")
+        _draw_guarantee_certificate_field(pdf, x=39 * mm, y=89 * mm, width=28 * mm, value=application_date, font_size=11.2)
+        pdf.drawString(82 * mm, 89 * mm, "Prazo(s) de Garantia:")
+        _draw_guarantee_certificate_field(pdf, x=124 * mm, y=89 * mm, width=42 * mm, value=guarantee_term, font_size=11.2)
+        pdf.drawString(180 * mm, 89 * mm, "Diluicao:")
+        _draw_guarantee_certificate_field(pdf, x=201 * mm, y=89 * mm, width=28 * mm, value=dilution_text.upper(), font_size=10.8, min_font_size=7.5)
+
+        pdf.setFillColor(colors.HexColor("#313131"))
+        pdf.setFont("Helvetica-Bold", 15)
+        pdf.drawCentredString(page_width / 2, 64 * mm, "Conforme regulamentacao da Vigilancia Sanitaria.")
+        pdf.drawCentredString(page_width / 2, 53 * mm, "CVS nº 006, de 12 de janeiro de 2011.")
+        pdf.setFont("Helvetica", 13)
+        pdf.drawCentredString(page_width / 2, 42 * mm, f"Este certificado tem validade conforme prazo informado: {validity_text}.")
+        pdf.drawCentredString(page_width / 2, 31 * mm, "Produto utilizado devidamente autorizado pelos orgaos competentes.")
+
+        pdf.setFillColor(colors.HexColor("#43a047"))
+        pdf.setFont("Helvetica-Bold", 10.5)
+        pdf.drawString(2 * mm, 22 * mm, f"Tecnico aplicador: {applicator_name}")
+
+        pdf.setFillColor(colors.white)
+        pdf.rect(16 * mm, 6 * mm, 64 * mm, 28 * mm, stroke=0, fill=1)
+        _draw_signature_stamp(
+            pdf,
+            signature_path=signature_path,
+            center_x=48 * mm,
+            line_y=12 * mm,
+            label="Tecnico responsavel",
+            name=responsible_name,
+            max_width=38 * mm,
+            max_height=12 * mm,
+        )
+
+        _draw_guarantee_footer_block(
+            pdf,
+            x=94 * mm,
+            y=8 * mm,
+            width=72 * mm,
+            lines=[
+                f"CNPJ: {company_data['empresa_cnpj'] or 'Nao informado'}",
+                company_data["empresa_site"] or "Site nao informado",
+                company_data["empresa_email"] or "E-mail nao informado",
+            ],
+        )
+        _draw_guarantee_footer_block(
+            pdf,
+            x=197 * mm,
+            y=8 * mm,
+            width=69 * mm,
+            lines=[
+                company_data["empresa_telefone_1"] or "Telefone nao informado",
+                company_data["empresa_telefone_2"] or "",
+            ],
+            align="center",
+        )
+
+        pdf.showPage()
+        pdf.save()
+        return buffer.getvalue()
+
+    return _run_document_generation("guarantee_certificate_pdf", work_order_id, _builder)
+
+
+def generate_guarantee_certificate_pdf_bundle(
+    db: Session,
+    work_order_id: int,
+    current_user: Optional[User] = None,
+) -> tuple[bytes, str]:
+    work_order = get_work_order(db, work_order_id, current_user=current_user)
+    filename = _guarantee_certificate_filename_for_work_order(work_order)
+    pdf_bytes = generate_guarantee_certificate_pdf(db, work_order_id, current_user=current_user)
+    return pdf_bytes, filename

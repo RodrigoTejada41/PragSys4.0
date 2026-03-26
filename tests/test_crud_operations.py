@@ -309,6 +309,7 @@ def test_update_and_delete_work_order_reconcile_stock_and_finance(client, auth_h
 
     assert update_response.status_code == 200
     assert update_response.json()["status"] == "concluida"
+    assert update_response.json()["numero"] == work_order["numero"]
 
     products_response = client.get("/api/v1/produtos", headers=auth_headers)
     assert Decimal(products_response.json()[0]["estoque_atual"]) == Decimal("8.50")

@@ -13,6 +13,7 @@ from app.application.services import (
     update_customer,
 )
 from app.infrastructure.db import get_db
+from app.infrastructure.models import User
 from app.interfaces.api.deps import require_roles
 
 router = APIRouter(prefix="/clientes", tags=["clientes"])
@@ -23,8 +24,11 @@ router = APIRouter(prefix="/clientes", tags=["clientes"])
     response_model=List[CustomerRead],
     dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
 )
-def get_customers(db: Session = Depends(get_db)) -> List[CustomerRead]:
-    return list_customers(db)
+def get_customers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> List[CustomerRead]:
+    return list_customers(db, current_user=current_user)
 
 
 @router.get(
@@ -49,26 +53,36 @@ def get_customer_address_by_cep(cep: str) -> AddressLookupRead:
     "",
     response_model=CustomerRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
 )
-def post_customer(payload: CustomerCreate, db: Session = Depends(get_db)) -> CustomerRead:
-    return create_customer(db, payload)
+def post_customer(
+    payload: CustomerCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> CustomerRead:
+    return create_customer(db, payload, current_user=current_user)
 
 
 @router.put(
     "/{customer_id}",
     response_model=CustomerRead,
-    dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
 )
-def put_customer(customer_id: int, payload: CustomerUpdate, db: Session = Depends(get_db)) -> CustomerRead:
-    return update_customer(db, customer_id, payload)
+def put_customer(
+    customer_id: int,
+    payload: CustomerUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> CustomerRead:
+    return update_customer(db, customer_id, payload, current_user=current_user)
 
 
 @router.delete(
     "/{customer_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
 )
-def remove_customer(customer_id: int, db: Session = Depends(get_db)) -> Response:
-    delete_customer(db, customer_id)
+def remove_customer(
+    customer_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> Response:
+    delete_customer(db, customer_id, current_user=current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

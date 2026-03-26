@@ -1,4 +1,4 @@
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Optional
 
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
@@ -37,6 +37,10 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token invalido ou expirado.",
         )
+
+
+def get_current_company_id(current_user: User = Depends(get_current_user)) -> Optional[int]:
+    return current_user.empresa_prestadora_id
 
 
 def require_roles(allowed_roles: Iterable[str]) -> Callable:

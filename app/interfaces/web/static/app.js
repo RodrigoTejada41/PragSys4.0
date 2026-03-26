@@ -3,24 +3,44 @@ const state = {
     user: null,
     customers: [],
     products: [],
+    nfeInvoices: [],
+    simplesConfigs: [],
     pests: [],
     technicians: [],
     workOrders: [],
     appointments: [],
     appointmentDashboard: null,
+    settings: null,
+    integrations: {
+        whatsapp: null,
+        whatsappConfig: null,
+        whatsappQr: null,
+        google: null,
+    },
     finance: [],
     cashLedger: [],
     financeDashboard: null,
+    receipts: [],
+    cashFlowSummary: null,
+    simplesSummary: null,
+    sefazReadiness: null,
     users: [],
     licenses: [],
     providerCompanies: [],
     providerCompanyTab: "dados",
     workOrderScreen: "new",
+    financeScreen: "lancamentos",
+    nfeTab: "issue",
+    appointmentScreen: "operational",
     appointmentCalendarView: "month",
     workOrderWorkflow: {
         lastSavedOrderId: null,
         certificateReady: false,
     },
+    nfeWorkflow: {
+        lastIssuedInvoiceId: null,
+    },
+    receiptPreview: null,
     workOrderPicker: {
         productSearch: "",
         pestSearch: "",
@@ -35,6 +55,8 @@ const state = {
         pest: null,
         technician: null,
         finance: null,
+        receipt: null,
+        nfe: null,
         workOrder: null,
         appointment: null,
         providerCompany: null,
@@ -49,12 +71,29 @@ const state = {
         workOrderNumber: "",
         workOrderCustomer: "",
         workOrderDate: "",
+        workOrderStartDate: "",
+        workOrderEndDate: "",
         workOrderStatus: "todos",
+        workOrderLane: "pending",
         appointmentSearch: "",
         appointmentStatus: "todos",
         appointmentTechnician: "",
         appointmentCustomer: "",
         appointmentDate: "",
+        appointmentStartDate: "",
+        appointmentEndDate: "",
+        appointmentLane: "pending",
+        financeSearch: "",
+        financeStatus: "todos",
+        financeCustomer: "",
+        financeStartDate: "",
+        financeEndDate: "",
+        receiptSearch: "",
+        receiptCustomer: "",
+        nfeSearch: "",
+        nfeStatus: "todos",
+        nfeCustomer: "",
+        simplesReferenceMonth: new Date().toISOString().slice(0, 7),
     },
 };
 
@@ -65,8 +104,18 @@ const viewTitles = {
     pragas: "Pragas",
     tecnicos: "Tecnicos",
     ordens: "Ordens de servico",
+    "ordens-nova": "Nova ordem de servico",
+    "ordens-cadastradas": "Ordens de servico cadastradas",
     agenda: "Agenda",
+    "agenda-novo": "Novo agendamento",
+    "agenda-operacional": "Agenda operacional",
     financeiro: "Financeiro",
+    "financeiro-lancamentos": "Lancamentos financeiros",
+    "financeiro-recibos": "Recibos",
+    "financeiro-nfe": "NF-e",
+    "financeiro-caixa": "Fluxo de caixa",
+    "financeiro-relatorios": "Relatorios financeiros",
+    configuracoes: "Configuracoes do sistema",
     empresas: "Cadastrar empresas",
     usuarios: "Usuarios",
     licencas: "Licencas",
@@ -76,6 +125,25 @@ const dashboardCharts = {
     status: null,
     finance: null,
 };
+
+const activeAppointmentStatuses = new Set([
+    "pendente",
+    "confirmado",
+    "em_deslocamento",
+    "em_atendimento",
+    "reagendado",
+]);
+
+const finishedAppointmentStatuses = new Set([
+    "concluido",
+    "cancelado",
+    "nao_realizado",
+]);
+
+const finishedWorkOrderStatuses = new Set([
+    "concluida",
+    "cancelada",
+]);
 
 const dataTableLanguage = {
     emptyTable: "Nenhum registro disponivel",
@@ -96,9 +164,14 @@ const dataTableLanguage = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+    renderSettingsLoadingState();
     buildForms();
     bindNavigation();
     bindWorkOrderModuleNavigation();
+    bindFinanceModuleNavigation();
+    bindNfeTabNavigation();
+    bindGoogleCalendarOAuth();
+    bindSettingsActions();
     bindAuth();
     bindDashboardFilters();
 
@@ -115,6 +188,109 @@ function bindNavigation() {
             event.preventDefault();
             switchView(button.dataset.view);
         });
+    });
+}
+
+function bindGoogleCalendarOAuth() {
+    window.addEventListener("message", async (event) => {
+        if (event.origin !== window.location.origin) {
+            return;
+        }
+        const payload = event.data || {};
+        if (payload.type !== "syspragas-google-calendar-oauth") {
+            return;
+        }
+        if (payload.status === "success") {
+            await loadAllData();
+            openAppointmentView("operational");
+            toast(payload.message || "Conta Google conectada com sucesso.");
+            return;
+        }
+        toast(payload.message || "Nao foi possivel concluir a autenticacao Google.");
+    });
+}
+
+function bindSettingsActions() {
+    const root = document.getElementById("settings-root");
+    if (!root) {
+        return;
+    }
+
+    root.addEventListener("submit", async (event) => {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement) || form.id !== "system-settings-form") {
+            return;
+        }
+        event.preventDefault();
+        const errorBox = form.querySelector(".form-error");
+        const saveButton = form.querySelector('[data-save-button="settings"]');
+        errorBox?.classList.add("hidden");
+        if (saveButton) {
+            saveButton.disabled = true;
+            saveButton.dataset.originalLabel = saveButton.dataset.originalLabel || saveButton.textContent;
+            saveButton.textContent = "Salvando...";
+        }
+        try {
+            const payload = getSystemSettingsPayload(form);
+            state.settings = await apiFetch("/api/v1/settings", {
+                method: "PUT",
+                body: JSON.stringify(payload),
+            });
+            await loadAllData();
+            toast("Configuracoes atualizadas com sucesso.");
+        } catch (error) {
+            if (errorBox) {
+                errorBox.textContent = error.message;
+                errorBox.classList.remove("hidden");
+            }
+            toast(error.message || "Nao foi possivel salvar as configuracoes.");
+        } finally {
+            if (saveButton) {
+                saveButton.disabled = false;
+                saveButton.textContent = saveButton.dataset.originalLabel || "Salvar configuracoes";
+            }
+        }
+    });
+
+    root.addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-settings-action], [data-settings-shortcut]");
+        if (!button) {
+            return;
+        }
+
+        const shortcut = button.dataset.settingsShortcut;
+        if (shortcut) {
+            switchView(shortcut);
+            return;
+        }
+
+        const action = button.dataset.settingsAction;
+        try {
+            if (action === "google-login") {
+                await loginGoogle();
+                return;
+            }
+            if (action === "google-logout") {
+                await logoutGoogle();
+                return;
+            }
+            if (action === "refresh-integrations") {
+                await refreshAppointmentIntegrationStatus();
+                await loadAllData();
+                toast("Status das integracoes atualizado.");
+                return;
+            }
+            if (action === "whatsapp-connect-qr") {
+                await connectWhatsAppQr();
+                return;
+            }
+            if (action === "whatsapp-logout") {
+                await logoutWhatsApp();
+                return;
+            }
+        } catch (error) {
+            toast(error.message || "Nao foi possivel concluir a acao.");
+        }
     });
 }
 
@@ -151,8 +327,123 @@ function bindWorkOrderModuleNavigation() {
     setWorkOrderWorkspaceView(state.workOrderScreen || "new");
 }
 
+function bindFinanceModuleNavigation() {
+    const buttons = Array.from(document.querySelectorAll("[data-finance-screen-trigger]"));
+    if (!buttons.length) {
+        return;
+    }
+
+    buttons.forEach((button, index) => {
+        button.addEventListener("click", () => setFinanceWorkspaceView(button.dataset.financeScreenTrigger));
+        button.addEventListener("keydown", (event) => {
+            const currentIndex = buttons.indexOf(button);
+            if (event.key === "ArrowRight") {
+                event.preventDefault();
+                buttons[(currentIndex + 1) % buttons.length].focus();
+            } else if (event.key === "ArrowLeft") {
+                event.preventDefault();
+                buttons[(currentIndex - 1 + buttons.length) % buttons.length].focus();
+            } else if (event.key === "Home") {
+                event.preventDefault();
+                buttons[0].focus();
+            } else if (event.key === "End") {
+                event.preventDefault();
+                buttons[buttons.length - 1].focus();
+            } else if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setFinanceWorkspaceView(button.dataset.financeScreenTrigger);
+            }
+        });
+        button.setAttribute("tabindex", index === 0 ? "0" : "-1");
+    });
+
+    setFinanceWorkspaceView(state.financeScreen || "lancamentos");
+}
+
+function bindNfeTabNavigation() {
+    const buttons = Array.from(document.querySelectorAll("[data-nfe-tab-trigger]"));
+    if (!buttons.length) {
+        return;
+    }
+    buttons.forEach((button, index) => {
+        button.addEventListener("click", () => setNfeTabView(button.dataset.nfeTabTrigger));
+        button.addEventListener("keydown", (event) => {
+            const currentIndex = buttons.indexOf(button);
+            if (event.key === "ArrowRight") {
+                event.preventDefault();
+                buttons[(currentIndex + 1) % buttons.length].focus();
+            } else if (event.key === "ArrowLeft") {
+                event.preventDefault();
+                buttons[(currentIndex - 1 + buttons.length) % buttons.length].focus();
+            } else if (event.key === "Home") {
+                event.preventDefault();
+                buttons[0].focus();
+            } else if (event.key === "End") {
+                event.preventDefault();
+                buttons[buttons.length - 1].focus();
+            } else if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setNfeTabView(button.dataset.nfeTabTrigger);
+            }
+        });
+        button.setAttribute("tabindex", index === 0 ? "0" : "-1");
+    });
+    setNfeTabView(state.nfeTab || "issue");
+}
+
+function resolveAppView(view) {
+    const rawView = String(view || "");
+    if (rawView.startsWith("financeiro-")) {
+        return "financeiro";
+    }
+    if (rawView.startsWith("ordens-")) {
+        return "ordens";
+    }
+    if (rawView.startsWith("agenda-")) {
+        return "agenda";
+    }
+    return view;
+}
+
+function resolveFinanceScreenFromView(view) {
+    const rawView = String(view || "");
+    if (!rawView.startsWith("financeiro-")) {
+        return rawView === "financeiro" ? state.financeScreen || "lancamentos" : null;
+    }
+    return rawView.replace("financeiro-", "") || "lancamentos";
+}
+
+function openFinanceView(screen = "lancamentos") {
+    switchView(`financeiro-${screen}`);
+}
+
+function resolveAppointmentScreenFromView(view) {
+    const rawView = String(view || "");
+    if (!rawView.startsWith("agenda-")) {
+        return rawView === "agenda" ? state.appointmentScreen || "operational" : null;
+    }
+    return rawView === "agenda-novo" ? "new" : "operational";
+}
+
+function openAppointmentView(screen = "operational") {
+    switchView(screen === "new" ? "agenda-novo" : "agenda-operacional");
+}
+
+function resolveWorkOrderScreenFromView(view) {
+    const rawView = String(view || "");
+    if (!rawView.startsWith("ordens-")) {
+        return rawView === "ordens" ? state.workOrderScreen || "new" : null;
+    }
+    return rawView === "ordens-cadastradas" ? "registered" : "new";
+}
+
+function openWorkOrderView(screen = "new") {
+    switchView(screen === "registered" ? "ordens-cadastradas" : "ordens-nova");
+}
+
 function bindAuth() {
     document.getElementById("logout-button").addEventListener("click", logout);
+    document.getElementById("sidebar-logout-button").addEventListener("click", logout);
     document.getElementById("login-form").addEventListener("submit", async (event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
@@ -213,14 +504,23 @@ async function bootstrapApp() {
 }
 
 function showLogin() {
+    const loginForm = document.getElementById("login-form");
+    const loginError = document.getElementById("login-error");
     document.getElementById("app-shell").classList.add("hidden");
     document.getElementById("login-screen").classList.remove("hidden");
+    loginError.classList.add("hidden");
+    loginError.textContent = "";
+    if (loginForm) {
+        loginForm.querySelector('[name="password"]').value = "";
+        loginForm.querySelector('[name="username"]')?.focus();
+    }
     setSyncStatus("Sessao local");
 }
 
 function logout() {
     state.token = "";
     state.user = null;
+    state.receiptPreview = null;
     localStorage.removeItem("syspragas_token");
     showLogin();
 }
@@ -235,18 +535,52 @@ async function loadAllData() {
         apiFetch("/api/v1/os"),
         apiFetch("/api/v1/agendamentos"),
         apiFetch("/api/v1/agendamentos/dashboard"),
+        apiFetch("/api/v1/whatsapp/status").catch(() => ({
+            status: "erro",
+            provider: "custom",
+            instance_name: null,
+            error_message: "Falha ao consultar o status do WhatsApp.",
+            configured: false,
+        })),
+        apiFetch("/api/v1/google-calendar/status").catch(() => ({
+            status: "erro",
+            message: "Falha ao consultar a conexao com Google Agenda.",
+            company_id: 0,
+            company_name: "Nao identificado",
+            account_email: null,
+            calendar_id: null,
+        })),
     ];
     const canAccessFinance = state.user?.role === "master" || state.user?.role === "admin";
+    const canAccessSettings = canAccessFinance;
     if (canAccessFinance) {
         basePromises.push(apiFetch("/api/v1/financeiro"));
         basePromises.push(apiFetch("/api/v1/financeiro/caixa"));
         basePromises.push(apiFetch("/api/v1/financeiro/dashboard"));
+        basePromises.push(apiFetch("/api/v1/recibos"));
+        basePromises.push(apiFetch("/api/v1/nfe"));
+        basePromises.push(apiFetch("/api/v1/nfe/sefaz/readiness"));
+        basePromises.push(apiFetch("/api/v1/fiscal/simples"));
+        basePromises.push(apiFetch("/api/v1/fiscal/fluxo-caixa/resumo?period=monthly"));
+        basePromises.push(apiFetch(`/api/v1/fiscal/simples/resumo/${getSelectedSimplesReference().year}/${getSelectedSimplesReference().month}`));
+    }
+    if (canAccessSettings) {
+        basePromises.push(apiFetch("/api/v1/settings"));
+        basePromises.push(apiFetch("/api/v1/whatsapp/configuracao"));
     }
     const results = await Promise.all(basePromises);
-    const [customers, products, pests, technicians, workOrders, appointments, appointmentDashboard] = results;
-    const finance = canAccessFinance ? results[7] : [];
-    const cashLedger = canAccessFinance ? results[8] : [];
-    const financeDashboard = canAccessFinance ? results[9] : null;
+    const [customers, products, pests, technicians, workOrders, appointments, appointmentDashboard, whatsappStatus, googleStatus] = results;
+    const finance = canAccessFinance ? results[9] : [];
+    const cashLedger = canAccessFinance ? results[10] : [];
+    const financeDashboard = canAccessFinance ? results[11] : null;
+    const receipts = canAccessFinance ? results[12] : [];
+    const nfeInvoices = canAccessFinance ? results[13] : [];
+    const sefazReadiness = canAccessFinance ? results[14] : null;
+    const simplesConfigs = canAccessFinance ? results[15] : [];
+    const cashFlowSummary = canAccessFinance ? results[16] : null;
+    const simplesSummary = canAccessFinance ? results[17] : null;
+    const settingsState = canAccessSettings ? results[18] : null;
+    const whatsappConfig = canAccessSettings ? results[19] : null;
 
     state.customers = customers;
     state.products = products;
@@ -255,9 +589,19 @@ async function loadAllData() {
     state.workOrders = workOrders;
     state.appointments = appointments;
     state.appointmentDashboard = appointmentDashboard;
+    state.integrations.whatsapp = whatsappStatus;
+    state.integrations.google = googleStatus;
     state.finance = finance;
     state.cashLedger = cashLedger;
     state.financeDashboard = financeDashboard;
+    state.receipts = receipts;
+    state.nfeInvoices = nfeInvoices;
+    state.sefazReadiness = sefazReadiness;
+    state.simplesConfigs = simplesConfigs;
+    state.cashFlowSummary = cashFlowSummary;
+    state.simplesSummary = simplesSummary;
+    state.settings = settingsState;
+    state.integrations.whatsappConfig = whatsappConfig;
 
     if (state.user?.role === "master") {
         const [users, licenses, providerCompanies] = await Promise.all([
@@ -312,13 +656,26 @@ async function apiFetch(url, options = {}, withAuth = true) {
 }
 
 function switchView(view) {
+    const appView = resolveAppView(view);
+    const financeScreen = resolveFinanceScreenFromView(view);
+    const workOrderScreen = resolveWorkOrderScreenFromView(view);
+    const appointmentScreen = resolveAppointmentScreenFromView(view);
     document.querySelectorAll(".nav-link[data-view]").forEach((button) => {
         button.classList.toggle("active", button.dataset.view === view);
     });
     document.querySelectorAll(".view").forEach((section) => {
-        section.classList.toggle("active", section.id === `view-${view}`);
+        section.classList.toggle("active", section.id === `view-${appView}`);
     });
-    document.getElementById("view-title").textContent = viewTitles[view] || viewTitles.dashboard;
+    if (appView === "ordens") {
+        setWorkOrderWorkspaceView(workOrderScreen || "new");
+    }
+    if (appView === "financeiro") {
+        setFinanceWorkspaceView(financeScreen || "lancamentos");
+    }
+    if (appView === "agenda") {
+        setAppointmentWorkspaceView(appointmentScreen || "operational");
+    }
+    document.getElementById("view-title").textContent = viewTitles[view] || viewTitles[appView] || viewTitles.dashboard;
 }
 
 function setWorkOrderWorkspaceView(view) {
@@ -336,6 +693,306 @@ function setWorkOrderWorkspaceView(view) {
     });
 }
 
+function setFinanceWorkspaceView(view) {
+    const allowedViews = new Set(["lancamentos", "recibos", "nfe", "caixa", "relatorios"]);
+    state.financeScreen = allowedViews.has(view) ? view : "lancamentos";
+    document.querySelectorAll("[data-finance-screen-trigger]").forEach((button) => {
+        const isActive = button.dataset.financeScreenTrigger === state.financeScreen;
+        button.classList.toggle("tab-active", isActive);
+        button.setAttribute("aria-selected", isActive ? "true" : "false");
+        button.setAttribute("tabindex", isActive ? "0" : "-1");
+    });
+    document.querySelectorAll("[data-finance-screen-panel]").forEach((panel) => {
+        const isActive = panel.dataset.financeScreenPanel === state.financeScreen;
+        panel.classList.toggle("is-active", isActive);
+        panel.hidden = !isActive;
+    });
+    if (state.financeScreen === "nfe") {
+        setNfeTabView(state.nfeTab || "issue");
+    }
+}
+
+function setNfeTabView(view) {
+    state.nfeTab = view === "issued" ? "issued" : "issue";
+    document.querySelectorAll("[data-nfe-tab-trigger]").forEach((button) => {
+        const isActive = button.dataset.nfeTabTrigger === state.nfeTab;
+        button.classList.toggle("tab-active", isActive);
+        button.setAttribute("aria-selected", isActive ? "true" : "false");
+        button.setAttribute("tabindex", isActive ? "0" : "-1");
+    });
+    document.querySelectorAll("[data-nfe-tab-panel]").forEach((panel) => {
+        const isActive = panel.dataset.nfeTabPanel === state.nfeTab;
+        panel.classList.toggle("tab-content-active", isActive);
+        panel.hidden = !isActive;
+    });
+}
+
+function setAppointmentWorkspaceView(view) {
+    state.appointmentScreen = view === "new" ? "new" : "operational";
+    document.querySelectorAll("[data-appointment-screen-panel]").forEach((panel) => {
+        const isActive = panel.dataset.appointmentScreenPanel === state.appointmentScreen;
+        panel.classList.toggle("is-active", isActive);
+        panel.hidden = !isActive;
+    });
+}
+
+function renderSettingsLoadingState() {
+    const summary = document.getElementById("settings-summary-grid");
+    const form = document.getElementById("system-settings-form");
+    const integrations = document.getElementById("settings-integrations-panel");
+    const admin = document.getElementById("settings-admin-panel");
+    const environment = document.getElementById("settings-environment-panel");
+    if (summary) {
+        summary.innerHTML = `<div class="empty-state">As configuracoes carregam apos o login com perfil administrativo.</div>`;
+    }
+    if (form) {
+        form.innerHTML = `<div class="empty-state">Entre com um usuario admin ou master para editar as configuracoes do sistema.</div>`;
+    }
+    if (integrations) {
+        integrations.innerHTML = "";
+    }
+    if (admin) {
+        admin.innerHTML = "";
+    }
+    if (environment) {
+        environment.innerHTML = "";
+    }
+}
+
+function renderSettings() {
+    const summary = document.getElementById("settings-summary-grid");
+    const form = document.getElementById("system-settings-form");
+    const integrations = document.getElementById("settings-integrations-panel");
+    const admin = document.getElementById("settings-admin-panel");
+    const environment = document.getElementById("settings-environment-panel");
+    if (!summary || !form || !integrations || !admin || !environment) {
+        return;
+    }
+
+    const canAccessSettings = state.user?.role === "master" || state.user?.role === "admin";
+    if (!canAccessSettings || !state.settings) {
+        renderSettingsLoadingState();
+        return;
+    }
+
+    const settingsState = state.settings;
+    const google = state.integrations.google || {};
+    const whatsapp = state.integrations.whatsapp || {};
+    const whatsappConfig = state.integrations.whatsappConfig || {};
+    const whatsappQr = state.integrations.whatsappQr || {};
+    const isMaster = state.user?.role === "master";
+    const multiempresaBadge = settingsState.system.multiempresa_enabled ? "Ativo" : "Unificado";
+    const operationModeLabel = settingsState.system.operation_mode === "rede" ? "Rede interna" : "Local";
+    const notificationsLabel = settingsState.system.notifications_enabled ? "Ativas" : "Desativadas";
+    const googleLabel = formatIntegrationStatus(google.status || "desconectado");
+    const whatsappLabel = formatIntegrationStatus(whatsapp.status || "desconectado");
+    const whatsappEnabledInSettings = Boolean(settingsState.integrations.whatsapp_enabled);
+    const googleMeta = google.account_email || google.message || "Conta nao conectada";
+    const whatsappMeta = whatsapp.instance_name || whatsapp.error_message || "Nenhum numero vinculado detectado";
+
+    summary.innerHTML = `
+        <div class="settings-summary-grid">
+            ${settingsSummaryCard("Modo de operacao", operationModeLabel, "Define o perfil de acesso local ou em rede do servidor atual.")}
+            ${settingsSummaryCard("Multiempresa", multiempresaBadge, settingsState.system.multiempresa_enabled ? "Os dados ficam isolados por empresa prestadora." : "Os dados operam sem escopo por empresa." )}
+            ${settingsSummaryCard("Google Agenda", googleLabel, googleMeta)}
+            ${settingsSummaryCard("WhatsApp", whatsappLabel, whatsappMeta)}
+            ${settingsSummaryCard("Notificacoes", notificationsLabel, settingsState.system.notifications_enabled ? "Avisos operacionais seguem habilitados." : "Avisos operacionais desabilitados." )}
+            ${settingsSummaryCard("Usuarios ativos", String(state.users.length || 0), isMaster ? "Leitura da administracao global disponivel neste perfil." : "Use a area de usuarios com perfil master para governanca completa.")}
+        </div>
+    `;
+
+    form.innerHTML = `
+        <section class="settings-form-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Integracoes</p>
+                <h4>Regras operacionais das integracoes</h4>
+                <p>Controle quando Google Agenda e WhatsApp participam do fluxo diario do time.</p>
+            </div>
+            <div class="settings-field-grid">
+                ${toggleField("google_calendar_enabled", "Google Agenda ativa", "Permite sincronizacao manual e automatica com a conta conectada.", settingsState.integrations.google_calendar_enabled)}
+                ${toggleField("whatsapp_enabled", "WhatsApp ativo", "Libera envio manual e automatico de mensagens do agendamento.", settingsState.integrations.whatsapp_enabled)}
+                ${toggleField("whatsapp_auto_send", "Envio automatico de WhatsApp", "Dispara mensagem automaticamente ao criar ou atualizar compromissos elegiveis.", settingsState.integrations.whatsapp_auto_send)}
+                ${toggleField("appointment_default_google_sync", "Google ativo por padrao nos novos agendamentos", "Preenche o padrao inicial dos formularios com sincronizacao ligada.", settingsState.system.appointment_default_google_sync)}
+            </div>
+            <label class="settings-textarea">
+                <span>Mensagem padrao do WhatsApp</span>
+                <textarea name="whatsapp_default_message" rows="4" placeholder="Mensagem automatica de agendamento">${escapeHtml(settingsState.integrations.whatsapp_default_message || "")}</textarea>
+            </label>
+        </section>
+        <section class="settings-form-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Sistema</p>
+                <h4>Contexto de operacao e seguranca</h4>
+                <p>Ajuste o comportamento global do sistema e a organizacao por empresa.</p>
+            </div>
+            <div class="settings-field-grid two-columns">
+                ${toggleField("multiempresa_enabled", "Multiempresa ativo", "Quando desativado, o sistema opera sem escopo por empresa.", settingsState.system.multiempresa_enabled)}
+                ${toggleField("notifications_enabled", "Notificacoes operacionais", "Mantem avisos e estados auxiliares exibidos na interface.", settingsState.system.notifications_enabled)}
+                <label>
+                    <span>Modo de operacao</span>
+                    <select name="operation_mode">
+                        <option value="local" ${settingsState.system.operation_mode === "local" ? "selected" : ""}>Local</option>
+                        <option value="rede" ${settingsState.system.operation_mode === "rede" ? "selected" : ""}>Rede</option>
+                    </select>
+                </label>
+            </div>
+        </section>
+        <div class="inline-actions">
+            <button type="submit" class="btn btn-success" data-save-button="settings">Salvar configuracoes</button>
+            <button type="button" class="btn btn-default ghost-button" data-settings-action="refresh-integrations">Atualizar status das integracoes</button>
+        </div>
+        <p class="origin-note">As configuracoes persistem no banco e passam a valer para novos fluxos operacionais.</p>
+        <p class="form-error hidden"></p>
+    `;
+
+    integrations.innerHTML = `
+        <section class="settings-side-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Google Agenda</p>
+                <h4>Conexao e troca de conta</h4>
+                <p>Use a conta correta por empresa e acompanhe o calendario vinculado.</p>
+            </div>
+            <div class="settings-side-list">
+                ${settingsInfoRow("Status", googleLabel)}
+                ${settingsInfoRow("Conta", google.account_email || "Nenhuma conta conectada")}
+                ${settingsInfoRow("Calendario", google.calendar_id || "primary")}
+                ${settingsInfoRow("Empresa", google.company_name || "Nao identificado")}
+            </div>
+            <div class="inline-actions">
+                <button type="button" class="btn btn-success" data-settings-action="google-login">Login ou troca de conta</button>
+                <button type="button" class="btn btn-default ghost-button" data-settings-action="google-logout" ${google.account_email ? "" : "disabled"}>Logout</button>
+            </div>
+        </section>
+        <section class="settings-side-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">WhatsApp</p>
+                <h4>Conexao e automacao de mensagens</h4>
+                <p>Monitore a instancia atual e o estado tecnico da integracao configurada.</p>
+            </div>
+            <div class="settings-side-list">
+                ${settingsInfoRow("Status", whatsappLabel)}
+                ${settingsInfoRow("Numero ou instancia", whatsapp.instance_name || "Nao identificado")}
+                ${settingsInfoRow("Provedor", whatsapp.provider || whatsappConfig.provider || "custom")}
+                ${settingsInfoRow("Configuracao tecnica", whatsappConfig.configured ? "Pronta" : "Incompleta")}
+                ${settingsInfoRow("QR Code", whatsapp.supports_qr ? "Disponivel" : "Nao suportado")}
+                ${settingsInfoRow("Numero conectado", whatsapp.connected_phone || "-")}
+            </div>
+            <p class="origin-note">${escapeHtml(whatsapp.error_message || "Use esta area para validar a integracao antes de disparos automaticos.")}</p>
+            <div class="inline-actions">
+                <button type="button" class="btn btn-success" data-settings-action="whatsapp-connect-qr" ${whatsappEnabledInSettings ? "" : "disabled"}>Conectar via QR</button>
+                <button type="button" class="btn btn-default ghost-button" data-settings-action="whatsapp-logout" ${whatsapp.supports_qr ? "" : "disabled"}>Desconectar sessao</button>
+                <button type="button" class="btn btn-default ghost-button" data-integration-action="refresh-whatsapp">Atualizar status</button>
+            </div>
+            ${whatsappQr.qr_image_data_url || whatsappQr.qr_code || whatsappQr.message ? `
+                <div class="whatsapp-qr-panel">
+                    <div class="section-heading compact">
+                        <h4>Autenticacao por QR Code</h4>
+                        <p>${escapeHtml(whatsappQr.message || "Leia o QR Code abaixo com o WhatsApp para conectar a sessao.")}</p>
+                    </div>
+                    ${whatsappQr.qr_image_data_url ? `<img class="whatsapp-qr-image" src="${escapeHtml(whatsappQr.qr_image_data_url)}" alt="QR Code do WhatsApp">` : ""}
+                    ${!whatsappQr.qr_image_data_url && whatsappQr.qr_code ? `<pre class="whatsapp-qr-text">${escapeHtml(whatsappQr.qr_code)}</pre>` : ""}
+                    <div class="settings-side-list">
+                        ${settingsInfoRow("Status da sessao", whatsappQr.status || "aguardando_conexao")}
+                        ${settingsInfoRow("Instancia", whatsappQr.instance_name || whatsapp.instance_name || "Nao identificada")}
+                        ${settingsInfoRow("Expira em", whatsappQr.expires_at || "-")}
+                        ${settingsInfoRow("Codigo de pareamento", whatsappQr.pairing_code || "-")}
+                    </div>
+                    ${whatsappQr.error_message ? `<p class="origin-note">${escapeHtml(whatsappQr.error_message)}</p>` : ""}
+                </div>
+            ` : ""}
+        </section>
+    `;
+
+    admin.innerHTML = `
+        <section class="settings-side-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Usuarios e permissoes</p>
+                <h4>Administracao e restricoes por empresa</h4>
+                <p>Os cadastros administrativos seguem em modulos proprios, mas a governanca parte daqui.</p>
+            </div>
+            <div class="settings-side-list">
+                ${settingsInfoRow("Perfil atual", state.user?.role || "-")}
+                ${settingsInfoRow("Empresas cadastradas", String(state.providerCompanies.length || 0))}
+                ${settingsInfoRow("Usuarios carregados", String(state.users.length || 0))}
+                ${settingsInfoRow("Licencas carregadas", String(state.licenses.length || 0))}
+            </div>
+            <div class="inline-actions">
+                <button type="button" class="btn btn-default ghost-button" data-settings-shortcut="usuarios">Usuarios</button>
+                <button type="button" class="btn btn-default ghost-button" data-settings-shortcut="empresas" ${isMaster ? "" : "disabled"}>Empresas</button>
+                <button type="button" class="btn btn-default ghost-button" data-settings-shortcut="licencas" ${isMaster ? "" : "disabled"}>Licencas</button>
+            </div>
+        </section>
+    `;
+
+    environment.innerHTML = `
+        <section class="settings-side-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Banco e ambiente</p>
+                <h4>Contexto tecnico da execucao</h4>
+                <p>Referencia segura para suporte local, rede interna e empacotamento da release.</p>
+            </div>
+            <div class="settings-side-list">
+                ${settingsInfoRow("Banco", settingsState.environment.database_url_masked)}
+                ${settingsInfoRow("Host configurado", settingsState.environment.app_host)}
+                ${settingsInfoRow("Porta", String(settingsState.environment.app_port))}
+                ${settingsInfoRow("Acesso remoto", settingsState.environment.allow_remote_access ? "Permitido" : "Desativado")}
+            </div>
+            <p class="origin-note">Para alterar host, porta ou conexao de banco use os arquivos de ambiente e os scripts de execucao da release.</p>
+        </section>
+    `;
+}
+
+function settingsSummaryCard(label, value, description) {
+    return `
+        <article class="settings-summary-card">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+            <p>${escapeHtml(description)}</p>
+        </article>
+    `;
+}
+
+function settingsInfoRow(label, value) {
+    return `
+        <div class="settings-info-row">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+        </div>
+    `;
+}
+
+function toggleField(name, label, description, checked) {
+    return `
+        <label class="settings-toggle">
+            <span class="settings-toggle-copy">
+                <strong>${escapeHtml(label)}</strong>
+                <small>${escapeHtml(description)}</small>
+            </span>
+            <span class="settings-switch">
+                <input type="checkbox" name="${escapeHtml(name)}" ${checked ? "checked" : ""}>
+                <span class="settings-switch-ui" aria-hidden="true"></span>
+            </span>
+        </label>
+    `;
+}
+
+function getSystemSettingsPayload(form) {
+    return {
+        integrations: {
+            google_calendar_enabled: form.querySelector('[name="google_calendar_enabled"]').checked,
+            whatsapp_enabled: form.querySelector('[name="whatsapp_enabled"]').checked,
+            whatsapp_auto_send: form.querySelector('[name="whatsapp_auto_send"]').checked,
+            whatsapp_default_message: form.querySelector('[name="whatsapp_default_message"]').value.trim(),
+        },
+        system: {
+            multiempresa_enabled: form.querySelector('[name="multiempresa_enabled"]').checked,
+            operation_mode: form.querySelector('[name="operation_mode"]').value,
+            notifications_enabled: form.querySelector('[name="notifications_enabled"]').checked,
+            appointment_default_google_sync: form.querySelector('[name="appointment_default_google_sync"]').checked,
+        },
+    };
+}
+
 function renderAll() {
     renderDashboard();
     renderCustomers();
@@ -345,25 +1002,35 @@ function renderAll() {
     renderWorkOrders();
     renderAppointments();
     renderFinance();
+    renderSettings();
     renderProviderCompanies();
     renderUsers();
     renderLicenses();
     renderWorkOrderFormHeader();
     renderAppointmentFormHeader();
     renderWorkOrderSaveFeedback();
+    renderNfeEmissionWorkspace();
+    renderNfeEmissionFeedback();
     setWorkOrderWorkspaceView(state.workOrderScreen || "new");
+    setFinanceWorkspaceView(state.financeScreen || "lancamentos");
+    setNfeTabView(state.nfeTab || "issue");
+    setAppointmentWorkspaceView(state.appointmentScreen || "operational");
     switchProviderCompanyTab(state.providerCompanyTab || "dados");
     renderProviderCompanyLicenseWorkspace();
 }
 
 function toggleMasterSections() {
     const isMaster = state.user?.role === "master";
+    const canAccessAdminSettings = state.user?.role === "master" || state.user?.role === "admin";
     document.querySelectorAll(".master-only").forEach((node) => {
         node.classList.toggle("hidden", !isMaster);
     });
     const canAccessFinance = state.user?.role === "master" || state.user?.role === "admin";
     document.querySelectorAll(".finance-only").forEach((node) => {
         node.classList.toggle("hidden", !canAccessFinance);
+    });
+    document.querySelectorAll(".admin-only").forEach((node) => {
+        node.classList.toggle("hidden", !canAccessAdminSettings);
     });
 }
 
@@ -387,7 +1054,7 @@ function buildForms() {
                 <button type="button" class="btn btn-default ghost-button" id="customer-cnpj-lookup">Buscar por CNPJ</button>
             </div>
             <label><span>CEP</span><input name="cep" maxlength="9" placeholder="00000-000"></label>
-            <label><span>Numero</span><input name="numero" placeholder="Numero"></label>
+            <label><span>Numero do endereco</span><input name="numero" placeholder="Numero"></label>
             <div class="inline-actions compact-actions full-width">
                 <button type="button" class="btn btn-default ghost-button" id="customer-cep-lookup">Buscar por CEP</button>
             </div>
@@ -410,9 +1077,40 @@ function buildForms() {
             <label><span>Toxicidade</span><input name="toxicidade" required></label>
             <label><span>Concentracao</span><input name="concentracao" required></label>
             <label><span>Registro MS</span><input name="registro_ms" required></label>
+            <label>
+                <span>NCM</span>
+                <input name="ncm" id="product-ncm-input" list="product-ncm-suggestions" placeholder="Digite codigo ou descricao">
+                <datalist id="product-ncm-suggestions"></datalist>
+                <div id="product-ncm-live-results" class="ncm-live-results hidden"></div>
+            </label>
+            <label class="product-inline-action">
+                <span>Base fiscal</span>
+                <button type="button" class="btn btn-default ghost-button" id="product-ncm-lookup-button">Buscar NCM</button>
+            </label>
+            <label class="full-width"><span>Descricao fiscal</span><input name="ncm_descricao" id="product-ncm-description" readonly></label>
+            <label>
+                <span>Override manual</span>
+                <select name="override_tributacao" id="product-tax-override">
+                    <option value="false">Usar base automatica</option>
+                    <option value="true">Informar aliquotas manualmente</option>
+                </select>
+            </label>
             <label><span>Estoque atual</span><input name="estoque_atual" type="number" min="0" step="0.01" value="0"></label>
             <label><span>Estoque minimo</span><input name="estoque_minimo" type="number" min="0" step="0.01" value="0"></label>
         </div>
+        <section class="tax-profile-card">
+            <div class="section-heading compact">
+                <h4>Tributacao vinculada ao produto</h4>
+                <p>O cadastro usa cache local de NCM e permite ajuste manual quando necessario.</p>
+            </div>
+            <div class="form-grid">
+                <label><span>ICMS (%)</span><input name="aliquota_icms" type="number" min="0" step="0.0001" value="0"></label>
+                <label><span>IPI (%)</span><input name="aliquota_ipi" type="number" min="0" step="0.0001" value="0"></label>
+                <label><span>PIS (%)</span><input name="aliquota_pis" type="number" min="0" step="0.0001" value="0"></label>
+                <label><span>COFINS (%)</span><input name="aliquota_cofins" type="number" min="0" step="0.0001" value="0"></label>
+            </div>
+            <div class="origin-note" id="product-tax-source-note">Sem NCM vinculado. Informe um NCM para preencher automaticamente as aliquotas.</div>
+        </section>
         <div class="section-heading">
             <h3>Importacoes de estoque</h3>
             <p>Use XML da NF-e ou CSV para dar entrada em produtos e registrar a despesa no financeiro.</p>
@@ -501,9 +1199,128 @@ function buildForms() {
         ${formActionHtml("finance", "Salvar lancamento", "Cancelar edicao")}
     `;
 
+    const receiptForm = document.getElementById("receipt-form");
+    if (receiptForm) {
+        receiptForm.innerHTML = `
+            <div class="form-grid">
+                <label><span>Cliente</span><select name="cliente_id" required><option value="">Selecione o cliente</option></select></label>
+                <label><span>OS vinculada</span><select name="os_id"><option value="">Sem vinculacao</option></select></label>
+                <label><span>Data do recebimento</span><input name="data_recebimento" type="date" required></label>
+                <label><span>Valor recebido</span><input name="valor" type="number" min="0.01" step="0.01" required></label>
+                <label>
+                    <span>Forma de pagamento</span>
+                    <select name="forma_pagamento" required>
+                        <option value="pix">PIX</option>
+                        <option value="dinheiro">Dinheiro</option>
+                        <option value="transferencia">Transferencia bancaria</option>
+                        <option value="cartao_credito">Cartao de credito</option>
+                        <option value="cartao_debito">Cartao de debito</option>
+                        <option value="boleto">Boleto</option>
+                        <option value="cheque">Cheque</option>
+                        <option value="outros">Outros</option>
+                    </select>
+                </label>
+                <label class="full-width"><span>Descricao</span><textarea name="descricao" required placeholder="Descreva claramente o motivo do recebimento."></textarea></label>
+            </div>
+            <div class="inline-actions compact-actions">
+                <button type="button" class="btn btn-default ghost-button" id="receipt-preview-refresh">Atualizar preview</button>
+                <span class="origin-note">O valor por extenso e o texto formal sao gerados automaticamente.</span>
+            </div>
+            <section class="receipt-preview-panel">
+                <div class="section-heading compact">
+                    <h4>Preview do recibo</h4>
+                    <p>Revise o texto formal e os dados finais antes de salvar.</p>
+                </div>
+                <div id="receipt-preview-card" class="receipt-preview-card">
+                    <div class="empty-state">Preencha os dados do recibo para visualizar o documento antes de salvar.</div>
+                </div>
+            </section>
+            ${formActionHtml("receipt", "Salvar recibo", "Cancelar edicao")}
+        `;
+    }
+
+    const nfeForm = document.getElementById("nfe-form");
+    if (nfeForm) {
+        nfeForm.innerHTML = `
+            <div id="nfe-emission-workspace" class="nfe-emission-workspace"></div>
+            <div class="form-grid">
+                <label><span>Numero NF-e</span><input name="numero_nfe" required></label>
+                <label><span>Cliente</span><select name="cliente_id" required><option value="">Selecione o cliente</option></select></label>
+                <label><span>Valor total</span><input name="valor_total" type="number" min="0.01" step="0.01" required></label>
+                <label><span>Data emissao</span><input name="data_emissao" type="date" required></label>
+                <label><span>Data vencimento</span><input name="data_vencimento" type="date" required></label>
+                <label><span>Natureza da operacao</span><input name="natureza_operacao" value="Venda" required></label>
+                <label><span>Referencia externa</span><input name="referencia_externa" placeholder="Ex.: NFE-2026-001"></label>
+                <label><span>Ambiente</span>
+                    <select name="ambiente">
+                        <option value="homologacao">Homologacao</option>
+                        <option value="producao">Producao</option>
+                    </select>
+                </label>
+                <label><span>Status</span>
+                    <select name="status">
+                        <option value="emitida">Emitida</option>
+                        <option value="cancelada">Cancelada</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Gerar financeiro</span>
+                    <select name="gerar_financeiro">
+                        <option value="true">Sim</option>
+                        <option value="false">Nao</option>
+                    </select>
+                </label>
+                <label class="full-width"><span>Observacoes</span><textarea name="observacoes"></textarea></label>
+            </div>
+            <section class="tax-profile-card">
+                <div class="section-heading compact">
+                    <h4>Itens fiscais da NF-e</h4>
+                    <p>Informe ao menos um item com descricao, NCM, quantidade e valor unitario para emitir na SEFAZ.</p>
+                </div>
+                <div id="nfe-items-list" class="product-row-list"></div>
+                <div class="inline-actions">
+                    <button type="button" class="btn btn-default ghost-button" id="add-nfe-item-row">Adicionar item</button>
+                </div>
+                <p class="origin-note nfe-items-note">Ao selecionar um produto, o sistema preenche descricao, NCM e aliquotas automaticamente.</p>
+            </section>
+            ${formActionHtml("nfe", "Salvar NF-e", "Cancelar edicao")}
+            <div id="nfe-save-feedback" class="nfe-save-feedback hidden"></div>
+        `;
+    }
+
+    const simplesConfigForm = document.getElementById("simples-config-form");
+    if (simplesConfigForm) {
+        simplesConfigForm.innerHTML = `
+            <div class="form-grid">
+                <label><span>Faixa inicial</span><input name="faixa_faturamento_inicio" type="number" min="0" step="0.01" value="0" required></label>
+                <label><span>Faixa final</span><input name="faixa_faturamento_fim" type="number" min="0" step="0.01" placeholder="Opcional"></label>
+                <label><span>Aliquota (%)</span><input name="aliquota" type="number" min="0.0001" step="0.0001" required></label>
+                <label><span>Anexo</span><input name="anexo" placeholder="III"></label>
+                <label>
+                    <span>Configuracao vigente</span>
+                    <select name="vigente">
+                        <option value="true">Sim</option>
+                        <option value="false">Nao</option>
+                    </select>
+                </label>
+                <label class="full-width"><span>Observacoes</span><textarea name="observacoes"></textarea></label>
+            </div>
+            <div class="inline-actions">
+                <button type="submit" class="btn btn-success" data-save-button="simplesConfig">Salvar configuracao</button>
+                <button type="button" class="btn btn-default ghost-button" id="simples-config-clear">Limpar formulario</button>
+            </div>
+            <p class="origin-note hidden" id="simples-config-mode-note"></p>
+            <p class="form-error hidden"></p>
+        `;
+    }
+
     document.getElementById("work-order-form").innerHTML = `
         <div class="form-grid">
-            <label><span>Numero</span><input name="numero" required></label>
+            <div class="work-order-number-banner full-width">
+                <p class="eyebrow">Identificacao da OS</p>
+                <strong id="work-order-number-display">Sera gerado automaticamente ao salvar</strong>
+                <small>O sistema gera o numero definitivo em sequencia e ele nao pode ser editado manualmente.</small>
+            </div>
             <label><span>Cliente</span><select name="cliente_id" required></select></label>
             <label><span>Tecnico</span><select name="tecnico_id" required></select></label>
             <label><span>Local de execucao</span><input name="local_execucao" required></label>
@@ -726,6 +1543,10 @@ function buildForms() {
                     <option value="true">Sim</option>
                 </select>
             </label>
+            <label class="checkbox-field">
+                <input name="enviar_whatsapp" type="checkbox" checked>
+                <span>Enviar WhatsApp ao salvar este agendamento</span>
+            </label>
             <label class="full-width"><span>Observacoes externas</span><textarea name="observacoes" placeholder="Orientacoes visiveis para a operacao"></textarea></label>
             <label class="full-width"><span>Observacoes internas</span><textarea name="observacoes_internas"></textarea></label>
             <label class="full-width"><span>Instrucoes tecnicas</span><textarea name="instrucoes_tecnicas"></textarea></label>
@@ -849,11 +1670,424 @@ function buildForms() {
     bindProductXmlImport();
     bindProductCsvImport();
     bindCustomerAutoLookup();
+    bindNfeFormHelpers();
+    bindProductFiscalControls();
     bindProviderCompanyWorkspace();
     bindWorkOrderSelectors();
     bindAppointmentWorkspace();
+    bindFinancialModuleWorkspace();
     clearWorkOrderForm();
     clearAppointmentForm();
+    clearReceiptForm();
+}
+
+function bindProductFiscalControls() {
+    const ncmInput = document.getElementById("product-ncm-input");
+    const lookupButton = document.getElementById("product-ncm-lookup-button");
+    const overrideSelect = document.getElementById("product-tax-override");
+    const resultsPanel = document.getElementById("product-ncm-live-results");
+    if (!ncmInput || !lookupButton || !overrideSelect || !resultsPanel) {
+        return;
+    }
+
+    let searchTimer = null;
+    ncmInput.addEventListener("input", () => {
+        window.clearTimeout(searchTimer);
+        searchTimer = window.setTimeout(() => {
+            loadNcmSuggestions(ncmInput.value);
+        }, 220);
+    });
+    ncmInput.addEventListener("focus", () => {
+        if (String(ncmInput.value || "").trim().length >= 2) {
+            loadNcmSuggestions(ncmInput.value);
+        }
+    });
+    ncmInput.addEventListener("change", async () => {
+        await applyNcmProfileToProductForm(ncmInput.value, false);
+    });
+    ncmInput.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+            hideNcmLiveResults();
+        }
+    });
+    lookupButton.addEventListener("click", async () => {
+        await applyNcmProfileToProductForm(ncmInput.value, true);
+    });
+    overrideSelect.addEventListener("change", () => {
+        syncProductTaxFields();
+    });
+    if (document.body.dataset.ncmOutsideBound !== "true") {
+        document.body.dataset.ncmOutsideBound = "true";
+        document.addEventListener("click", (event) => {
+            const target = event.target;
+            if (
+                target instanceof HTMLElement
+                && !target.closest("#product-ncm-input")
+                && !target.closest("#product-ncm-live-results")
+                && !target.closest("#product-ncm-lookup-button")
+            ) {
+                hideNcmLiveResults();
+            }
+        });
+    }
+    syncProductTaxFields();
+}
+
+function bindFinancialModuleWorkspace() {
+    bindFinanceFilters();
+    bindReceiptFilters();
+    bindNfeFilters();
+    bindSimplesSummaryRefresh();
+    bindReceiptWorkspace();
+}
+
+function bindFinanceFilters() {
+    const bindings = [
+        ["finance-search-filter", "financeSearch", "input"],
+        ["finance-status-filter", "financeStatus", "change"],
+        ["finance-customer-filter", "financeCustomer", "change"],
+        ["finance-start-date-filter", "financeStartDate", "change"],
+        ["finance-end-date-filter", "financeEndDate", "change"],
+    ];
+    bindings.forEach(([id, key, eventName]) => {
+        const field = document.getElementById(id);
+        if (!field || field.dataset.bound === "true") {
+            return;
+        }
+        field.dataset.bound = "true";
+        field.addEventListener(eventName, () => {
+            state.filters[key] = field.value;
+            renderFinance();
+        });
+    });
+
+    const clearButton = document.getElementById("finance-clear-filters");
+    if (clearButton && clearButton.dataset.bound !== "true") {
+        clearButton.dataset.bound = "true";
+        clearButton.addEventListener("click", () => {
+            state.filters.financeSearch = "";
+            state.filters.financeStatus = "todos";
+            state.filters.financeCustomer = "";
+            state.filters.financeStartDate = "";
+            state.filters.financeEndDate = "";
+            renderFinance();
+        });
+    }
+}
+
+function bindReceiptFilters() {
+    const bindings = [
+        ["receipt-search-filter", "receiptSearch", "input"],
+        ["receipt-customer-filter", "receiptCustomer", "change"],
+    ];
+    bindings.forEach(([id, key, eventName]) => {
+        const field = document.getElementById(id);
+        if (!field || field.dataset.bound === "true") {
+            return;
+        }
+        field.dataset.bound = "true";
+        field.addEventListener(eventName, () => {
+            state.filters[key] = field.value;
+            renderFinance();
+        });
+    });
+
+    const clearButton = document.getElementById("receipt-clear-filters");
+    if (clearButton && clearButton.dataset.bound !== "true") {
+        clearButton.dataset.bound = "true";
+        clearButton.addEventListener("click", () => {
+            state.filters.receiptSearch = "";
+            state.filters.receiptCustomer = "";
+            renderFinance();
+        });
+    }
+}
+
+function bindReceiptWorkspace() {
+    const form = document.getElementById("receipt-form");
+    const previewButton = document.getElementById("receipt-preview-refresh");
+    if (!form || !previewButton) {
+        return;
+    }
+
+    if (previewButton.dataset.bound !== "true") {
+        previewButton.dataset.bound = "true";
+        previewButton.addEventListener("click", async () => {
+            await refreshReceiptPreview(false);
+        });
+    }
+
+    if (form.dataset.previewBound !== "true") {
+        form.dataset.previewBound = "true";
+        const schedulePreview = () => {
+            window.clearTimeout(form._receiptPreviewTimer);
+            form._receiptPreviewTimer = window.setTimeout(() => {
+                refreshReceiptPreview(true);
+            }, 220);
+        };
+        form.addEventListener("input", schedulePreview);
+        form.addEventListener("change", (event) => {
+            if (event.target?.name === "cliente_id") {
+                syncReceiptWorkOrderOptions();
+                applySelectedReceiptWorkOrderDefaults();
+            }
+            if (event.target?.name === "os_id") {
+                applySelectedReceiptWorkOrderDefaults();
+            }
+            schedulePreview();
+        });
+    }
+}
+
+function bindNfeFilters() {
+    const bindings = [
+        ["nfe-search-filter", "nfeSearch", "input"],
+        ["nfe-status-filter", "nfeStatus", "change"],
+        ["nfe-customer-filter", "nfeCustomer", "change"],
+    ];
+    bindings.forEach(([id, key, eventName]) => {
+        const field = document.getElementById(id);
+        if (!field || field.dataset.bound === "true") {
+            return;
+        }
+        field.dataset.bound = "true";
+        field.addEventListener(eventName, () => {
+            state.filters[key] = field.value;
+            renderFinance();
+        });
+    });
+
+    const clearButton = document.getElementById("nfe-clear-filters");
+    if (clearButton && clearButton.dataset.bound !== "true") {
+        clearButton.dataset.bound = "true";
+        clearButton.addEventListener("click", () => {
+            state.filters.nfeSearch = "";
+            state.filters.nfeStatus = "todos";
+            state.filters.nfeCustomer = "";
+            renderFinance();
+        });
+    }
+}
+
+function bindSimplesSummaryRefresh() {
+    const refreshButton = document.getElementById("simples-summary-refresh");
+    if (refreshButton && refreshButton.dataset.bound !== "true") {
+        refreshButton.dataset.bound = "true";
+        refreshButton.addEventListener("click", async () => {
+            try {
+                setSyncStatus("Atualizando resumo fiscal...");
+                state.simplesSummary = await apiFetch(
+                    `/api/v1/fiscal/simples/resumo/${getSelectedSimplesReference().year}/${getSelectedSimplesReference().month}`,
+                );
+                renderFinance();
+                setSyncStatus("Sincronizado");
+            } catch (error) {
+                setSyncStatus("Falha na consulta");
+                toast(error.message);
+            }
+        });
+    }
+
+    const monthField = document.getElementById("simples-reference-month");
+    if (monthField && monthField.dataset.bound !== "true") {
+        monthField.dataset.bound = "true";
+        monthField.addEventListener("change", async () => {
+            state.filters.simplesReferenceMonth = monthField.value || state.filters.simplesReferenceMonth;
+            try {
+                state.simplesSummary = await apiFetch(
+                    `/api/v1/fiscal/simples/resumo/${getSelectedSimplesReference().year}/${getSelectedSimplesReference().month}`,
+                );
+                renderFinance();
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    }
+}
+
+function bindSimplesConfigActions() {
+    const clearButton = document.getElementById("simples-config-clear");
+    if (clearButton && clearButton.dataset.bound !== "true") {
+        clearButton.dataset.bound = "true";
+        clearButton.addEventListener("click", () => clearSimplesConfigForm());
+    }
+}
+
+function syncFinancialReferenceMonth() {
+    const monthField = document.getElementById("simples-reference-month");
+    if (monthField) {
+        monthField.value = state.filters.simplesReferenceMonth || new Date().toISOString().slice(0, 7);
+    }
+}
+
+function getSelectedSimplesReference() {
+    const rawValue = state.filters.simplesReferenceMonth || new Date().toISOString().slice(0, 7);
+    const [yearText, monthText] = rawValue.split("-");
+    const year = Number(yearText) || new Date().getFullYear();
+    const month = Number(monthText) || new Date().getMonth() + 1;
+    return { year, month };
+}
+
+async function loadNcmSuggestions(query) {
+    const datalist = document.getElementById("product-ncm-suggestions");
+    const resultsPanel = document.getElementById("product-ncm-live-results");
+    if (!datalist || !resultsPanel) {
+        return;
+    }
+    const normalizedQuery = String(query || "").trim();
+    if (normalizedQuery.length < 2) {
+        datalist.innerHTML = "";
+        hideNcmLiveResults();
+        return;
+    }
+    try {
+        const results = await apiFetch(`/api/v1/fiscal/ncm?query=${encodeURIComponent(normalizedQuery)}&limit=8`);
+        datalist.innerHTML = results
+            .map((item) => `<option value="${escapeHtml(item.codigo)}">${escapeHtml(`${item.codigo} - ${item.descricao}`)}</option>`)
+            .join("");
+        renderNcmLiveResults(results, normalizedQuery);
+        const exactCode = digitsOnly(normalizedQuery).slice(0, 8);
+        if (exactCode.length === 8 && results.some((item) => item.codigo === exactCode)) {
+            await applyNcmProfileToProductForm(exactCode, false);
+            hideNcmLiveResults();
+        }
+    } catch {
+        datalist.innerHTML = "";
+        hideNcmLiveResults();
+    }
+}
+
+function renderNcmLiveResults(results, query) {
+    const resultsPanel = document.getElementById("product-ncm-live-results");
+    const ncmInput = document.getElementById("product-ncm-input");
+    if (!resultsPanel || !ncmInput) {
+        return;
+    }
+    if (!results.length) {
+        resultsPanel.innerHTML = `<div class="ncm-live-empty">Nenhum NCM encontrado para "${escapeHtml(query)}".</div>`;
+        resultsPanel.classList.remove("hidden");
+        return;
+    }
+
+    resultsPanel.innerHTML = `
+        <div class="ncm-live-header">Resultados da pre-busca</div>
+        <div class="ncm-live-list">
+            ${results.map((item) => `
+                <button type="button" class="ncm-live-option" data-code="${escapeHtml(item.codigo)}">
+                    <strong>${escapeHtml(item.codigo)}</strong>
+                    <span>${escapeHtml(item.descricao)}</span>
+                    <small>ICMS ${escapeHtml(String(item.aliquota_icms || 0))}% | PIS ${escapeHtml(String(item.aliquota_pis || 0))}% | COFINS ${escapeHtml(String(item.aliquota_cofins || 0))}%</small>
+                </button>
+            `).join("")}
+        </div>
+    `;
+    resultsPanel.classList.remove("hidden");
+
+    resultsPanel.querySelectorAll(".ncm-live-option").forEach((button) => {
+        button.addEventListener("click", async () => {
+            ncmInput.value = button.dataset.code || "";
+            hideNcmLiveResults();
+            await applyNcmProfileToProductForm(ncmInput.value, true);
+        });
+    });
+}
+
+function hideNcmLiveResults() {
+    const resultsPanel = document.getElementById("product-ncm-live-results");
+    if (!resultsPanel) {
+        return;
+    }
+    resultsPanel.classList.add("hidden");
+}
+
+async function applyNcmProfileToProductForm(ncmValue, warnOnEmpty = false) {
+    const normalized = digitsOnly(ncmValue || "").slice(0, 8);
+    if (!normalized) {
+        if (warnOnEmpty) {
+            toast("Informe um NCM para consultar a tributacao.");
+        }
+        syncProductTaxFields();
+        return;
+    }
+    try {
+        const profile = await apiFetch(`/api/v1/fiscal/ncm/${normalized}`);
+        const form = document.getElementById("product-form");
+        fillForm(form, {
+            ncm: profile.codigo,
+            ncm_descricao: profile.descricao,
+            aliquota_icms: profile.aliquota_icms,
+            aliquota_ipi: profile.aliquota_ipi,
+            aliquota_pis: profile.aliquota_pis,
+            aliquota_cofins: profile.aliquota_cofins,
+        });
+        syncProductTaxFields();
+        updateProductTaxSourceNote(`Base fiscal carregada de ${profile.fonte_dados}.`);
+    } catch (error) {
+        syncProductTaxFields();
+        updateProductTaxSourceNote("Nao foi possivel localizar o NCM informado na base fiscal.");
+        if (warnOnEmpty) {
+            toast(error.message);
+        }
+    }
+}
+
+function syncProductTaxFields() {
+    const form = document.getElementById("product-form");
+    if (!form) {
+        return;
+    }
+    const manualOverride = form.querySelector('[name="override_tributacao"]')?.value === "true";
+    ["aliquota_icms", "aliquota_ipi", "aliquota_pis", "aliquota_cofins", "ncm_descricao"].forEach((fieldName) => {
+        const field = form.querySelector(`[name="${fieldName}"]`);
+        if (!field) {
+            return;
+        }
+        const isDescription = fieldName === "ncm_descricao";
+        field.readOnly = !manualOverride || isDescription;
+        field.classList.toggle("readonly-field", !manualOverride || isDescription);
+    });
+    updateProductTaxSourceNote(
+        manualOverride
+            ? "Modo manual ativo. As aliquotas informadas serao preservadas no produto."
+            : "Modo automatico ativo. O sistema usa a base local de NCM para preencher as aliquotas.",
+    );
+}
+
+function updateProductTaxSourceNote(message) {
+    const note = document.getElementById("product-tax-source-note");
+    if (note && message) {
+        note.textContent = message;
+    }
+}
+
+function clearSimplesConfigForm() {
+    const form = document.getElementById("simples-config-form");
+    if (!form) {
+        return;
+    }
+    form.reset();
+    form.dataset.editingId = "";
+    form.querySelector(".form-error").classList.add("hidden");
+    const note = document.getElementById("simples-config-mode-note");
+    if (note) {
+        note.classList.add("hidden");
+        note.textContent = "";
+    }
+    syncFinancialReferenceMonth();
+}
+
+function clearReceiptForm() {
+    const form = document.getElementById("receipt-form");
+    if (!form) {
+        return;
+    }
+    form.reset();
+    form.querySelector(".form-error").classList.add("hidden");
+    form.querySelector('[name="data_recebimento"]').value = todayIso();
+    form.querySelector('[name="forma_pagamento"]').value = "pix";
+    state.receiptPreview = null;
+    syncReceiptWorkOrderOptions();
+    renderReceiptPreview(null);
 }
 
 function bindProductXmlImport() {
@@ -1095,9 +2329,9 @@ async function saveProviderCompanyLicense() {
         return;
     }
     try {
-        await apiFetch("/api/v1/licencas", { method: "POST", body: JSON.stringify(payload) });
+        const result = await apiFetch("/api/v1/licencas", { method: "POST", body: JSON.stringify(payload) });
         clearProviderCompanyLicenseForm();
-        await afterMutation("Licenca da empresa salva com sucesso.");
+        await afterMutation("Licenca da empresa salva com sucesso.", { kind: "license", entity: result });
         renderProviderCompanyLicenseWorkspace();
     } catch (error) {
         toast(error.message);
@@ -1188,7 +2422,11 @@ function bindCrudForms() {
     });
 
     bindForm("product-form", "product", async (form) => {
-        await submitCrud("product", "/api/v1/produtos", objectFromForm(form));
+        const payload = objectFromForm(form);
+        payload.override_tributacao = payload.override_tributacao === "true";
+        payload.ncm = digitsOnly(payload.ncm || "").slice(0, 8) || null;
+        payload.ncm_descricao = payload.ncm_descricao || null;
+        await submitCrud("product", "/api/v1/produtos", payload);
     });
 
     bindForm("pest-form", "pest", async (form) => {
@@ -1205,6 +2443,7 @@ function bindCrudForms() {
         const payload = objectFromForm(form);
         payload.cliente_id = payload.cliente_id ? Number(payload.cliente_id) : null;
         payload.os_id = null;
+        payload.nfe_id = null;
         payload.total_parcelas = Number(payload.total_parcelas || 1);
         payload.parcela_atual = 1;
         payload.categoria = payload.categoria || null;
@@ -1214,6 +2453,29 @@ function bindCrudForms() {
         payload.origem = "manual";
         await submitCrud("finance", "/api/v1/financeiro", payload);
     });
+
+    if (document.getElementById("receipt-form")) {
+        bindForm("receipt-form", "receipt", async (form) => {
+            const payload = buildReceiptPayload(form);
+            const result = await submitCrud("receipt", "/api/v1/recibos", payload);
+            state.receiptPreview = result;
+            renderReceiptPreview(result);
+            openFinanceView("recibos");
+        });
+    }
+
+    if (document.getElementById("nfe-form")) {
+        bindForm("nfe-form", "nfe", async (form) => {
+            clearNfeEmissionFeedback();
+            const payload = buildNfePayloadFromForm(form);
+            const result = await submitCrud("nfe", "/api/v1/nfe", payload);
+            state.nfeWorkflow.lastIssuedInvoiceId = result.id;
+            state.nfeTab = "issue";
+            renderNfeEmissionWorkspace();
+            renderNfeEmissionFeedback();
+            openFinanceView("nfe");
+        });
+    }
 
     bindForm("work-order-form", "workOrder", async (form) => {
         await save_order(form);
@@ -1242,7 +2504,10 @@ function bindCrudForms() {
         const note = form.querySelector('[data-mode-note="providerCompany"]');
         note.classList.remove("hidden");
         note.textContent = `Editando registro #${result.id}.`;
-        await afterMutation(id ? "Empresa atualizada com sucesso." : "Empresa salva com sucesso.");
+        await afterMutation(id ? "Empresa atualizada com sucesso." : "Empresa salva com sucesso.", {
+            kind: "providerCompany",
+            entity: result,
+        });
         if (!id) {
             switchProviderCompanyTab("licencas");
         }
@@ -1266,10 +2531,50 @@ function bindCrudForms() {
         payload.empresa_prestadora_id = payload.empresa_prestadora_id ? Number(payload.empresa_prestadora_id) : null;
         await submitCrud("license", "/api/v1/licencas", payload);
     });
+
+    const simplesConfigForm = document.getElementById("simples-config-form");
+    if (simplesConfigForm) {
+        simplesConfigForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const errorBox = form.querySelector(".form-error");
+            const saveButton = form.querySelector('[data-save-button="simplesConfig"]');
+            errorBox.classList.add("hidden");
+            saveButton.disabled = true;
+            saveButton.dataset.originalLabel = saveButton.dataset.originalLabel || saveButton.textContent;
+            saveButton.textContent = "Salvando...";
+            try {
+                const payload = objectFromForm(form);
+                payload.faixa_faturamento_fim = payload.faixa_faturamento_fim || null;
+                payload.anexo = payload.anexo || null;
+                payload.observacoes = payload.observacoes || null;
+                payload.vigente = payload.vigente === "true";
+                const editingId = Number(form.dataset.editingId || 0) || null;
+                const result = await apiFetch(editingId ? `/api/v1/fiscal/simples/${editingId}` : "/api/v1/fiscal/simples", {
+                    method: editingId ? "PUT" : "POST",
+                    body: JSON.stringify(payload),
+                });
+                clearSimplesConfigForm();
+                await afterMutation(editingId ? "Configuracao do Simples atualizada com sucesso." : "Configuracao do Simples salva com sucesso.", {
+                    kind: "simplesConfig",
+                    entity: result,
+                });
+            } catch (error) {
+                errorBox.textContent = error.message;
+                errorBox.classList.remove("hidden");
+                errorBox.scrollIntoView({ behavior: "smooth", block: "center" });
+                toast(error.message || "Nao foi possivel salvar a configuracao.");
+            } finally {
+                saveButton.disabled = false;
+                saveButton.textContent = saveButton.dataset.originalLabel || "Salvar configuracao";
+            }
+        });
+    }
 }
 
 function bindForm(formId, kind, handler) {
     const form = document.getElementById(formId);
+    form.noValidate = true;
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const errorBox = form.querySelector(".form-error");
@@ -1285,6 +2590,8 @@ function bindForm(formId, kind, handler) {
         } catch (error) {
             errorBox.textContent = error.message;
             errorBox.classList.remove("hidden");
+            errorBox.scrollIntoView({ behavior: "smooth", block: "center" });
+            toast(error.message || "Nao foi possivel concluir a operacao.");
         } finally {
             if (saveButton) {
                 saveButton.disabled = false;
@@ -1307,17 +2614,559 @@ async function submitCrud(kind, baseUrl, payload) {
         result = await apiFetch(baseUrl, { method: "POST", body: JSON.stringify(payload) });
     }
     resetFormMode(kind);
-    await afterMutation(id ? "Registro atualizado com sucesso." : "Registro salvo com sucesso.");
+    await afterMutation(id ? "Registro atualizado com sucesso." : "Registro salvo com sucesso.", { kind, entity: result });
     return result;
 }
 
-async function afterMutation(message) {
-    await loadAllData();
-    toast(message);
+function getEntityCollectionByKind(kind) {
+    const sourceMap = {
+        customer: state.customers,
+        product: state.products,
+        pest: state.pests,
+        technician: state.technicians,
+        finance: state.finance,
+        receipt: state.receipts,
+        nfe: state.nfeInvoices,
+        workOrder: state.workOrders,
+        appointment: state.appointments,
+        providerCompany: state.providerCompanies,
+        user: state.users,
+        license: state.licenses,
+        simplesConfig: state.simplesConfigs,
+    };
+    return sourceMap[kind] || null;
+}
+
+function applyLocalMutation(kind, entity) {
+    const collection = getEntityCollectionByKind(kind);
+    if (!collection || !entity || entity.id == null) {
+        return;
+    }
+    const index = collection.findIndex((item) => item.id === entity.id);
+    if (index >= 0) {
+        collection[index] = entity;
+        return;
+    }
+    collection.unshift(entity);
+}
+
+function refreshUiFromLocalState() {
+    hydrateDynamicControls();
+    syncEditingModes();
+    renderAll();
+}
+
+async function afterMutation(message, options = {}) {
+    const { kind = null, entity = null } = options;
+    if (kind && entity) {
+        applyLocalMutation(kind, entity);
+    }
+    try {
+        await loadAllData();
+        toast(message);
+    } catch (error) {
+        refreshUiFromLocalState();
+        setSyncStatus("Atualizacao parcial");
+        toast(`${message} Nao foi possivel atualizar a tela agora: ${error.message}`);
+    }
 }
 
 function objectFromForm(form) {
     return Object.fromEntries(new FormData(form).entries());
+}
+
+function buildReceiptPayload(form) {
+    const raw = objectFromForm(form);
+    const payload = {
+        cliente_id: Number(raw.cliente_id || 0),
+        os_id: raw.os_id ? Number(raw.os_id) : null,
+        valor: raw.valor,
+        forma_pagamento: raw.forma_pagamento,
+        descricao: String(raw.descricao || "").trim(),
+        data_recebimento: raw.data_recebimento,
+    };
+
+    const errors = [];
+    if (!payload.cliente_id) {
+        errors.push("Selecione o cliente do recibo.");
+    }
+    if (!payload.data_recebimento) {
+        errors.push("Informe a data do recebimento.");
+    }
+    if (!(Number(payload.valor) > 0)) {
+        errors.push("Informe um valor maior que zero para o recibo.");
+    }
+    if (!payload.forma_pagamento) {
+        errors.push("Selecione a forma de pagamento.");
+    }
+    if (!payload.descricao || payload.descricao.length < 5) {
+        errors.push("Descreva o recebimento com pelo menos 5 caracteres.");
+    }
+    if (payload.os_id) {
+        const workOrder = getEntityByKind("workOrder", payload.os_id);
+        if (!workOrder) {
+            errors.push("A ordem de servico selecionada nao foi encontrada.");
+        } else if (workOrder.cliente_id !== payload.cliente_id) {
+            errors.push("A OS vinculada deve pertencer ao mesmo cliente informado.");
+        }
+    }
+
+    if (errors.length) {
+        throw new Error([...new Set(errors)].join(" "));
+    }
+    return payload;
+}
+
+function getFilteredReceipts() {
+    const search = (state.filters.receiptSearch || "").trim().toLowerCase();
+    const customerId = state.filters.receiptCustomer || "";
+    return state.receipts.filter((item) => {
+        const customerMatches = !customerId || String(item.cliente_id) === String(customerId);
+        const searchMatches = !search || [
+            item.numero,
+            item.cliente?.razao_social,
+            item.descricao,
+            item.forma_pagamento,
+            item.os_numero,
+        ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(search);
+        return customerMatches && searchMatches;
+    });
+}
+
+function syncReceiptWorkOrderOptions() {
+    const form = document.getElementById("receipt-form");
+    const select = form?.querySelector('[name="os_id"]');
+    if (!select) {
+        return;
+    }
+    const currentValue = select.value;
+    const customerId = Number(form.querySelector('[name="cliente_id"]')?.value || 0);
+    const items = state.workOrders
+        .filter((item) => !customerId || item.cliente_id === customerId)
+        .sort((a, b) => `${b.data_execucao}${b.hora_inicio}`.localeCompare(`${a.data_execucao}${a.hora_inicio}`));
+    select.innerHTML = `
+        <option value="">Sem vinculacao</option>
+        ${items.map((item) => `
+            <option value="${item.id}">
+                ${escapeHtml(`OS ${item.numero} | ${item.cliente?.razao_social || "Cliente"} | ${formatDate(item.data_execucao)}`)}
+            </option>
+        `).join("")}
+    `;
+    if (currentValue && select.querySelector(`option[value="${currentValue}"]`)) {
+        select.value = currentValue;
+    }
+}
+
+function applySelectedReceiptWorkOrderDefaults() {
+    const form = document.getElementById("receipt-form");
+    if (!form) {
+        return;
+    }
+    const workOrder = getEntityByKind("workOrder", Number(form.querySelector('[name="os_id"]').value || 0));
+    if (!workOrder) {
+        return;
+    }
+    if (!form.querySelector('[name="valor"]').value) {
+        form.querySelector('[name="valor"]').value = workOrder.valor_servico || "";
+    }
+    if (!String(form.querySelector('[name="descricao"]').value || "").trim()) {
+        form.querySelector('[name="descricao"]').value = `Recebimento referente a OS ${workOrder.numero}`;
+    }
+}
+
+async function refreshReceiptPreview(silent = true) {
+    const form = document.getElementById("receipt-form");
+    if (!form) {
+        return null;
+    }
+    let payload;
+    try {
+        payload = buildReceiptPayload(form);
+    } catch (error) {
+        if (!silent) {
+            toast(error.message);
+        }
+        if (!silent || !String(form.querySelector('[name="descricao"]').value || "").trim()) {
+            state.receiptPreview = null;
+            renderReceiptPreview(null);
+        }
+        return null;
+    }
+
+    try {
+        const preview = await apiFetch("/api/v1/recibos/preview", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        });
+        state.receiptPreview = preview;
+        renderReceiptPreview(preview);
+        return preview;
+    } catch (error) {
+        state.receiptPreview = null;
+        renderReceiptPreview(null, error.message);
+        if (!silent) {
+            toast(error.message);
+        }
+        return null;
+    }
+}
+
+function renderReceiptPreview(preview, errorMessage = "") {
+    const target = document.getElementById("receipt-preview-card");
+    if (!target) {
+        return;
+    }
+    if (!preview) {
+        target.innerHTML = errorMessage
+            ? `<div class="empty-state">${escapeHtml(errorMessage)}</div>`
+            : `<div class="empty-state">Preencha os dados do recibo para visualizar o documento antes de salvar.</div>`;
+        return;
+    }
+    const customerName = preview.cliente_nome || preview.cliente?.razao_social || "Cliente";
+    const customerDocument = preview.cliente_documento || preview.cliente?.cpf_cnpj || "-";
+    const formattedAmount = preview.valor_formatado || formatCurrency(preview.valor || 0);
+    const amountInWords = preview.valor_por_extenso || "-";
+    const paymentLabel = preview.forma_pagamento_label || String(preview.forma_pagamento || "").replaceAll("_", " ");
+    const formattedDate = preview.data_recebimento_formatada || formatDate(preview.data_recebimento);
+    target.innerHTML = `
+        <div class="receipt-preview-grid">
+            <article class="receipt-preview-metric">
+                <span>Cliente</span>
+                <strong>${escapeHtml(customerName)}</strong>
+                <small>${escapeHtml(customerDocument)}</small>
+            </article>
+            <article class="receipt-preview-metric">
+                <span>Valor</span>
+                <strong>${escapeHtml(formattedAmount)}</strong>
+                <small>${escapeHtml(amountInWords)}</small>
+            </article>
+            <article class="receipt-preview-metric">
+                <span>Pagamento</span>
+                <strong>${escapeHtml(paymentLabel)}</strong>
+                <small>${escapeHtml(formattedDate)}</small>
+            </article>
+            <article class="receipt-preview-metric">
+                <span>OS</span>
+                <strong>${escapeHtml(preview.os_numero || "Sem vinculacao")}</strong>
+                <small>Numero definitivo sera gerado ao salvar.</small>
+            </article>
+        </div>
+        <div class="receipt-preview-text">
+            <strong>Texto formal</strong>
+            <p>${escapeHtml(preview.texto_formal)}</p>
+        </div>
+    `;
+}
+
+function focusReceiptPreview() {
+    const previewCard = document.getElementById("receipt-preview-card");
+    if (!previewCard) {
+        return;
+    }
+    previewCard.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function showReceiptPreview(receiptId) {
+    const receipt = getEntityByKind("receipt", Number(receiptId));
+    if (!receipt) {
+        toast("Recibo nao encontrado para visualizacao.");
+        return;
+    }
+    state.receiptPreview = receipt;
+    renderReceiptPreview(receipt);
+    openFinanceView("recibos");
+    window.setTimeout(() => focusReceiptPreview(), 80);
+}
+
+function bindNfeFormHelpers() {
+    const form = document.getElementById("nfe-form");
+    if (!form) {
+        return;
+    }
+    const addButton = document.getElementById("add-nfe-item-row");
+    if (addButton) {
+        addButton.addEventListener("click", () => addNfeItemRow());
+    }
+    form.addEventListener("input", () => {
+        if (state.nfeWorkflow.lastIssuedInvoiceId) {
+            clearNfeEmissionFeedback();
+        }
+        renderNfeEmissionWorkspace();
+    });
+    form.addEventListener("change", (event) => {
+        if (event.target?.name === "ambiente") {
+            renderNfeEmissionWorkspace();
+        }
+    });
+    ensureNfeItemRows();
+}
+
+function buildNfePayloadFromForm(form) {
+    const raw = objectFromForm(form);
+    const items = getNfeItemsFromForm(form);
+    if (!items.length) {
+        throw new Error("Adicione ao menos um item fiscal para emitir a NF-e.");
+    }
+
+    const totalFromItems = items.reduce(
+        (sum, item) => sum + (Number(item.quantidade || 0) * Number(item.valor_unitario || 0)),
+        0,
+    );
+
+    return {
+        numero_nfe: raw.numero_nfe,
+        cliente_id: Number(raw.cliente_id),
+        valor_total: raw.valor_total || totalFromItems.toFixed(2),
+        data_emissao: raw.data_emissao,
+        data_vencimento: raw.data_vencimento,
+        status: raw.status,
+        gerar_financeiro: raw.gerar_financeiro === "true",
+        observacoes: raw.observacoes || null,
+        natureza_operacao: raw.natureza_operacao || "Venda",
+        ambiente: raw.ambiente || "homologacao",
+        referencia_externa: raw.referencia_externa || null,
+        itens: items,
+    };
+}
+
+function ensureNfeItemRows() {
+    const list = document.getElementById("nfe-items-list");
+    if (!list || list.children.length) {
+        hydrateNfeItemProductOptions();
+        return;
+    }
+    addNfeItemRow();
+}
+
+function addNfeItemRow(item = {}) {
+    const list = document.getElementById("nfe-items-list");
+    if (!list) {
+        return;
+    }
+    const row = document.createElement("div");
+    row.className = "product-item-row nfe-item-row";
+    row.innerHTML = `
+        <label class="product-row-field product-row-product">
+            <span class="product-row-label">Produto</span>
+            <select class="nfe-item-product">
+                <option value="">Produto avulso</option>
+            </select>
+        </label>
+        <label class="product-row-field">
+            <span class="product-row-label">Descricao</span>
+            <input class="nfe-item-description" value="${escapeHtml(item.descricao || "")}" required>
+        </label>
+        <label class="product-row-field">
+            <span class="product-row-label">NCM</span>
+            <input class="nfe-item-ncm" value="${escapeHtml(digitsOnly(item.ncm || "").slice(0, 8))}" maxlength="8" required>
+        </label>
+        <label class="product-row-field">
+            <span class="product-row-label">Quantidade</span>
+            <input class="nfe-item-quantity" type="number" min="0.0001" step="0.0001" value="${escapeHtml(String(item.quantidade || "1"))}" required>
+        </label>
+        <label class="product-row-field">
+            <span class="product-row-label">Valor unitario</span>
+            <input class="nfe-item-unit-price" type="number" min="0.01" step="0.01" value="${escapeHtml(String(item.valor_unitario || ""))}" required>
+        </label>
+        <label class="product-row-field">
+            <span class="product-row-label">CFOP</span>
+            <input class="nfe-item-cfop" value="${escapeHtml(item.cfop || "5102")}">
+        </label>
+        <div class="product-row-actions">
+            <button type="button" class="btn btn-default ghost-button nfe-item-remove">Remover item</button>
+        </div>
+    `;
+    list.appendChild(row);
+    hydrateNfeItemProductOptions(row.querySelector(".nfe-item-product"), item.produto_id || "");
+    bindNfeItemRow(row);
+    if (item.produto_id) {
+        applyProductToNfeItemRow(row, Number(item.produto_id), { preserveProvidedValues: true, item });
+    }
+    recalculateNfeFormTotal();
+}
+
+function bindNfeItemRow(row) {
+    const productSelect = row.querySelector(".nfe-item-product");
+    const removeButton = row.querySelector(".nfe-item-remove");
+    const ncmInput = row.querySelector(".nfe-item-ncm");
+    const valueInputs = row.querySelectorAll(".nfe-item-quantity, .nfe-item-unit-price");
+
+    productSelect?.addEventListener("change", () => {
+        applyProductToNfeItemRow(row, Number(productSelect.value || 0));
+    });
+    removeButton?.addEventListener("click", () => {
+        const list = document.getElementById("nfe-items-list");
+        row.remove();
+        if (list && !list.children.length) {
+            addNfeItemRow();
+        }
+        recalculateNfeFormTotal();
+    });
+    ncmInput?.addEventListener("input", () => {
+        ncmInput.value = digitsOnly(ncmInput.value).slice(0, 8);
+    });
+    valueInputs.forEach((input) => {
+        input.addEventListener("input", () => recalculateNfeFormTotal());
+    });
+}
+
+function hydrateNfeItemProductOptions(selectNode = null, selectedValue = "") {
+    const selects = selectNode ? [selectNode] : Array.from(document.querySelectorAll(".nfe-item-product"));
+    selects.forEach((select) => {
+        if (!select) {
+            return;
+        }
+        const currentValue = String(selectedValue || select.value || "");
+        select.innerHTML = `<option value="">Produto avulso</option>${state.products
+            .map((product) => `<option value="${product.id}">${escapeHtml(product.nome)}</option>`)
+            .join("")}`;
+        if (currentValue) {
+            select.value = currentValue;
+        }
+    });
+}
+
+function applyProductToNfeItemRow(row, productId, options = {}) {
+    const product = state.products.find((item) => item.id === productId);
+    if (!product) {
+        recalculateNfeFormTotal();
+        return;
+    }
+    const descriptionInput = row.querySelector(".nfe-item-description");
+    const ncmInput = row.querySelector(".nfe-item-ncm");
+    const unitPriceInput = row.querySelector(".nfe-item-unit-price");
+    const item = options.item || {};
+
+    descriptionInput.value = options.preserveProvidedValues
+        ? (item.descricao || product.nome || "")
+        : (product.nome || "");
+    ncmInput.value = options.preserveProvidedValues
+        ? digitsOnly(item.ncm || product.ncm || "").slice(0, 8)
+        : digitsOnly(product.ncm || "").slice(0, 8);
+    if (!options.preserveProvidedValues && !unitPriceInput.value) {
+        unitPriceInput.value = Number(product.preco_unitario || 0).toFixed(2);
+    }
+    recalculateNfeFormTotal();
+}
+
+function recalculateNfeFormTotal() {
+    const totalInput = document.querySelector('#nfe-form [name="valor_total"]');
+    if (!totalInput) {
+        return;
+    }
+    const currentValue = Number(totalInput.value || 0);
+    if (currentValue > 0 && document.activeElement === totalInput) {
+        return;
+    }
+    const total = Array.from(document.querySelectorAll("#nfe-items-list .nfe-item-row")).reduce((sum, row) => {
+        const quantity = Number(row.querySelector(".nfe-item-quantity")?.value || 0);
+        const unitPrice = Number(row.querySelector(".nfe-item-unit-price")?.value || 0);
+        return sum + (quantity * unitPrice);
+    }, 0);
+    totalInput.value = total > 0 ? total.toFixed(2) : "";
+}
+
+function getNfeItemsFromForm(form) {
+    return Array.from(form.querySelectorAll(".nfe-item-row"))
+        .map((row) => ({
+            produto_id: row.querySelector(".nfe-item-product").value ? Number(row.querySelector(".nfe-item-product").value) : null,
+            descricao: row.querySelector(".nfe-item-description").value.trim(),
+            ncm: digitsOnly(row.querySelector(".nfe-item-ncm").value || "").slice(0, 8),
+            quantidade: row.querySelector(".nfe-item-quantity").value,
+            valor_unitario: row.querySelector(".nfe-item-unit-price").value,
+            cfop: row.querySelector(".nfe-item-cfop").value.trim() || "5102",
+        }))
+        .filter((item) => item.descricao && item.ncm && item.quantidade && item.valor_unitario);
+}
+
+function renderNfeEmissionWorkspace() {
+    const target = document.getElementById("nfe-emission-workspace");
+    const form = document.getElementById("nfe-form");
+    if (!target || !form) {
+        return;
+    }
+    const readiness = state.sefazReadiness;
+    const currentEnvironment = form.querySelector('[name="ambiente"]')?.value || readiness?.environment || "homologacao";
+    const provider = readiness?.provider || "focus_nfe";
+    const directProvider = provider === "sefaz_direct";
+    const canEmit = directProvider && (currentEnvironment !== "producao" || Boolean(readiness?.xsd_dir));
+    const statusTone = readiness?.ready ? "is-ready" : "is-warning";
+    const notes = Array.isArray(readiness?.notes) ? readiness.notes.slice(0, 3) : [];
+    const currentInvoice = state.editing.nfe ? getEntityByKind("nfe", state.editing.nfe) : null;
+    const saveButton = form.querySelector('[data-save-button="nfe"]');
+
+    if (saveButton) {
+        saveButton.textContent = currentInvoice
+            ? "Salvar alteracoes"
+            : (canEmit ? "Emitir NF-e" : "Salvar NF-e");
+        saveButton.dataset.originalLabel = saveButton.textContent;
+    }
+
+    target.innerHTML = `
+        <section class="nfe-emission-card ${statusTone}">
+            <div class="section-heading compact">
+                <h4>${directProvider ? "Emissao fiscal pronta" : "Emissao em modo integrado"}</h4>
+                <p>${directProvider
+                    ? `Provider ativo: ${escapeHtml(provider)} em ${escapeHtml(currentEnvironment)}.`
+                    : "A tela continua funcional, mas a emissao direta pela SEFAZ nao esta ativa."}</p>
+            </div>
+            <div class="nfe-emission-meta">
+                <span class="orders-stat is-active">${escapeHtml(provider)}</span>
+                <span class="orders-stat">${escapeHtml(currentEnvironment)}</span>
+                <span class="orders-stat">${readiness?.ready ? "Prontidao validada" : "Configuracao parcial"}</span>
+            </div>
+            ${notes.length ? `<div class="nfe-emission-notes">${notes.map((note) => `<p>${escapeHtml(note)}</p>`).join("")}</div>` : ""}
+            ${currentInvoice ? '<p class="origin-note">Edicao local aberta. Os itens fiscais serao reusados do payload salvo quando disponivel.</p>' : ""}
+        </section>
+    `;
+}
+
+function clearNfeEmissionFeedback() {
+    state.nfeWorkflow.lastIssuedInvoiceId = null;
+    renderNfeEmissionFeedback();
+}
+
+function renderNfeEmissionFeedback() {
+    const target = document.getElementById("nfe-save-feedback");
+    if (!target) {
+        return;
+    }
+    const invoice = state.nfeWorkflow.lastIssuedInvoiceId
+        ? getEntityByKind("nfe", state.nfeWorkflow.lastIssuedInvoiceId)
+        : null;
+    if (!invoice) {
+        target.innerHTML = "";
+        target.classList.add("hidden");
+        return;
+    }
+    target.innerHTML = `
+        <section class="work-order-save-card">
+            <div class="section-heading compact">
+                <h4>NF-e emitida com sucesso</h4>
+                <p>Nota ${escapeHtml(invoice.numero_nfe)} vinculada a ${escapeHtml(invoice.cliente?.razao_social || "cliente")}.</p>
+            </div>
+            <div class="work-order-save-meta">
+                <span class="orders-stat is-active">${escapeHtml(invoice.provedor || "nfe")}</span>
+                <span class="orders-stat">${escapeHtml(badgeLabel(invoice.status_processamento || invoice.status))}</span>
+                <span class="orders-stat">${escapeHtml(invoice.finance_entry_id ? `Lancamento #${invoice.finance_entry_id}` : "Sem financeiro")}</span>
+            </div>
+            <div class="work-order-save-actions">
+                <button type="button" class="btn btn-success nfe-sync-status" data-id="${invoice.id}">Consultar status</button>
+                <button type="button" class="btn btn-default ghost-button nfe-download-xml" data-id="${invoice.id}">Baixar XML</button>
+                <button type="button" class="btn btn-default ghost-button nfe-open-pdf" data-id="${invoice.id}">Abrir DANFE</button>
+            </div>
+        </section>
+    `;
+    target.classList.remove("hidden");
+    bindNfeActions();
+}
+
+function badgeLabel(value) {
+    return String(value || "-").replaceAll("_", " ");
 }
 
 function extractPrefixedFields(form, prefix) {
@@ -1344,6 +3193,11 @@ function clearPrefixedFields(form, prefix) {
 
 function hydrateDynamicControls() {
     setSelectOptions(document.querySelector('#finance-form [name="cliente_id"]'), state.customers, "id", "razao_social");
+    setSelectOptions(document.querySelector('#receipt-form [name="cliente_id"]'), state.customers, "id", "razao_social");
+    setSelectOptions(document.querySelector('#nfe-form [name="cliente_id"]'), state.customers, "id", "razao_social");
+    setSelectOptions(document.getElementById("finance-customer-filter"), state.customers, "id", "razao_social");
+    setSelectOptions(document.getElementById("receipt-customer-filter"), state.customers, "id", "razao_social");
+    setSelectOptions(document.getElementById("nfe-customer-filter"), state.customers, "id", "razao_social");
     setSelectOptions(document.querySelector('#work-order-form [name="cliente_id"]'), state.customers, "id", "razao_social");
     setSelectOptions(
         document.querySelector('#work-order-form [name="tecnico_id"]'),
@@ -1358,7 +3212,11 @@ function hydrateDynamicControls() {
         "id",
         "nome",
     );
+    hydrateNfeItemProductOptions();
+    recalculateNfeFormTotal();
+    syncReceiptWorkOrderOptions();
     syncAppointmentWorkOrderOptions();
+    syncFinancialReferenceMonth();
 
     document.querySelectorAll(".product-select").forEach((select) => {
         setSelectOptions(select, state.products, "id", "nome");
@@ -1381,8 +3239,21 @@ function hydrateDynamicControls() {
         "id",
         "display_name",
     );
+    if (!state.editing.workOrder) {
+        const workOrderGoogleField = document.querySelector('#work-order-form [name="sincronizar_google_agenda"]');
+        if (workOrderGoogleField) {
+            workOrderGoogleField.value = state.settings?.system?.appointment_default_google_sync ? "true" : "false";
+        }
+    }
+    if (!state.editing.appointment) {
+        const appointmentGoogleField = document.querySelector('#appointment-form [name="sincronizar_google"]');
+        if (appointmentGoogleField) {
+            appointmentGoogleField.value = state.settings?.system?.appointment_default_google_sync ? "true" : "false";
+        }
+    }
     syncWorkOrderPickerState();
     renderWorkOrderSelectors();
+    syncProductTaxFields();
 }
 
 function setSelectOptions(select, items, valueKey, labelKey) {
@@ -1478,7 +3349,7 @@ function clearWorkOrderForm() {
     document.getElementById("work-order-photo-input").value = "";
     form.querySelector('[name="gerar_agendamento"]').value = "true";
     form.querySelector('[name="duracao_prevista_minutos"]').value = "60";
-    form.querySelector('[name="sincronizar_google_agenda"]').value = "false";
+    form.querySelector('[name="sincronizar_google_agenda"]').value = state.settings?.system?.appointment_default_google_sync ? "true" : "false";
     renderWorkOrderSelectors();
     renderWorkOrderFormHeader();
 }
@@ -1494,7 +3365,6 @@ function getWorkOrderPayload(form) {
         .filter((item) => item.produto_id);
 
     return {
-        numero: raw.numero,
         cliente_id: Number(raw.cliente_id),
         tecnico_id: Number(raw.tecnico_id),
         data_execucao: raw.data_execucao,
@@ -1534,9 +3404,6 @@ function validate_work_order_form(form) {
         errors.push(message);
     };
 
-    if (!payload.numero?.trim()) {
-        markFieldInvalid('[name="numero"]', "Informe o numero da ordem de servico.");
-    }
     if (!payload.cliente_id) {
         markFieldInvalid('[name="cliente_id"]', "Selecione um cliente para a ordem.");
     }
@@ -1567,8 +3434,11 @@ function validate_work_order_form(form) {
 
     const selectedProductIds = new Set();
     const productRows = Array.from(form.querySelectorAll(".product-item-row"));
-    if (!productRows.length) {
-        markNodeInvalid(document.getElementById("products-tab-ordem"), "Adicione pelo menos um produto na ordem.");
+    if (!productRows.length && ["em_execucao", "concluida"].includes(payload.status)) {
+        markNodeInvalid(
+            document.getElementById("products-tab-ordem"),
+            "Adicione pelo menos um produto antes de salvar a OS como em execucao ou concluida.",
+        );
     }
     productRows.forEach((row, index) => {
         const productSelect = row.querySelector(".product-select");
@@ -1615,16 +3485,19 @@ async function save_order(form) {
         },
     );
     resetFormMode("workOrder");
-    await afterMutation("Order saved successfully");
+    await afterMutation(workOrderId ? "OS atualizada com sucesso." : "OS gravada com sucesso.", {
+        kind: "workOrder",
+        entity: result,
+    });
     setWorkOrderWorkspaceView("new");
     state.workOrderWorkflow.lastSavedOrderId = result.id;
     state.workOrderWorkflow.certificateReady = false;
     try {
-        await generate_certificate(result.id, { mode: "background" });
+        await generate_certificate(result.id, { mode: "background", variant: "garantia" });
         state.workOrderWorkflow.certificateReady = true;
     } catch (error) {
         state.workOrderWorkflow.certificateReady = false;
-        toast(`Ordem salva, mas houve falha ao preparar o certificado: ${error.message}`);
+        toast(`Ordem salva, mas houve falha ao preparar o certificado de garantia: ${error.message}`);
     }
     renderWorkOrderSaveFeedback();
     return result;
@@ -1750,20 +3623,65 @@ function bindWorkOrderSelectors() {
         if (!button) {
             return;
         }
+        const workOrderId = Number(button.dataset.id);
+        const action = button.dataset.workOrderAction;
+        const previewActions = new Set(["preview-order", "print", "certificate-preview", "certificate-guarantee-preview", "certificate-moldura-preview"]);
+        const previewTitleMap = {
+            "preview-order": `Ordem de Servico ${workOrderId}`,
+            print: `Ordem de Servico ${workOrderId}`,
+            "certificate-preview": `Certificado ${workOrderId}`,
+            "certificate-guarantee-preview": `Certificado de Garantia ${workOrderId}`,
+            "certificate-moldura-preview": `Certificado Moldura ${workOrderId}`,
+        };
+        const previewWindow = previewActions.has(action)
+            ? openDocumentPreviewShell(previewTitleMap[action] || `Documento ${workOrderId}`)
+            : null;
         try {
-            const workOrderId = Number(button.dataset.id);
-            if (button.dataset.workOrderAction === "print") {
-                await print_order(workOrderId);
+            logClientEvent("work_order_save_action_click", { work_order_id: workOrderId, action });
+            if (action === "preview-order") {
+                await preview_work_order(workOrderId, { previewWindow });
                 return;
             }
-            if (button.dataset.workOrderAction === "certificate-preview") {
-                await generate_certificate(workOrderId, { mode: "preview" });
+            if (action === "print") {
+                await print_order(workOrderId, { previewWindow });
                 return;
             }
-            if (button.dataset.workOrderAction === "certificate-download") {
+            if (action === "certificate-preview") {
+                await generate_certificate(workOrderId, { mode: "preview", previewWindow });
+                return;
+            }
+            if (action === "certificate-guarantee-preview") {
+                await generate_certificate(workOrderId, { mode: "preview", variant: "garantia", previewWindow });
+                return;
+            }
+            if (action === "certificate-guarantee-download") {
+                await generate_certificate(workOrderId, { mode: "download", variant: "garantia" });
+                return;
+            }
+            if (action === "certificate-download") {
                 await generate_certificate(workOrderId, { mode: "download" });
+                return;
+            }
+            if (action === "certificate-moldura-preview") {
+                await generate_certificate(workOrderId, { mode: "preview", variant: "moldura", previewWindow });
+                return;
+            }
+            if (action === "certificate-moldura-download") {
+                await generate_certificate(workOrderId, { mode: "download", variant: "moldura" });
             }
         } catch (error) {
+            if (previewWindow) {
+                renderDocumentPreviewError(previewWindow, previewTitleMap[action] || "Documento", error.message);
+            }
+            logClientEvent(
+                "work_order_save_action_error",
+                {
+                    work_order_id: Number(button.dataset.id),
+                    action: button.dataset.workOrderAction,
+                    message: error.message,
+                },
+                "error"
+            );
             toast(error.message);
         }
     });
@@ -2162,7 +4080,85 @@ function getAppointmentPayload(form) {
         status: raw.status,
         origem: raw.origem,
         sincronizar_google: raw.sincronizar_google === "true",
+        enviar_whatsapp: form.querySelector('[name="enviar_whatsapp"]').checked,
     };
+}
+
+function parseTimeToMinutes(value) {
+    if (!value) {
+        return null;
+    }
+    const [hours, minutes] = String(value).split(":").map((part) => Number(part));
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+        return null;
+    }
+    return (hours * 60) + minutes;
+}
+
+function minutesToTimeLabel(totalMinutes) {
+    if (!Number.isFinite(totalMinutes)) {
+        return "--:--";
+    }
+    const normalized = ((totalMinutes % 1440) + 1440) % 1440;
+    const hours = String(Math.floor(normalized / 60)).padStart(2, "0");
+    const minutes = String(normalized % 60).padStart(2, "0");
+    return `${hours}:${minutes}`;
+}
+
+function getAppointmentScheduleInsight(form) {
+    const technicianId = Number(form.querySelector('[name="tecnico_id"]')?.value || 0);
+    const appointmentDate = form.querySelector('[name="data_agendamento"]')?.value || "";
+    const startTime = form.querySelector('[name="hora_agendamento"]')?.value || "";
+    const durationMinutes = Number(form.querySelector('[name="duracao_prevista_minutos"]')?.value || 0);
+    const startMinutes = parseTimeToMinutes(startTime);
+    const editingId = Number(state.editing.appointment || 0);
+
+    if (!technicianId || !appointmentDate || startMinutes === null || durationMinutes < 15) {
+        return {
+            canEvaluate: false,
+            startLabel: startTime || "--:--",
+            endLabel: "--:--",
+            conflict: null,
+        };
+    }
+
+    const endMinutes = startMinutes + durationMinutes;
+    const conflict = state.appointments.find((item) => {
+        if (item.id === editingId) {
+            return false;
+        }
+        if (item.tecnico_id !== technicianId || item.data_agendamento !== appointmentDate) {
+            return false;
+        }
+        if (!activeAppointmentStatuses.has(item.status)) {
+            return false;
+        }
+        const otherStart = parseTimeToMinutes(formatTime(item.hora_agendamento));
+        const otherEnd = otherStart === null ? null : otherStart + Number(item.duracao_prevista_minutos || 0);
+        if (otherStart === null || otherEnd === null) {
+            return false;
+        }
+        return startMinutes < otherEnd && endMinutes > otherStart;
+    }) || null;
+
+    return {
+        canEvaluate: true,
+        startLabel: minutesToTimeLabel(startMinutes),
+        endLabel: minutesToTimeLabel(endMinutes),
+        conflict,
+    };
+}
+
+function buildAppointmentConflictMessage(insight, technicianName) {
+    if (!insight?.conflict) {
+        return null;
+    }
+    const conflictingStart = parseTimeToMinutes(formatTime(insight.conflict.hora_agendamento));
+    const conflictingEnd = conflictingStart === null
+        ? null
+        : conflictingStart + Number(insight.conflict.duracao_prevista_minutos || 0);
+    const conflictingInterval = `${minutesToTimeLabel(conflictingStart)} ate ${minutesToTimeLabel(conflictingEnd)}`;
+    return `Conflito de horario para o tecnico '${technicianName || insight.conflict.tecnico_nome || "selecionado"}' com o agendamento #${insight.conflict.id} (${insight.conflict.cliente_nome}, ${conflictingInterval}). Horario solicitado: ${insight.startLabel} ate ${insight.endLabel}.`;
 }
 
 function validateAppointmentForm(form) {
@@ -2192,6 +4188,19 @@ function validateAppointmentForm(form) {
     if (!(payload.duracao_prevista_minutos >= 15)) {
         markFieldInvalid('[name="duracao_prevista_minutos"]', "Defina uma duracao minima de 15 minutos.");
     }
+    const scheduleInsight = getAppointmentScheduleInsight(form);
+    if (scheduleInsight.conflict) {
+        form.querySelector('[name="tecnico_id"]')?.classList.add("field-invalid");
+        form.querySelector('[name="data_agendamento"]')?.classList.add("field-invalid");
+        form.querySelector('[name="hora_agendamento"]')?.classList.add("field-invalid");
+        form.querySelector('[name="duracao_prevista_minutos"]')?.classList.add("field-invalid");
+        errors.push(
+            buildAppointmentConflictMessage(
+                scheduleInsight,
+                getEntityByKind("technician", payload.tecnico_id)?.nome || "selecionado",
+            ),
+        );
+    }
 
     if (errors.length) {
         throw new Error([...new Set(errors)].join(" "));
@@ -2210,9 +4219,26 @@ async function saveAppointment(form) {
         },
     );
     resetFormMode("appointment");
-    await afterMutation(appointmentId ? "Agendamento atualizado com sucesso." : "Agendamento salvo com sucesso.");
-    switchView("agenda");
+    await afterMutation(buildAppointmentSaveMessage(result, Boolean(appointmentId)), {
+        kind: "appointment",
+        entity: result,
+    });
+    openAppointmentView("operational");
     return result;
+}
+
+function buildAppointmentSaveMessage(appointment, isEditing = false) {
+    const baseMessage = isEditing ? "Agendamento atualizado com sucesso." : "Agendamento salvo com sucesso.";
+    if (isEditing || !appointment) {
+        return baseMessage;
+    }
+    if (appointment.whatsapp_status === "enviado") {
+        return `${baseMessage} WhatsApp enviado ao cliente.`;
+    }
+    if (appointment.whatsapp_status === "falha") {
+        return `${baseMessage} WhatsApp nao enviado: ${appointment.whatsapp_ultimo_erro || "consulte o log do agendamento."}`;
+    }
+    return baseMessage;
 }
 
 function bindAppointmentWorkspace() {
@@ -2224,6 +4250,7 @@ function bindAppointmentWorkspace() {
     form.addEventListener("input", () => {
         form.querySelector(".form-error").classList.add("hidden");
         form.querySelectorAll(".field-invalid").forEach((node) => node.classList.remove("field-invalid"));
+        renderAppointmentCustomerSummary();
     });
 
     form.querySelector('[name="cliente_id"]').addEventListener("change", () => {
@@ -2236,6 +4263,10 @@ function bindAppointmentWorkspace() {
     });
     form.querySelector('[name="tecnico_id"]').addEventListener("change", renderAppointmentCustomerSummary);
     form.querySelector('[name="sincronizar_google"]').addEventListener("change", renderAppointmentCustomerSummary);
+    form.querySelector('[name="enviar_whatsapp"]').addEventListener("change", renderAppointmentCustomerSummary);
+    form.querySelector('[name="data_agendamento"]').addEventListener("change", renderAppointmentCustomerSummary);
+    form.querySelector('[name="hora_agendamento"]').addEventListener("change", renderAppointmentCustomerSummary);
+    form.querySelector('[name="duracao_prevista_minutos"]').addEventListener("change", renderAppointmentCustomerSummary);
 
     document.getElementById("appointment-open-linked-work-order").addEventListener("click", () => {
         openLinkedWorkOrderFromAppointmentForm();
@@ -2254,7 +4285,8 @@ function clearAppointmentForm() {
     form.querySelector(".form-error").classList.add("hidden");
     form.querySelector('[name="status"]').value = "pendente";
     form.querySelector('[name="origem"]').value = "manual";
-    form.querySelector('[name="sincronizar_google"]').value = "false";
+    form.querySelector('[name="sincronizar_google"]').value = state.settings?.system?.appointment_default_google_sync ? "true" : "false";
+    form.querySelector('[name="enviar_whatsapp"]').checked = Boolean(state.settings?.integrations?.whatsapp_auto_send);
     form.querySelector('[name="duracao_prevista_minutos"]').value = "60";
     form.querySelector('[name="data_agendamento"]').value = todayIso();
     syncAppointmentWorkOrderOptions();
@@ -2296,6 +4328,12 @@ function renderAppointmentCustomerSummary() {
     const customer = getEntityByKind("customer", Number(form.querySelector('[name="cliente_id"]').value || 0));
     const workOrder = getEntityByKind("workOrder", Number(form.querySelector('[name="os_id"]').value || 0));
     const technician = getEntityByKind("technician", Number(form.querySelector('[name="tecnico_id"]').value || 0));
+    const scheduleInsight = getAppointmentScheduleInsight(form);
+    const scheduleMessage = scheduleInsight.conflict
+        ? buildAppointmentConflictMessage(scheduleInsight, technician?.nome)
+        : (scheduleInsight.canEvaluate
+            ? `Janela prevista: ${scheduleInsight.startLabel} ate ${scheduleInsight.endLabel}. Nenhum conflito encontrado para este tecnico.`
+            : "Defina tecnico, data, horario e duracao para validar a disponibilidade.");
 
     target.innerHTML = `
         <div class="appointment-customer-card">
@@ -2312,6 +4350,16 @@ function renderAppointmentCustomerSummary() {
             <span class="order-summary-label">Responsavel</span>
             <strong>${escapeHtml(technician?.nome || "Tecnico ainda nao atribuido")}</strong>
             <span>${escapeHtml(form.querySelector('[name="sincronizar_google"]').value === "true" ? "Google Agenda habilitado" : "Google Agenda desabilitado")}</span>
+        </div>
+        <div class="appointment-customer-card">
+            <span class="order-summary-label">WhatsApp</span>
+            <strong>${escapeHtml(form.querySelector('[name="enviar_whatsapp"]').checked ? "Envio previsto" : "Nao enviar")}</strong>
+            <span>${escapeHtml(form.querySelector('[name="enviar_whatsapp"]').checked ? "O cliente recebera mensagem ao salvar." : "Nenhuma mensagem automatica sera enviada neste salvamento.")}</span>
+        </div>
+        <div class="appointment-customer-card ${scheduleInsight.conflict ? "is-conflict" : "is-available"}">
+            <span class="order-summary-label">Disponibilidade</span>
+            <strong>${escapeHtml(scheduleInsight.canEvaluate ? `${scheduleInsight.startLabel} ate ${scheduleInsight.endLabel}` : "Analise pendente")}</strong>
+            <span>${escapeHtml(scheduleMessage)}</span>
         </div>
     `;
 
@@ -2363,6 +4411,8 @@ function getFilteredAppointments() {
     const technician = state.filters.appointmentTechnician || "";
     const customer = state.filters.appointmentCustomer || "";
     const selectedDate = state.filters.appointmentDate || "";
+    const startDate = state.filters.appointmentStartDate || "";
+    const endDate = state.filters.appointmentEndDate || "";
 
     return state.appointments.filter((item) => {
         const searchMatch = !search || [
@@ -2377,7 +4427,9 @@ function getFilteredAppointments() {
         const technicianMatch = !technician || String(item.tecnico_id || "") === technician;
         const customerMatch = !customer || String(item.cliente_id) === customer;
         const dateMatch = !selectedDate || item.data_agendamento === selectedDate;
-        return searchMatch && statusMatch && technicianMatch && customerMatch && dateMatch;
+        const startMatch = !startDate || item.data_agendamento >= startDate;
+        const endMatch = !endDate || item.data_agendamento <= endDate;
+        return searchMatch && statusMatch && technicianMatch && customerMatch && dateMatch && startMatch && endMatch;
     });
 }
 
@@ -2452,6 +4504,10 @@ function renderAppointments() {
 
     const filteredAppointments = getFilteredAppointments();
     const counts = getAppointmentCounts(filteredAppointments);
+    const pendingAppointments = getAppointmentsForLane(filteredAppointments, "pending");
+    const finishedAppointments = getAppointmentsForLane(filteredAppointments, "finished");
+    const selectedLane = state.filters.appointmentLane === "finished" ? "finished" : "pending";
+    const laneAppointments = selectedLane === "finished" ? finishedAppointments : pendingAppointments;
     const referenceDate = parseLocalDate(state.filters.appointmentDate || todayIso());
 
     dashboardTarget.innerHTML = `
@@ -2464,6 +4520,7 @@ function renderAppointments() {
                 <button type="button" class="btn btn-success" id="appointment-new-button">Novo agendamento</button>
             </div>
         </div>
+        ${renderAppointmentIntegrationCards()}
         <div class="appointments-summary-grid">
             <article class="summary-metric-card"><span>Total</span><strong>${counts.total}</strong></article>
             <article class="summary-metric-card is-pending"><span>Pendentes</span><strong>${counts.pendente}</strong></article>
@@ -2471,6 +4528,10 @@ function renderAppointments() {
             <article class="summary-metric-card is-progress"><span>Em rota / atendimento</span><strong>${counts.em_deslocamento + counts.em_atendimento}</strong></article>
             <article class="summary-metric-card is-complete"><span>Concluidos</span><strong>${counts.concluido}</strong></article>
             <article class="summary-metric-card is-alert"><span>Cancelados / nao realizados</span><strong>${counts.cancelado + counts.nao_realizado}</strong></article>
+        </div>
+        <div class="tab-strip workspace-lane-tabs">
+            <button type="button" class="tab-pill ${selectedLane === "pending" ? "is-active" : ""}" data-appointment-lane="pending">Pendentes <span>${pendingAppointments.length}</span></button>
+            <button type="button" class="tab-pill ${selectedLane === "finished" ? "is-active" : ""}" data-appointment-lane="finished">Finalizados <span>${finishedAppointments.length}</span></button>
         </div>
         <div class="appointments-filter-grid">
             <label class="orders-search-field">
@@ -2506,8 +4567,16 @@ function renderAppointments() {
                 </select>
             </label>
             <label class="orders-search-field">
-                <span>Data de referencia</span>
+                <span>Referencia do calendario</span>
                 <input id="appointment-date-filter" type="date" value="${escapeHtml(state.filters.appointmentDate || "")}">
+            </label>
+            <label class="orders-search-field">
+                <span>Periodo inicial</span>
+                <input id="appointment-start-date-filter" type="date" value="${escapeHtml(state.filters.appointmentStartDate || "")}">
+            </label>
+            <label class="orders-search-field">
+                <span>Periodo final</span>
+                <input id="appointment-end-date-filter" type="date" value="${escapeHtml(state.filters.appointmentEndDate || "")}">
             </label>
             <div class="orders-filter-actions">
                 <button type="button" class="btn btn-default ghost-button" id="appointment-clear-filters">Limpar filtros</button>
@@ -2520,8 +4589,8 @@ function renderAppointments() {
         </div>
     `;
 
-    calendarTarget.innerHTML = renderAppointmentCalendar(filteredAppointments, referenceDate);
-    dayListTarget.innerHTML = renderAppointmentDayLists(filteredAppointments, referenceDate);
+    calendarTarget.innerHTML = renderAppointmentCalendar(laneAppointments, referenceDate);
+    dayListTarget.innerHTML = renderAppointmentDayLists(laneAppointments, referenceDate, selectedLane);
 
     bindAppointmentFilters();
     bindAppointmentActions();
@@ -2620,7 +4689,7 @@ function renderAppointmentCalendarChip(item) {
     `;
 }
 
-function renderAppointmentDayLists(appointments, referenceDate) {
+function renderAppointmentDayLists(appointments, referenceDate, lane = "pending") {
     const referenceIso = referenceDate.toISOString().slice(0, 10);
     const visibleAppointments = appointments.filter((item) => {
         if (state.appointmentCalendarView === "day") {
@@ -2636,16 +4705,26 @@ function renderAppointmentDayLists(appointments, referenceDate) {
         return item.data_agendamento.slice(0, 7) === referenceIso.slice(0, 7);
     });
     const todayItems = appointments.filter((item) => item.data_agendamento === todayIso());
-    const overdueItems = appointments.filter((item) =>
-        item.data_agendamento < todayIso()
-        && ["pendente", "confirmado", "em_deslocamento", "em_atendimento"].includes(item.status));
+    const overdueItems = lane === "pending"
+        ? appointments.filter((item) =>
+            item.data_agendamento < todayIso()
+            && ["pendente", "confirmado", "em_deslocamento", "em_atendimento", "reagendado"].includes(item.status))
+        : [];
+    const firstSectionTitle = lane === "finished" ? "Finalizados do dia" : "Pendentes do dia";
+    const firstSectionDescription = lane === "finished"
+        ? `${todayItems.length} compromisso(s) finalizados hoje.`
+        : `${todayItems.length} compromisso(s) pendentes para hoje.`;
+    const thirdSectionTitle = lane === "finished" ? "Historico finalizado" : "Compromissos atrasados";
+    const thirdSectionDescription = lane === "finished"
+        ? `${visibleAppointments.length} registro(s) finalizados no recorte atual.`
+        : `${overdueItems.length} item(ns) exigem atencao operacional.`;
 
     return `
         <div class="appointments-day-board">
             <section class="appointments-day-section">
                 <div class="section-heading compact">
-                    <h4>Lista do dia</h4>
-                    <p>${todayItems.length} compromisso(s) marcados para hoje.</p>
+                    <h4>${firstSectionTitle}</h4>
+                    <p>${firstSectionDescription}</p>
                 </div>
                 <div class="appointment-card-list">
                     ${todayItems.length ? todayItems.map((item) => renderAppointmentCard(item)).join("") : '<div class="empty-state">Nenhum atendimento programado para hoje.</div>'}
@@ -2660,23 +4739,177 @@ function renderAppointmentDayLists(appointments, referenceDate) {
                     ${visibleAppointments.length ? visibleAppointments.map((item) => renderAppointmentCard(item)).join("") : '<div class="empty-state">Nenhum agendamento encontrado para esta visualizacao.</div>'}
                 </div>
             </section>
-            <section class="appointments-day-section ${overdueItems.length ? "is-alert" : ""}">
+            <section class="appointments-day-section ${lane === "pending" && overdueItems.length ? "is-alert" : ""}">
                 <div class="section-heading compact">
-                    <h4>Compromissos atrasados</h4>
-                    <p>${overdueItems.length} item(ns) exigem atencao operacional.</p>
+                    <h4>${thirdSectionTitle}</h4>
+                    <p>${thirdSectionDescription}</p>
                 </div>
                 <div class="appointment-card-list">
-                    ${overdueItems.length ? overdueItems.map((item) => renderAppointmentCard(item, { compact: true })).join("") : '<div class="empty-state">Sem compromissos atrasados.</div>'}
+                    ${lane === "finished"
+        ? (visibleAppointments.length
+            ? visibleAppointments.map((item) => renderAppointmentCard(item, { compact: true })).join("")
+            : '<div class="empty-state">Nenhum agendamento finalizado neste periodo.</div>')
+        : (overdueItems.length
+            ? overdueItems.map((item) => renderAppointmentCard(item, { compact: true })).join("")
+            : '<div class="empty-state">Sem compromissos atrasados.</div>')}
                 </div>
             </section>
         </div>
     `;
 }
 
+function formatIntegrationStatus(status) {
+    const normalized = String(status || "").toLowerCase();
+    if (normalized === "ativo") {
+        return "🟢 Ativo";
+    }
+    if (normalized === "aguardando_conexao") {
+        return "🟡 Aguardando conexao";
+    }
+    if (normalized === "erro") {
+        return "⚠️ Erro";
+    }
+    return "🔴 Desconectado";
+}
+
+function renderAppointmentIntegrationCards() {
+    const whatsapp = state.integrations.whatsapp || {};
+    const google = state.integrations.google || {};
+    const whatsappEnabledInSettings = Boolean(state.settings?.integrations?.whatsapp_enabled);
+    const googleConnected = google.status === "ativo";
+    const googleCanLogout = googleConnected && Number(google.company_id || 0) > 0;
+    const whatsappConnected = whatsapp.status === "ativo";
+    const whatsappCanConnect = whatsappEnabledInSettings;
+    const googleEmail = google.account_email || "Nenhuma conta conectada";
+    const googleCompany = google.company_name ? `Empresa: ${escapeHtml(google.company_name)}` : "Empresa nao identificada";
+    const whatsappMeta = whatsapp.instance_name
+        ? `Instancia: ${escapeHtml(whatsapp.instance_name)}`
+        : `Provedor: ${escapeHtml(whatsapp.provider || "-")}`;
+
+    return `
+        <div class="appointments-summary-grid integrations-grid">
+            <article class="summary-metric-card">
+                <span>WhatsApp</span>
+                <strong>${escapeHtml(formatIntegrationStatus(whatsapp.status))}</strong>
+                <p>${whatsappMeta}</p>
+                <p>${escapeHtml(whatsapp.error_message || "Status operacional da conexao usado pela agenda.")}</p>
+                <div class="inline-actions">
+                    <button type="button" class="btn btn-success" data-integration-action="whatsapp-connect-qr" ${whatsappCanConnect ? "" : "disabled"}>Conectar WhatsApp</button>
+                    <button type="button" class="btn btn-default ghost-button" data-integration-action="whatsapp-logout" ${whatsappConnected ? "" : "disabled"}>Logout</button>
+                    <button type="button" class="btn btn-default ghost-button" data-integration-action="refresh-whatsapp">Atualizar status</button>
+                </div>
+            </article>
+            <article class="summary-metric-card">
+                <span>Google Agenda</span>
+                <strong>${escapeHtml(formatIntegrationStatus(google.status))}</strong>
+                <p>${escapeHtml(googleEmail)}</p>
+                <p>${googleConnected ? googleCompany : escapeHtml(google.message || "Conecte uma conta Google para sincronizar.")}</p>
+                <div class="inline-actions">
+                    <button type="button" class="btn btn-success" data-integration-action="google-login">Conectar nova conta</button>
+                    <button type="button" class="btn btn-default ghost-button" data-integration-action="google-logout" ${googleCanLogout ? "" : "disabled"}>Logout</button>
+                </div>
+            </article>
+        </div>
+    `;
+}
+
+
+async function refreshAppointmentIntegrationStatus() {
+    state.integrations.whatsapp = await apiFetch("/api/v1/whatsapp/status");
+    state.integrations.google = await apiFetch("/api/v1/google-calendar/status");
+    renderAppointments();
+    renderSettings();
+}
+
+
+async function connectWhatsAppQr() {
+    state.integrations.whatsappQr = await apiFetch("/api/v1/whatsapp/sessao/qr", {
+        method: "POST",
+    });
+    await refreshAppointmentIntegrationStatus();
+    switchView("configuracoes");
+    toast(state.integrations.whatsappQr.message || "Leia o QR Code do WhatsApp para conectar a sessao.");
+}
+
+
+async function logoutWhatsApp() {
+    state.integrations.whatsapp = await apiFetch("/api/v1/whatsapp/sessao/logout", {
+        method: "POST",
+    });
+    state.integrations.whatsappQr = null;
+    renderSettings();
+    renderAppointments();
+    toast(state.integrations.whatsapp.error_message || "Sessao WhatsApp desconectada.");
+}
+
+
+async function loginGoogle() {
+    const result = await apiFetch("/api/v1/google-calendar/login", { method: "POST" });
+    const popup = window.open(
+        result.authorization_url,
+        "syspragas-google-calendar-oauth",
+        "width=640,height=760,menubar=no,toolbar=no,location=yes,resizable=yes,scrollbars=yes,status=no",
+    );
+    if (!popup) {
+        window.location.href = result.authorization_url;
+        return;
+    }
+    popup.focus();
+    toast(result.message || "Abra a autenticacao Google para conectar uma nova conta.");
+}
+
+
+async function logoutGoogle() {
+    const result = await apiFetch("/api/v1/google-calendar/logout", { method: "POST" });
+    state.integrations.google = result;
+    await loadAllData();
+    openAppointmentView("operational");
+    toast(result.message || "Conta Google desconectada com sucesso.");
+}
+
 function renderAppointmentCard(item, options = {}) {
     const compact = options.compact || false;
     const linkedWorkOrder = item.os_id ? getEntityByKind("workOrder", item.os_id) : null;
-    const isOverdue = item.data_agendamento < todayIso() && ["pendente", "confirmado", "em_deslocamento", "em_atendimento"].includes(item.status);
+    const isOverdue = item.data_agendamento < todayIso() && ["pendente", "confirmado", "em_deslocamento", "em_atendimento", "reagendado"].includes(item.status);
+    const whatsappIntegration = state.integrations.whatsapp || {};
+    const googleEnabled = Boolean(item.sincronizar_google);
+    const whatsappLogs = Array.isArray(item.whatsapp_logs) ? item.whatsapp_logs : [];
+    const finished = isAppointmentFinished(item.status);
+    const hasPhone = Boolean(item.telefone);
+    const whatsappIntegrationAvailable = whatsappIntegration.status === "ativo";
+    const whatsappEnabled = hasPhone && whatsappIntegrationAvailable;
+    const whatsappStatusLabel = item.whatsapp_status ? item.whatsapp_status.replaceAll("_", " ") : "sem envio";
+    let whatsappButtonLabel = whatsappLogs.length ? "Reenviar WhatsApp" : "Enviar WhatsApp";
+    let whatsappDisabledReason = "";
+    if (!hasPhone) {
+        whatsappButtonLabel = "WhatsApp indisponivel";
+        whatsappDisabledReason = "Cliente sem telefone valido para envio.";
+    } else if (!whatsappIntegrationAvailable) {
+        whatsappButtonLabel = "WhatsApp indisponivel";
+        whatsappDisabledReason = whatsappIntegration.error_message || "Integracao WhatsApp desabilitada ou incompleta.";
+    }
+    const googleStatusLabel = (item.google_sync_status || "desconectado").replaceAll("_", " ");
+    let googleButtonLabel = "Google desativado";
+    if (googleEnabled) {
+        if (item.google_sync_status === "falha") {
+            googleButtonLabel = "Tentar sincronizar no Google";
+        } else if (item.google_calendar_event_id) {
+            googleButtonLabel = "Sincronizar novamente";
+        } else {
+            googleButtonLabel = "Sincronizar no Google";
+        }
+    }
+    const googleMessage = item.google_sync_message
+        ? `<p class="origin-note">${escapeHtml(item.google_sync_message)}</p>`
+        : "";
+    const whatsappMessage = item.whatsapp_ultimo_erro
+        ? `<p class="origin-note">WhatsApp: ${escapeHtml(item.whatsapp_ultimo_erro)}</p>`
+        : (whatsappLogs[0]?.created_at
+            ? `<p class="origin-note">WhatsApp ${escapeHtml(whatsappStatusLabel)} em ${escapeHtml(formatDateTime(whatsappLogs[0].created_at))}.</p>`
+            : "");
+    const whatsappAvailabilityMessage = whatsappDisabledReason
+        ? `<p class="origin-note">WhatsApp indisponivel: ${escapeHtml(whatsappDisabledReason)}</p>`
+        : "";
     const detailsHtml = linkedWorkOrder
         ? `
             <div class="appointment-linked-assets">
@@ -2700,15 +4933,22 @@ function renderAppointmentCard(item, options = {}) {
                 <div><span class="order-summary-label">Tecnico</span><strong>${escapeHtml(item.tecnico_nome || "Nao definido")}</strong></div>
                 <div><span class="order-summary-label">Duracao</span><strong>${escapeHtml(String(item.duracao_prevista_minutos))} min</strong></div>
                 <div><span class="order-summary-label">Telefone</span><strong>${escapeHtml(item.telefone || "-")}</strong></div>
-                <div><span class="order-summary-label">Google</span><strong>${escapeHtml((item.google_sync_status || "desconectado").replaceAll("_", " "))}</strong></div>
+                <div><span class="order-summary-label">Google</span><strong>${escapeHtml(googleStatusLabel)}</strong></div>
+                <div><span class="order-summary-label">WhatsApp</span><strong>${escapeHtml(whatsappStatusLabel)}</strong></div>
             </div>
             <p class="appointment-card-note">${escapeHtml(item.observacoes || item.observacoes_internas || "Sem observacoes adicionais.")}</p>
+            ${googleMessage}
+            ${whatsappMessage}
+            ${whatsappAvailabilityMessage}
             <div class="appointment-status-actions">
                 ${renderAppointmentProgressActions(item)}
             </div>
             <div class="appointment-main-actions">
                 <button type="button" class="btn btn-default ghost-button" data-appointment-action="edit" data-id="${item.id}">Editar / reagendar</button>
-                <button type="button" class="btn btn-default ghost-button" data-appointment-action="sync-google" data-id="${item.id}">Sincronizar Google</button>
+                <button type="button" class="btn btn-default ghost-button" data-appointment-action="print" data-id="${item.id}">${finished ? "Reimprimir" : "Imprimir resumo"}</button>
+                <button type="button" class="btn btn-default ghost-button" data-appointment-action="reopen" data-id="${item.id}" ${finished ? "" : "disabled"}>Reabrir agendamento</button>
+                <button type="button" class="btn btn-default ghost-button" data-appointment-action="send-whatsapp" data-id="${item.id}" ${whatsappEnabled ? "" : `disabled title="${escapeHtml(whatsappDisabledReason)}"`}>${whatsappButtonLabel}</button>
+                <button type="button" class="btn btn-default ghost-button" data-appointment-action="sync-google" data-id="${item.id}" ${googleEnabled ? "" : "disabled"}>${googleButtonLabel}</button>
                 <button type="button" class="btn btn-default ghost-button" data-appointment-action="open-work-order" data-os-id="${item.os_id || ""}" ${item.os_id ? "" : "disabled"}>Abrir OS</button>
             </div>
             <details class="appointment-details">
@@ -2721,6 +4961,21 @@ function renderAppointmentCard(item, options = {}) {
                         <div><dt>Retorno / revisita</dt><dd>${escapeHtml(item.retorno_revisita || "-")}</dd></div>
                     </dl>
                     ${detailsHtml}
+                    <div class="appointment-history-list">
+                        <div class="section-heading compact">
+                            <h4>Logs de WhatsApp</h4>
+                            <p>Historico de envios automaticos e manuais ao cliente.</p>
+                        </div>
+                        ${whatsappLogs.length
+        ? whatsappLogs.slice().reverse().map((entry) => `
+                            <article class="appointment-history-item">
+                                <strong>${escapeHtml(entry.usuario_nome || (entry.automatico ? "Sistema" : "Usuario"))}</strong>
+                                <span>${formatDateTime(entry.created_at)}</span>
+                                <p>${escapeHtml(`WhatsApp ${entry.status} para ${entry.destino_telefone}${entry.erro ? ` | ${entry.erro}` : ""}`)}</p>
+                            </article>
+                        `).join("")
+        : '<div class="empty-state">Nenhum envio de WhatsApp registrado.</div>'}
+                    </div>
                     <div class="appointment-history-list">
                         ${(item.historico || []).length
         ? item.historico.slice().reverse().map((entry) => `
@@ -2754,6 +5009,9 @@ function renderAppointmentStatusBadge(status) {
 
 function renderAppointmentProgressActions(item) {
     const actions = [];
+    if (isAppointmentFinished(item.status)) {
+        return actions.join("");
+    }
     if (item.status === "pendente" || item.status === "reagendado") {
         actions.push(`<button type="button" class="btn btn-success" data-appointment-action="status" data-id="${item.id}" data-status="confirmado">Confirmar</button>`);
     }
@@ -2773,7 +5031,7 @@ function renderAppointmentProgressActions(item) {
 function bindAppointmentFilters() {
     document.getElementById("appointment-new-button")?.addEventListener("click", () => {
         resetFormMode("appointment");
-        switchView("agenda");
+        openAppointmentView("new");
     });
     document.getElementById("appointment-search")?.addEventListener("input", (event) => {
         state.filters.appointmentSearch = event.target.value;
@@ -2795,18 +5053,67 @@ function bindAppointmentFilters() {
         state.filters.appointmentDate = event.target.value;
         renderAppointments();
     });
+    document.getElementById("appointment-start-date-filter")?.addEventListener("change", (event) => {
+        state.filters.appointmentStartDate = event.target.value;
+        renderAppointments();
+    });
+    document.getElementById("appointment-end-date-filter")?.addEventListener("change", (event) => {
+        state.filters.appointmentEndDate = event.target.value;
+        renderAppointments();
+    });
+    document.querySelectorAll("[data-appointment-lane]").forEach((button) => {
+        button.addEventListener("click", () => {
+            state.filters.appointmentLane = button.dataset.appointmentLane === "finished" ? "finished" : "pending";
+            renderAppointments();
+        });
+    });
     document.getElementById("appointment-clear-filters")?.addEventListener("click", () => {
         state.filters.appointmentSearch = "";
         state.filters.appointmentStatus = "todos";
         state.filters.appointmentTechnician = "";
         state.filters.appointmentCustomer = "";
         state.filters.appointmentDate = "";
+        state.filters.appointmentStartDate = "";
+        state.filters.appointmentEndDate = "";
+        state.filters.appointmentLane = "pending";
         renderAppointments();
     });
     document.querySelectorAll("[data-appointment-view]").forEach((button) => {
         button.addEventListener("click", () => {
             state.appointmentCalendarView = button.dataset.appointmentView;
             renderAppointments();
+        });
+    });
+    document.querySelectorAll("[data-integration-action]").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", async () => {
+            try {
+                if (button.dataset.integrationAction === "refresh-whatsapp") {
+                    await refreshAppointmentIntegrationStatus();
+                    toast("Status das integracoes atualizado.");
+                    return;
+                }
+                if (button.dataset.integrationAction === "whatsapp-connect-qr") {
+                    await connectWhatsAppQr();
+                    return;
+                }
+                if (button.dataset.integrationAction === "whatsapp-logout") {
+                    await logoutWhatsApp();
+                    return;
+                }
+                if (button.dataset.integrationAction === "google-login") {
+                    await loginGoogle();
+                    return;
+                }
+                if (button.dataset.integrationAction === "google-logout") {
+                    await logoutGoogle();
+                }
+            } catch (error) {
+                toast(error.message);
+            }
         });
     });
 }
@@ -2820,7 +5127,6 @@ function bindAppointmentActions() {
             try {
                 if (action === "edit") {
                     startEditing("appointment", appointmentId);
-                    switchView("agenda");
                     return;
                 }
                 if (action === "open-work-order" && osId) {
@@ -2828,9 +5134,33 @@ function bindAppointmentActions() {
                     return;
                 }
                 if (action === "sync-google") {
-                    await apiFetch(`/api/v1/agendamentos/${appointmentId}/sync-google`, { method: "POST" });
-                    await afterMutation("Agendamento sincronizado com Google Agenda.");
-                    switchView("agenda");
+                    await syncAppointmentWithGoogle(appointmentId);
+                    return;
+                }
+                if (action === "print") {
+                    printAppointmentSummary(appointmentId);
+                    return;
+                }
+                if (action === "reopen") {
+                    const reopened = await apiFetch(`/api/v1/agendamentos/${appointmentId}/reabrir`, {
+                        method: "POST",
+                    });
+                    await afterMutation("Agendamento reaberto com sucesso.", {
+                        kind: "appointment",
+                        entity: reopened,
+                    });
+                    openAppointmentView("operational");
+                    return;
+                }
+                if (action === "send-whatsapp") {
+                    const result = await apiFetch(`/api/v1/whatsapp/agendamentos/${appointmentId}/enviar`, {
+                        method: "POST",
+                    });
+                    await afterMutation("Mensagem de WhatsApp enviada com sucesso.", {
+                        kind: "appointment",
+                        entity: result,
+                    });
+                    openAppointmentView("operational");
                     return;
                 }
                 if (action === "status") {
@@ -2843,7 +5173,7 @@ function bindAppointmentActions() {
                         }),
                     });
                     await afterMutation("Status do agendamento atualizado.");
-                    switchView("agenda");
+                    openAppointmentView("operational");
                 }
             } catch (error) {
                 toast(error.message);
@@ -2858,6 +5188,26 @@ function bindAppointmentActions() {
             }
         });
     });
+}
+
+async function syncAppointmentWithGoogle(appointmentId) {
+    const result = await apiFetch(`/api/v1/google-calendar/appointments/${appointmentId}/sync`, { method: "POST" });
+    if (result.mode === "oauth_required" && result.authorization_url) {
+        const popup = window.open(
+            result.authorization_url,
+            "syspragas-google-calendar-oauth",
+            "width=640,height=760,menubar=no,toolbar=no,location=yes,resizable=yes,scrollbars=yes,status=no",
+        );
+        if (!popup) {
+            window.location.href = result.authorization_url;
+            return;
+        }
+        popup.focus();
+        toast(result.message || "Conecte sua conta Google para concluir a sincronizacao.");
+        return;
+    }
+    await afterMutation(result.message || "Agendamento sincronizado com Google Agenda.");
+    openAppointmentView("operational");
 }
 
 function openLinkedWorkOrderFromAppointmentForm() {
@@ -2877,6 +5227,7 @@ function duplicateAppointmentAsFollowUp() {
         return;
     }
     resetFormMode("appointment");
+    openAppointmentView("new");
     const form = document.getElementById("appointment-form");
     fillForm(form, {
         cliente_id: String(original.cliente_id),
@@ -2980,17 +5331,18 @@ function renderCustomers() {
 function renderProducts() {
     setTableContent(
         "products-table",
-        ["Produto", "Principio ativo", "Estoque", "Minimo", "Registro", "Acoes"],
+        ["Produto", "NCM", "Tributacao", "Estoque", "Minimo", "Registro", "Acoes"],
         state.products.map((item) => [
-            item.nome,
-            item.principio_ativo,
+            `<div>${escapeHtml(item.nome)}<div class="origin-note">${escapeHtml(item.principio_ativo)}</div></div>`,
+            item.ncm ? `<div>${escapeHtml(item.ncm)}<div class="origin-note">${escapeHtml(item.ncm_descricao || "")}</div></div>` : "-",
+            `<div>ICMS ${escapeHtml(String(item.aliquota_icms || 0))}%<div class="origin-note">IPI ${escapeHtml(String(item.aliquota_ipi || 0))}% | PIS ${escapeHtml(String(item.aliquota_pis || 0))}% | COFINS ${escapeHtml(String(item.aliquota_cofins || 0))}%</div></div>`,
             `${item.estoque_atual}`,
             `${item.estoque_minimo}`,
             item.registro_ms,
             actionButtons("product", item.id),
         ]),
         "Nenhum produto cadastrado.",
-        { nonSortableTargets: [5] },
+        { nonSortableTargets: [6] },
     );
     bindEntityActions("product");
 }
@@ -3030,8 +5382,14 @@ function renderWorkOrders() {
     }
 
     const filteredOrders = getFilteredWorkOrdersForWorkspace();
-    const activeOrders = filteredOrders.filter((item) => item.status !== "concluida" && item.status !== "cancelada");
-    const archivedOrders = filteredOrders.filter((item) => item.status === "concluida" || item.status === "cancelada");
+    const activeOrders = getWorkOrdersForLane(filteredOrders, "pending");
+    const archivedOrders = getWorkOrdersForLane(filteredOrders, "finished");
+    const selectedLane = state.filters.workOrderLane === "finished" ? "finished" : "pending";
+    const laneOrders = selectedLane === "finished" ? archivedOrders : activeOrders;
+    const laneTitle = selectedLane === "finished" ? "Ordens finalizadas" : "Ordens pendentes";
+    const laneDescription = selectedLane === "finished"
+        ? "Historico operacional com acesso rapido para reimpressao e reabertura."
+        : "Ordens em acompanhamento com foco nas proximas execucoes e ajustes operacionais.";
 
     target.innerHTML = `
         <div class="orders-workspace">
@@ -3046,8 +5404,16 @@ function renderWorkOrders() {
                         <input id="work-orders-customer-search" type="search" placeholder="Razao social" value="${escapeHtml(state.filters.workOrderCustomer || "")}">
                     </label>
                     <label class="orders-search-field">
-                        <span>Data</span>
+                        <span>Data exata</span>
                         <input id="work-orders-date-filter" type="date" value="${escapeHtml(state.filters.workOrderDate || "")}">
+                    </label>
+                    <label class="orders-search-field">
+                        <span>Periodo inicial</span>
+                        <input id="work-orders-start-date-filter" type="date" value="${escapeHtml(state.filters.workOrderStartDate || "")}">
+                    </label>
+                    <label class="orders-search-field">
+                        <span>Periodo final</span>
+                        <input id="work-orders-end-date-filter" type="date" value="${escapeHtml(state.filters.workOrderEndDate || "")}">
                     </label>
                     <label class="orders-search-field">
                         <span>Status</span>
@@ -3069,17 +5435,15 @@ function renderWorkOrders() {
                     <span class="orders-stat">${archivedOrders.length} finalizadas / historico</span>
                 </div>
             </div>
+            <div class="tab-strip workspace-lane-tabs">
+                <button type="button" class="tab-pill ${selectedLane === "pending" ? "is-active" : ""}" data-work-order-lane="pending">Pendentes <span>${activeOrders.length}</span></button>
+                <button type="button" class="tab-pill ${selectedLane === "finished" ? "is-active" : ""}" data-work-order-lane="finished">Finalizados <span>${archivedOrders.length}</span></button>
+            </div>
             ${renderWorkOrderLane(
-                "Ordens em andamento",
-                "As OS operacionais ficam em destaque, com acoes rapidas e leitura direta dos itens aplicados.",
-                activeOrders,
-                false,
-            )}
-            ${renderWorkOrderLane(
-                "Ordens finalizadas e historico",
-                "As OS concluidas e canceladas ficam fora da area principal para reduzir ruido visual.",
-                archivedOrders,
-                true,
+                laneTitle,
+                laneDescription,
+                laneOrders,
+                selectedLane === "finished",
             )}
         </div>
     `;
@@ -3097,6 +5461,8 @@ function getFilteredWorkOrdersForWorkspace() {
     const numberSearch = (state.filters.workOrderNumber || "").trim().toLowerCase();
     const customerSearch = (state.filters.workOrderCustomer || "").trim().toLowerCase();
     const selectedDate = state.filters.workOrderDate || "";
+    const startDate = state.filters.workOrderStartDate || "";
+    const endDate = state.filters.workOrderEndDate || "";
     const selectedStatus = state.filters.workOrderStatus || "todos";
 
     return state.workOrders.filter((item) => {
@@ -3107,15 +5473,35 @@ function getFilteredWorkOrdersForWorkspace() {
             .toLowerCase()
             .includes(customerSearch);
         const dateMatch = !selectedDate || item.data_execucao === selectedDate;
+        const startMatch = !startDate || item.data_execucao >= startDate;
+        const endMatch = !endDate || item.data_execucao <= endDate;
         const statusMatch = selectedStatus === "todos" || item.status === selectedStatus;
-        return numberMatch && customerMatch && dateMatch && statusMatch;
+        return numberMatch && customerMatch && dateMatch && startMatch && endMatch && statusMatch;
     });
+}
+
+function isAppointmentFinished(status) {
+    return finishedAppointmentStatuses.has(String(status || "").toLowerCase());
+}
+
+function isWorkOrderFinished(status) {
+    return finishedWorkOrderStatuses.has(String(status || "").toLowerCase());
+}
+
+function getAppointmentsForLane(items, lane = state.filters.appointmentLane || "pending") {
+    return items.filter((item) => lane === "finished" ? isAppointmentFinished(item.status) : !isAppointmentFinished(item.status));
+}
+
+function getWorkOrdersForLane(items, lane = state.filters.workOrderLane || "pending") {
+    return items.filter((item) => lane === "finished" ? isWorkOrderFinished(item.status) : !isWorkOrderFinished(item.status));
 }
 
 function bindWorkOrderWorkspaceFilters() {
     const numberSearch = document.getElementById("work-orders-number-search");
     const customerSearch = document.getElementById("work-orders-customer-search");
     const dateFilter = document.getElementById("work-orders-date-filter");
+    const startDateFilter = document.getElementById("work-orders-start-date-filter");
+    const endDateFilter = document.getElementById("work-orders-end-date-filter");
     const statusFilter = document.getElementById("work-orders-status-filter");
     const clearButton = document.getElementById("work-orders-clear-filters");
 
@@ -3131,15 +5517,32 @@ function bindWorkOrderWorkspaceFilters() {
         state.filters.workOrderDate = event.target.value;
         renderWorkOrders();
     });
+    startDateFilter?.addEventListener("change", (event) => {
+        state.filters.workOrderStartDate = event.target.value;
+        renderWorkOrders();
+    });
+    endDateFilter?.addEventListener("change", (event) => {
+        state.filters.workOrderEndDate = event.target.value;
+        renderWorkOrders();
+    });
     statusFilter?.addEventListener("change", (event) => {
         state.filters.workOrderStatus = event.target.value;
         renderWorkOrders();
+    });
+    document.querySelectorAll("[data-work-order-lane]").forEach((button) => {
+        button.addEventListener("click", () => {
+            state.filters.workOrderLane = button.dataset.workOrderLane === "finished" ? "finished" : "pending";
+            renderWorkOrders();
+        });
     });
     clearButton?.addEventListener("click", () => {
         state.filters.workOrderNumber = "";
         state.filters.workOrderCustomer = "";
         state.filters.workOrderDate = "";
+        state.filters.workOrderStartDate = "";
+        state.filters.workOrderEndDate = "";
         state.filters.workOrderStatus = "todos";
+        state.filters.workOrderLane = "pending";
         renderWorkOrders();
     });
 }
@@ -3218,11 +5621,18 @@ function renderWorkOrderCard(item, archived) {
 function renderWorkOrderActionPanel(item) {
     const linkedFinance = state.finance.find((entry) => entry.os_id === item.id) || null;
     const quickActions = [];
-    if (item.status !== "concluida" && item.status !== "cancelada") {
+    if (!isWorkOrderFinished(item.status)) {
         quickActions.push(`
             <button type="button" class="btn btn-sm ghost-button action-button complete-work-order" data-id="${item.id}">
                 <i class="fas fa-check-circle"></i>
                 <span>Concluir ordem</span>
+            </button>
+        `);
+    } else {
+        quickActions.push(`
+            <button type="button" class="btn btn-sm ghost-button action-button reopen-work-order" data-id="${item.id}">
+                <i class="fas fa-rotate-left"></i>
+                <span>Reabrir OS</span>
             </button>
         `);
     }
@@ -3234,6 +5644,12 @@ function renderWorkOrderActionPanel(item) {
             </button>
         `);
     }
+    quickActions.push(`
+        <button type="button" class="btn btn-sm ghost-button action-button reprint-work-order" data-id="${item.id}">
+            <i class="fas fa-print"></i>
+            <span>Reimprimir OS</span>
+        </button>
+    `);
 
     const primaryActions = quickActions.length
         ? `<div class="order-primary-actions">${quickActions.join("")}</div>`
@@ -3269,11 +5685,15 @@ function renderWorkOrderActionPanel(item) {
                         </a>
                         <a href="#" class="subtle-link toolbar-link pdf-link" data-doc="certificado" data-id="${item.id}">
                             <i class="fas fa-shield-alt"></i>
-                            <span>Sanitario</span>
+                            <span>Sanitario padrao</span>
                         </a>
-                        <a href="#" class="subtle-link toolbar-link pdf-link" data-doc="moldura" data-id="${item.id}">
+                        <a href="#" class="subtle-link toolbar-link pdf-link is-featured" data-doc="garantia" data-id="${item.id}">
+                            <i class="fas fa-award"></i>
+                            <span>Certificado garantia</span>
+                        </a>
+                        <a href="#" class="subtle-link toolbar-link pdf-link is-featured" data-doc="moldura" data-id="${item.id}">
                             <i class="fas fa-certificate"></i>
-                            <span>Moldura</span>
+                            <span>Moldura recomendada</span>
                         </a>
                     </div>
                 </details>
@@ -3371,18 +5791,40 @@ function bindWorkOrderDocumentLinks() {
     document.querySelectorAll(".pdf-link").forEach((link) => {
         link.addEventListener("click", async (event) => {
             event.preventDefault();
+            const { id, doc } = event.currentTarget.dataset;
+            const docUrlMap = {
+                os: `/api/v1/os/${id}/pdf`,
+                relatorio: `/api/v1/os/${id}/relatorio-tecnico.pdf`,
+                certificado: `/api/v1/os/${id}/certificado-sanitario.pdf`,
+                garantia: `/api/v1/os/${id}/certificado-garantia.pdf`,
+                moldura: `/api/v1/os/${id}/certificado-moldura.pdf`,
+            };
+            const docTitleMap = {
+                os: `Ordem de Servico ${id}`,
+                relatorio: `Relatorio tecnico ${id}`,
+                certificado: `Certificado sanitario ${id}`,
+                garantia: `Certificado de garantia ${id}`,
+                moldura: `Certificado moldura ${id}`,
+            };
+            const previewWindow = openDocumentPreviewShell(
+                docTitleMap[doc] || `Documento ${id}`,
+                "Preparando documento..."
+            );
             try {
-                const { id, doc } = event.currentTarget.dataset;
-                const docUrlMap = {
-                    os: `/api/v1/os/${id}/pdf`,
-                    relatorio: `/api/v1/os/${id}/relatorio-tecnico.pdf`,
-                    certificado: `/api/v1/os/${id}/certificado-sanitario.pdf`,
-                    moldura: `/api/v1/os/${id}/certificado-moldura.pdf`,
-                };
+                logClientEvent("work_order_document_open", { work_order_id: Number(id), document: doc });
                 const blob = await apiFetch(docUrlMap[doc]);
-                const fileUrl = URL.createObjectURL(blob);
-                window.open(fileUrl, "_blank", "noopener");
+                openBlobPreview(blob, docTitleMap[doc] || `Documento ${id}`, { previewWindow });
             } catch (error) {
+                renderDocumentPreviewError(
+                    previewWindow,
+                    docTitleMap[doc] || `Documento ${id}`,
+                    error.message || "Nao foi possivel abrir o documento."
+                );
+                logClientEvent(
+                    "work_order_document_error",
+                    { work_order_id: Number(id), document: doc, message: error.message },
+                    "error"
+                );
                 toast(error.message);
             }
         });
@@ -3421,48 +5863,141 @@ function renderWorkOrderSaveFeedback() {
     target.innerHTML = `
         <section class="work-order-save-card">
             <div class="section-heading compact">
-                <h4>Order saved successfully</h4>
-                <p>OS ${escapeHtml(workOrder.numero)} pronta para impressao, emissao e download do certificado de dedetizacao.</p>
+                <h4>Ordem salva com sucesso</h4>
+                <p>OS ${escapeHtml(workOrder.numero)} pronta para visualizacao, impressao e emissao dos documentos. O certificado de garantia foi preparado automaticamente e pode ser aberto abaixo.</p>
             </div>
             <div class="work-order-save-meta">
                 <span class="orders-stat is-active">${escapeHtml(workOrder.cliente?.razao_social || "Cliente")}</span>
                 <span class="orders-stat">${formatDate(workOrder.data_execucao)}</span>
-                <span class="orders-stat">${state.workOrderWorkflow.certificateReady ? "Certificado pronto" : "Certificado sob demanda"}</span>
+                <span class="orders-stat">${state.workOrderWorkflow.certificateReady ? "Garantia pronta" : "Garantia sob demanda"}</span>
             </div>
             <div class="work-order-save-actions">
-                <button type="button" class="btn btn-success" data-work-order-action="print" data-id="${workOrder.id}">Print Order</button>
-                <button type="button" class="btn btn-default ghost-button" data-work-order-action="certificate-preview" data-id="${workOrder.id}">Generate Certificate</button>
-                <button type="button" class="btn btn-default ghost-button" data-work-order-action="certificate-download" data-id="${workOrder.id}">Download Certificate</button>
+                <button type="button" class="btn btn-success" data-work-order-action="preview-order" data-id="${workOrder.id}">Visualizar OS</button>
+                <button type="button" class="btn btn-default ghost-button" data-work-order-action="print" data-id="${workOrder.id}">Imprimir OS</button>
+                <button type="button" class="btn btn-primary" data-work-order-action="certificate-guarantee-preview" data-id="${workOrder.id}">Abrir garantia</button>
+                <button type="button" class="btn btn-default ghost-button" data-work-order-action="certificate-guarantee-download" data-id="${workOrder.id}">Baixar garantia</button>
+                <button type="button" class="btn btn-warning" data-work-order-action="certificate-moldura-preview" data-id="${workOrder.id}">Abrir moldura</button>
+                <button type="button" class="btn btn-default ghost-button" data-work-order-action="certificate-moldura-download" data-id="${workOrder.id}">Baixar moldura</button>
             </div>
         </section>
     `;
     target.classList.remove("hidden");
 }
 
-async function print_order(workOrderId) {
+async function preview_work_order(workOrderId, options = {}) {
     const blob = await apiFetch(`/api/v1/os/${workOrderId}/pdf`);
     const workOrder = getEntityByKind("workOrder", workOrderId);
-    openBlobPreview(blob, `Ordem de Servico ${workOrder?.numero || workOrderId}`, { printOnLoad: true });
+    openBlobPreview(blob, `Ordem de Servico ${workOrder?.numero || workOrderId}`, {
+        previewWindow: options.previewWindow,
+    });
+}
+
+async function print_order(workOrderId, options = {}) {
+    const blob = await apiFetch(`/api/v1/os/${workOrderId}/pdf`);
+    const workOrder = getEntityByKind("workOrder", workOrderId);
+    openBlobPreview(blob, `Ordem de Servico ${workOrder?.numero || workOrderId}`, {
+        printOnLoad: true,
+        previewWindow: options.previewWindow,
+    });
+}
+
+function printAppointmentSummary(appointmentId) {
+    const appointment = getEntityByKind("appointment", Number(appointmentId));
+    if (!appointment) {
+        toast("Agendamento nao encontrado para impressao.");
+        return;
+    }
+    const printWindow = window.open("", "_blank", "noopener");
+    if (!printWindow) {
+        toast("Nao foi possivel abrir a janela de impressao.");
+        return;
+    }
+    printWindow.document.write(`
+        <!doctype html>
+        <html lang="pt-BR">
+            <head>
+                <meta charset="utf-8">
+                <title>Agendamento ${appointment.id}</title>
+                <style>
+                    body { font-family: "Segoe UI", sans-serif; margin: 24px; color: #1e2a22; }
+                    h1 { margin-bottom: 6px; }
+                    .meta { color: #5d675f; margin-bottom: 18px; }
+                    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }
+                    .card { border: 1px solid #d7ded1; border-radius: 12px; padding: 12px 14px; }
+                    .card span { display: block; color: #5d675f; font-size: 12px; margin-bottom: 4px; }
+                    .note { margin-top: 18px; white-space: pre-wrap; }
+                    @media print { body { margin: 12mm; } }
+                </style>
+            </head>
+            <body>
+                <h1>Agendamento #${appointment.id}</h1>
+                <p class="meta">${escapeHtml(appointment.cliente_nome)} | ${escapeHtml(appointment.tipo_servico)}</p>
+                <div class="grid">
+                    <div class="card"><span>Data</span><strong>${escapeHtml(formatDate(appointment.data_agendamento))}</strong></div>
+                    <div class="card"><span>Hora</span><strong>${escapeHtml(formatTime(appointment.hora_agendamento))}</strong></div>
+                    <div class="card"><span>Tecnico</span><strong>${escapeHtml(appointment.tecnico_nome || "Nao definido")}</strong></div>
+                    <div class="card"><span>Status</span><strong>${escapeHtml(appointment.status.replaceAll("_", " "))}</strong></div>
+                    <div class="card"><span>Telefone</span><strong>${escapeHtml(appointment.telefone || "-")}</strong></div>
+                    <div class="card"><span>OS vinculada</span><strong>${escapeHtml(appointment.os_numero || "Sem vinculacao")}</strong></div>
+                    <div class="card" style="grid-column: 1 / -1;"><span>Endereco</span><strong>${escapeHtml(appointment.endereco_completo || "-")}</strong></div>
+                </div>
+                <div class="note">
+                    <strong>Observacoes</strong>
+                    <p>${escapeHtml(appointment.observacoes || appointment.observacoes_internas || "Sem observacoes adicionais.")}</p>
+                </div>
+                <script>
+                    window.addEventListener("load", () => {
+                        setTimeout(() => {
+                            window.focus();
+                            window.print();
+                        }, 250);
+                    });
+                </script>
+            </body>
+        </html>
+    `);
+    printWindow.document.close();
 }
 
 async function generate_certificate(workOrderId, options = {}) {
     const mode = options.mode || "preview";
-    const blob = await apiFetch(`/api/v1/os/${workOrderId}/certificado-sanitario.pdf`);
+    const variant = options.variant || "standard";
+    const endpointMap = {
+        standard: `/api/v1/os/${workOrderId}/certificado-sanitario.pdf`,
+        garantia: `/api/v1/os/${workOrderId}/certificado-garantia.pdf`,
+        moldura: `/api/v1/os/${workOrderId}/certificado-moldura.pdf`,
+    };
+    const endpoint = endpointMap[variant] || endpointMap.standard;
+    const blob = await apiFetch(endpoint);
     const workOrder = getEntityByKind("workOrder", workOrderId);
     if (mode === "background") {
         return blob;
     }
     if (mode === "download") {
-        downloadBlob(blob, buildCertificateFilename(workOrder));
+        downloadBlob(blob, buildCertificateFilename(workOrder, variant));
         return blob;
     }
-    openBlobPreview(blob, `Certificado ${workOrder?.numero || workOrderId}`);
+    const titlePrefix = variant === "moldura"
+        ? "Certificado Moldura"
+        : variant === "garantia"
+            ? "Certificado de Garantia"
+            : "Certificado";
+    openBlobPreview(blob, `${titlePrefix} ${workOrder?.numero || workOrderId}`, {
+        previewWindow: options.previewWindow,
+    });
     return blob;
 }
 
-function buildCertificateFilename(workOrder) {
+function buildCertificateFilename(workOrder, variant = "standard") {
     const customer = sanitizeFilenamePart(workOrder?.cliente?.razao_social || "cliente");
-    return `cert_${workOrder?.id || "os"}_${customer}.pdf`;
+    const suffix = variant === "moldura" ? "moldura" : variant === "garantia" ? "garantia" : "padrao";
+    return `cert_${suffix}_${workOrder?.id || "os"}_${customer}.pdf`;
+}
+
+function buildReceiptPdfFilename(receipt) {
+    const receiptNumber = sanitizeFilenamePart(receipt?.numero || receipt?.id || "recibo");
+    const customer = sanitizeFilenamePart(receipt?.cliente?.razao_social || "cliente");
+    return `recibo_${receiptNumber}_${customer}.pdf`;
 }
 
 function sanitizeFilenamePart(value) {
@@ -3474,6 +6009,15 @@ function sanitizeFilenamePart(value) {
         .toLowerCase() || "arquivo";
 }
 
+function logClientEvent(eventName, payload = {}, level = "info") {
+    const logger = level === "error"
+        ? console.error
+        : level === "warn"
+            ? console.warn
+            : console.info;
+    logger(`[SysPragas] ${eventName}`, payload);
+}
+
 function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -3482,17 +6026,32 @@ function downloadBlob(blob, filename) {
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
+    logClientEvent("document_download", { filename, size_bytes: blob.size || null });
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function openBlobPreview(blob, title, options = {}) {
-    const previewUrl = URL.createObjectURL(blob);
+function openDocumentPreviewShell(title, message = "Preparando documento...") {
     const previewWindow = window.open("", "_blank");
     if (!previewWindow) {
-        window.open(previewUrl, "_blank", "noopener");
+        return null;
+    }
+    renderPreviewWindowState(previewWindow, title, {
+        bodyHtml: `<div class="preview-state preview-state-loading">${escapeHtml(message)}</div>`,
+    });
+    return previewWindow;
+}
+
+function renderDocumentPreviewError(previewWindow, title, message) {
+    if (!previewWindow || previewWindow.closed) {
         return;
     }
-    const printOnLoad = options.printOnLoad ? "true" : "false";
+    renderPreviewWindowState(previewWindow, title, {
+        bodyHtml: `<div class="preview-state preview-state-error">${escapeHtml(message)}</div>`,
+    });
+}
+
+function renderPreviewWindowState(previewWindow, title, options = {}) {
+    previewWindow.document.open();
     previewWindow.document.write(`
         <!doctype html>
         <html lang="pt-BR">
@@ -3501,76 +6060,94 @@ function openBlobPreview(blob, title, options = {}) {
                 <title>${escapeHtml(title)}</title>
                 <style>
                     body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #eef2ea; color: #1e2a22; }
-                    .preview-shell { display: grid; gap: 12px; padding: 16px; }
-                    .preview-note { padding: 12px 14px; background: #ffffff; border-bottom: 1px solid #d7ded1; }
-                    iframe { width: 100%; height: calc(100vh - 86px); border: 0; background: #fff; }
+                    .preview-shell { display: grid; gap: 12px; min-height: 100vh; padding: 16px; }
+                    .preview-note { padding: 12px 14px; background: #ffffff; border-bottom: 1px solid #d7ded1; border-radius: 14px; }
+                    .preview-state { display: grid; place-items: center; min-height: calc(100vh - 120px); padding: 24px; text-align: center; border-radius: 18px; background: rgba(255, 255, 255, 0.92); border: 1px solid #d7ded1; }
+                    .preview-state-loading { color: #2d6a4f; font-weight: 700; }
+                    .preview-state-error { color: #b14534; font-weight: 700; }
+                    iframe { width: 100%; height: calc(100vh - 86px); border: 0; background: #fff; border-radius: 18px; }
                 </style>
             </head>
             <body>
                 <div class="preview-shell">
-                    <div class="preview-note">Documento pronto para visualizacao e impressao.</div>
-                    <iframe id="preview-frame" src="${previewUrl}" title="${escapeHtml(title)}"></iframe>
+                    <div class="preview-note">${escapeHtml(options.note || "Documento pronto para visualizacao e impressao.")}</div>
+                    ${options.bodyHtml || ""}
                 </div>
-                <script>
-                    const frame = document.getElementById('preview-frame');
-                    frame.addEventListener('load', () => {
-                        if (${printOnLoad}) {
-                            setTimeout(() => {
-                                try {
-                                    frame.contentWindow.focus();
-                                    frame.contentWindow.print();
-                                } catch (_) {}
-                            }, 400);
-                        }
-                    });
-                </script>
             </body>
         </html>
     `);
     previewWindow.document.close();
 }
 
+function openBlobPreview(blob, title, options = {}) {
+    const previewUrl = URL.createObjectURL(blob);
+    const previewWindow = options.previewWindow && !options.previewWindow.closed
+        ? options.previewWindow
+        : window.open("", "_blank");
+    if (!previewWindow) {
+        window.open(previewUrl, "_blank", "noopener");
+        return;
+    }
+    const printOnLoad = options.printOnLoad ? "true" : "false";
+    renderPreviewWindowState(previewWindow, title, {
+        bodyHtml: `<iframe id="preview-frame" src="${previewUrl}" title="${escapeHtml(title)}"></iframe>`,
+    });
+    previewWindow.addEventListener("beforeunload", () => URL.revokeObjectURL(previewUrl), { once: true });
+    const frame = previewWindow.document.getElementById("preview-frame");
+    frame?.addEventListener("load", () => {
+        if (options.printOnLoad) {
+            setTimeout(() => {
+                try {
+                    frame.contentWindow.focus();
+                    frame.contentWindow.print();
+                } catch (_) {}
+            }, 400);
+        }
+    });
+    logClientEvent("document_preview_opened", {
+        title,
+        size_bytes: blob.size || null,
+        print_on_load: Boolean(options.printOnLoad),
+    });
+}
+
+async function openReceiptPdf(receiptId, options = {}) {
+    const receipt = getEntityByKind("receipt", Number(receiptId));
+    const blob = await apiFetch(`/api/v1/recibos/${receiptId}/pdf`);
+    if (options.download) {
+        downloadBlob(blob, buildReceiptPdfFilename(receipt));
+        return;
+    }
+    openBlobPreview(blob, `Recibo ${receipt?.numero || receiptId}`, {
+        printOnLoad: Boolean(options.printOnLoad),
+    });
+}
+
 function renderFinance() {
+    if (!userCanAccessFinance()) {
+        return;
+    }
     renderFinanceSummary();
-    setTableContent(
-        "finance-table",
-        ["Tipo", "Descricao", "Categoria", "Valor", "Pago", "Saldo", "Vencimento", "Status", "Acoes"],
-        state.finance.map((item) => {
-            const payButton = item.status !== "pago" && Number(item.saldo_aberto ?? item.valor) > 0
-                ? actionButton(
-                    "pay-finance",
-                    item.tipo === "receita" ? "Receber" : "Pagar",
-                    `data-id="${item.id}" data-open-balance="${item.saldo_aberto ?? item.valor}"`,
-                )
-                : "";
-            const parcelText = Number(item.total_parcelas || 1) > 1 ? `${item.parcela_atual}/${item.total_parcelas}` : "";
-            const actions = item.os_id
-                ? `<div class="toolbar compact-toolbar">
-                    <div class="toolbar-group">
-                        <span class="origin-note">Gerado pela OS ${item.os_id}</span>
-                        ${parcelText ? `<span class="badge">${escapeHtml(parcelText)}</span>` : ""}
-                    </div>
-                    ${payButton ? `<div class="toolbar-group">${payButton}</div>` : ""}
-                </div>`
-                : actionButtons("finance", item.id, payButton);
-            return [
-                badge(item.tipo, item.tipo === "despesa" ? "warn" : ""),
-                `${escapeHtml(item.descricao)}${parcelText ? `<div class="origin-note">Parcela ${escapeHtml(parcelText)}</div>` : ""}`,
-                item.categoria || item.fornecedor_nome || "-",
-                formatCurrency(item.valor),
-                formatCurrency(item.valor_pago || 0),
-                formatCurrency(item.saldo_aberto ?? item.valor),
-                formatDate(item.vencimento),
-                badge(item.status, item.status === "atrasado" ? "danger" : item.status === "pago" ? "" : "warn"),
-                actions,
-            ];
-        }),
-        "Nenhum lancamento financeiro cadastrado.",
-        { nonSortableTargets: [8], pageLength: 6 },
-    );
+    renderFinanceInsights();
+    renderFinanceEntriesTable();
+    renderReceiptsTable();
+    renderNfeInvoices();
+    renderFinanceReportsIssuedInvoices();
+    renderSimplesNationalPanel();
     renderCashLedger();
     bindEntityActions("finance");
+    bindEntityActions("receipt");
+    bindEntityActions("nfe");
+    bindReceiptActions();
+    bindNfeActions();
     bindQuickActions();
+    bindFinanceFilters();
+    bindReceiptFilters();
+    bindNfeFilters();
+    bindSimplesSummaryRefresh();
+    bindSimplesConfigActions();
+    setFinanceWorkspaceView(state.financeScreen || "lancamentos");
+    setNfeTabView(state.nfeTab || "issue");
 }
 
 function renderFinanceSummary() {
@@ -3604,6 +6181,504 @@ function renderCashLedger() {
         "Nenhuma movimentacao registrada no fluxo de caixa.",
         { pageLength: 6 },
     );
+}
+
+function renderFinanceInsights() {
+    const summary = state.cashFlowSummary || {
+        recebido: 0,
+        pendente: 0,
+        vencido: 0,
+        quantidade_recebida: 0,
+        quantidade_pendente: 0,
+        quantidade_vencida: 0,
+    };
+    const cashSummaryHtml = `
+        <div class="finance-insight-grid">
+            <article class="finance-insight-card">
+                <span>Recebido</span>
+                <strong>${formatCurrency(summary.recebido || 0)}</strong>
+                <small>${summary.quantidade_recebida || 0} titulo(s) com baixa</small>
+            </article>
+            <article class="finance-insight-card">
+                <span>Pendente</span>
+                <strong>${formatCurrency(summary.pendente || 0)}</strong>
+                <small>${summary.quantidade_pendente || 0} titulo(s) em aberto</small>
+            </article>
+            <article class="finance-insight-card is-alert">
+                <span>Vencido</span>
+                <strong>${formatCurrency(summary.vencido || 0)}</strong>
+                <small>${summary.quantidade_vencida || 0} titulo(s) vencido(s)</small>
+            </article>
+        </div>
+    `;
+    ["finance-cashflow-summary", "finance-report-cashflow-summary"].forEach((id) => {
+        const summaryTarget = document.getElementById(id);
+        if (summaryTarget) {
+            summaryTarget.innerHTML = cashSummaryHtml;
+        }
+    });
+
+    const nfeSummaryTarget = document.getElementById("finance-nfe-summary");
+    if (nfeSummaryTarget) {
+        const invoices = state.nfeInvoices || [];
+        const emittedInvoices = invoices.filter((item) => item.status === "emitida");
+        const totalEmitted = emittedInvoices.reduce((total, item) => total + Number(item.valor_total || 0), 0);
+        const generatedTitles = invoices.filter((item) => item.finance_entry_id).length;
+        nfeSummaryTarget.innerHTML = `
+            <div class="finance-insight-grid compact">
+                <article class="finance-insight-card">
+                    <span>NF-e emitidas</span>
+                    <strong>${emittedInvoices.length}</strong>
+                    <small>${formatCurrency(totalEmitted)}</small>
+                </article>
+                <article class="finance-insight-card">
+                    <span>Titulos gerados</span>
+                    <strong>${generatedTitles}</strong>
+                    <small>Integracao financeira automatica</small>
+                </article>
+            </div>
+        `;
+    }
+}
+
+function renderFinanceEntriesTable() {
+    setTableContent(
+        "finance-table",
+        ["Tipo", "Descricao", "Origem", "Valor", "Pago", "Saldo", "Vencimento", "Status", "Acoes"],
+        getFilteredFinanceEntries().map((item) => {
+            const payButton = item.status !== "pago" && Number(item.saldo_aberto ?? item.valor) > 0
+                ? actionButton(
+                    "pay-finance",
+                    item.tipo === "receita" ? "Receber" : "Pagar",
+                    `data-id="${item.id}" data-open-balance="${item.saldo_aberto ?? item.valor}"`,
+                )
+                : "";
+            const parcelText = Number(item.total_parcelas || 1) > 1 ? `${item.parcela_atual}/${item.total_parcelas}` : "";
+            const originLabel = item.nfe_id
+                ? `NF-e ${item.nfe_id}`
+                : item.recibo_id
+                    ? `Recibo ${item.recibo_id}`
+                : item.os_id
+                    ? `OS ${item.os_id}`
+                    : item.origem;
+            const actions = item.os_id || item.nfe_id
+                ? `<div class="toolbar compact-toolbar">
+                    <div class="toolbar-group">
+                        <span class="origin-note">Gerado por ${escapeHtml(originLabel)}</span>
+                        ${parcelText ? `<span class="badge">${escapeHtml(parcelText)}</span>` : ""}
+                    </div>
+                    ${payButton ? `<div class="toolbar-group">${payButton}</div>` : ""}
+                </div>`
+                : item.recibo_id
+                    ? `<div class="toolbar compact-toolbar">
+                        <div class="toolbar-group">
+                            <span class="origin-note">Gerado por ${escapeHtml(originLabel)}</span>
+                        </div>
+                    </div>`
+                : actionButtons("finance", item.id, payButton);
+            return [
+                badge(item.tipo, item.tipo === "despesa" ? "warn" : ""),
+                `<div>${escapeHtml(item.descricao)}${parcelText ? `<div class="origin-note">Parcela ${escapeHtml(parcelText)}</div>` : ""}</div>`,
+                item.nfe_id
+                    ? `<div>${escapeHtml(originLabel)}<div class="origin-note">${escapeHtml(item.categoria || "Conta a receber")}</div></div>`
+                    : item.os_id
+                        ? `<div>${escapeHtml(originLabel)}<div class="origin-note">${escapeHtml(item.categoria || "Servico")}</div></div>`
+                        : item.categoria || item.fornecedor_nome || "-",
+                formatCurrency(item.valor),
+                formatCurrency(item.valor_pago || 0),
+                formatCurrency(item.saldo_aberto ?? item.valor),
+                formatDate(item.vencimento),
+                badge(item.status, item.status === "atrasado" ? "danger" : item.status === "pago" ? "" : "warn"),
+                actions,
+            ];
+        }),
+        "Nenhum lancamento financeiro cadastrado.",
+        { nonSortableTargets: [8], pageLength: 6 },
+    );
+}
+
+function renderReceiptsTable() {
+    setTableContent(
+        "receipts-table",
+        ["Numero", "Cliente", "Data", "Forma", "Valor", "OS", "Financeiro", "Acoes"],
+        getFilteredReceipts().map((item) => [
+            `<div><strong>${escapeHtml(item.numero)}</strong><div class="origin-note">${escapeHtml(item.descricao)}</div></div>`,
+            item.cliente?.razao_social || "-",
+            formatDate(item.data_recebimento),
+            badge(item.forma_pagamento.replaceAll("_", " "), ""),
+            formatCurrency(item.valor),
+            item.os_numero || "-",
+            item.finance_entry_id
+                ? `<div>Lancamento #${item.finance_entry_id}<div class="origin-note">Baixa integrada no caixa</div></div>`
+                : "Nao integrado",
+            renderReceiptActionPanel(item),
+        ]),
+        "Nenhum recibo emitido.",
+        { nonSortableTargets: [7], pageLength: 6 },
+    );
+}
+
+function renderReceiptActionPanel(item) {
+    return `
+        <div class="toolbar compact-toolbar">
+            <div class="toolbar-group">
+                <button type="button" class="btn btn-sm ghost-button receipt-preview-action" data-id="${item.id}">Visualizar</button>
+                <button type="button" class="btn btn-sm ghost-button receipt-print-action" data-id="${item.id}">Imprimir</button>
+                <button type="button" class="btn btn-sm ghost-button receipt-pdf-action" data-id="${item.id}">PDF</button>
+            </div>
+            <div class="toolbar-group">
+                <button type="button" class="btn btn-sm ghost-button action-button secondary edit-entity" data-kind="receipt" data-id="${item.id}">Editar</button>
+                <button type="button" class="btn btn-sm ghost-button action-button danger delete-entity" data-kind="receipt" data-id="${item.id}">Excluir</button>
+            </div>
+        </div>
+    `;
+}
+
+function renderNfeInvoices() {
+    setTableContent(
+        "nfe-table",
+        ["Numero", "Cliente", "Emissao", "Vencimento", "Valor", "Financeiro", "Status", "Acoes"],
+        getFilteredNfeInvoices().map((item) => {
+            const financeInfo = item.finance_entry_id
+                ? `<div>Lancamento #${item.finance_entry_id}<div class="origin-note">Consulta cruzada ativa</div></div>`
+                : "Nao gerado";
+            const fiscalStatus = item.status_processamento || item.status;
+            const statusTone = fiscalStatus === "rejeitado" || item.status === "cancelada"
+                ? "danger"
+                : (fiscalStatus === "autorizado" ? "" : "warn");
+            return [
+                item.numero_nfe,
+                item.cliente?.razao_social || "-",
+                formatDate(item.data_emissao),
+                formatDate(item.data_vencimento),
+                formatCurrency(item.valor_total),
+                financeInfo,
+                `
+                    <div class="nfe-status-stack">
+                        ${badge(item.status, item.status === "cancelada" ? "danger" : "")}
+                        ${badge(fiscalStatus, statusTone)}
+                    </div>
+                `,
+                renderNfeActionPanel(item),
+            ];
+        }),
+        "Nenhuma NF-e registrada.",
+        { nonSortableTargets: [7], pageLength: 6 },
+    );
+}
+
+function renderNfeActionPanel(item) {
+    const canCancel = item.status !== "cancelada";
+    const hasPdf = Boolean(item.pdf_url);
+    const hasXml = Boolean(item.xml_url || item.xml_autorizado || item.xml_enviado);
+    return `
+        <div class="nfe-action-panel">
+            <div class="nfe-action-grid">
+                <button type="button" class="btn btn-sm ghost-button action-button secondary nfe-sync-status" data-id="${item.id}">Consultar</button>
+                <button type="button" class="btn btn-sm ghost-button edit-entity" data-kind="nfe" data-id="${item.id}">Editar</button>
+                <button type="button" class="btn btn-sm ghost-button nfe-download-xml" data-id="${item.id}" ${hasXml ? "" : "disabled"}>XML</button>
+                <button type="button" class="btn btn-sm ghost-button nfe-open-pdf" data-id="${item.id}" ${hasPdf ? "" : "disabled"}>DANFE</button>
+                <button type="button" class="btn btn-sm ghost-button action-button danger nfe-cancel" data-id="${item.id}" ${canCancel ? "" : "disabled"}>Cancelar</button>
+            </div>
+        </div>
+    `;
+}
+
+function renderFinanceReportsIssuedInvoices() {
+    const issuedInvoices = state.nfeInvoices
+        .filter((item) => item.status === "emitida")
+        .sort((left, right) => String(right.data_emissao || "").localeCompare(String(left.data_emissao || "")));
+    setTableContent(
+        "finance-reports-nfe-table",
+        ["Numero", "Cliente", "Emissao", "Valor", "Financeiro", "Status fiscal"],
+        issuedInvoices.map((item) => [
+            item.numero_nfe,
+            item.cliente?.razao_social || "-",
+            formatDate(item.data_emissao),
+            formatCurrency(item.valor_total),
+            item.finance_entry_id
+                ? `<div>Lancamento #${item.finance_entry_id}<div class="origin-note">Integrada ao contas a receber</div></div>`
+                : "Nao gerado",
+            badge(item.status_processamento || item.status, item.status_processamento === "rejeitado" ? "danger" : ""),
+        ]),
+        "Nenhuma NF-e emitida encontrada para relatorio.",
+        { pageLength: 6 },
+    );
+}
+
+function bindReceiptActions() {
+    const tableHost = document.getElementById("receipts-table");
+    if (!tableHost || tableHost.dataset.bound === "true") {
+        return;
+    }
+    tableHost.dataset.bound = "true";
+    tableHost.addEventListener("click", async (event) => {
+        const previewButton = event.target.closest(".receipt-preview-action");
+        if (previewButton) {
+            showReceiptPreview(previewButton.dataset.id);
+            return;
+        }
+
+        const printButton = event.target.closest(".receipt-print-action");
+        if (printButton) {
+            try {
+                await openReceiptPdf(printButton.dataset.id, { printOnLoad: true });
+            } catch (error) {
+                toast(error.message);
+            }
+            return;
+        }
+
+        const pdfButton = event.target.closest(".receipt-pdf-action");
+        if (pdfButton) {
+            try {
+                await openReceiptPdf(pdfButton.dataset.id, { download: true });
+                toast("PDF do recibo gerado com sucesso.");
+            } catch (error) {
+                toast(error.message);
+            }
+        }
+    });
+}
+
+function bindNfeActions() {
+    document.querySelectorAll(".nfe-sync-status").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", async () => {
+            try {
+                const invoice = await apiFetch(`/api/v1/nfe/${button.dataset.id}?sync=true`);
+                await loadAllData();
+                state.nfeWorkflow.lastIssuedInvoiceId = invoice.id;
+                state.nfeTab = "issued";
+                renderNfeEmissionWorkspace();
+                renderNfeEmissionFeedback();
+                toast("Status da NF-e atualizado com sucesso.");
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    });
+
+    document.querySelectorAll(".nfe-cancel").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", async () => {
+            if (button.disabled) {
+                return;
+            }
+            const justification = window.prompt("Informe a justificativa do cancelamento da NF-e:", "Cancelamento solicitado pelo emitente.");
+            if (justification === null) {
+                return;
+            }
+            try {
+                const invoice = await apiFetch(`/api/v1/nfe/${button.dataset.id}`, {
+                    method: "DELETE",
+                    body: JSON.stringify({ justificativa: justification.trim() || null }),
+                });
+                state.nfeWorkflow.lastIssuedInvoiceId = invoice.id;
+                state.nfeTab = "issued";
+                await afterMutation("NF-e cancelada com sucesso.");
+                renderNfeEmissionFeedback();
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    });
+
+    document.querySelectorAll(".nfe-download-xml").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", () => {
+            if (button.disabled) {
+                return;
+            }
+            const invoice = getEntityByKind("nfe", Number(button.dataset.id));
+            if (!invoice) {
+                return;
+            }
+            openNfeXml(invoice);
+        });
+    });
+
+    document.querySelectorAll(".nfe-open-pdf").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", () => {
+            if (button.disabled) {
+                return;
+            }
+            const invoice = getEntityByKind("nfe", Number(button.dataset.id));
+            if (!invoice) {
+                return;
+            }
+            openNfePdf(invoice);
+        });
+    });
+}
+
+function openNfeXml(invoice) {
+    if (invoice.xml_url) {
+        window.open(invoice.xml_url, "_blank", "noopener");
+        return;
+    }
+    const xmlContent = invoice.xml_autorizado || invoice.xml_enviado;
+    if (!xmlContent) {
+        toast("Nenhum XML disponivel para esta NF-e.");
+        return;
+    }
+    const blob = new Blob([xmlContent], { type: "application/xml;charset=utf-8" });
+    downloadBlob(blob, buildNfeXmlFilename(invoice));
+}
+
+function openNfePdf(invoice) {
+    if (!invoice.pdf_url) {
+        toast("Nenhum DANFE disponivel para esta NF-e.");
+        return;
+    }
+    window.open(invoice.pdf_url, "_blank", "noopener");
+}
+
+function buildNfeXmlFilename(invoice) {
+    const customer = sanitizeFilenamePart(invoice?.cliente?.razao_social || "cliente");
+    return `nfe_${invoice?.numero_nfe || invoice?.id || "arquivo"}_${customer}.xml`;
+}
+
+function renderSimplesNationalPanel() {
+    const summaryTarget = document.getElementById("simples-summary-card");
+    if (summaryTarget) {
+        const summary = state.simplesSummary || {
+            referencia: state.filters.simplesReferenceMonth || new Date().toISOString().slice(0, 7),
+            faturamento_bruto: 0,
+            aliquota_aplicada: 0,
+            imposto_estimado: 0,
+            notas_emitidas: 0,
+            anexo: "-",
+        };
+        summaryTarget.innerHTML = `
+            <div class="finance-insight-grid compact">
+                <article class="finance-insight-card">
+                    <span>Referencia</span>
+                    <strong>${escapeHtml(summary.referencia || "-")}</strong>
+                    <small>Anexo ${escapeHtml(summary.anexo || "-")}</small>
+                </article>
+                <article class="finance-insight-card">
+                    <span>Faturamento bruto</span>
+                    <strong>${formatCurrency(summary.faturamento_bruto || 0)}</strong>
+                    <small>${summary.notas_emitidas || 0} NF-e emitida(s)</small>
+                </article>
+                <article class="finance-insight-card">
+                    <span>Aliquota aplicada</span>
+                    <strong>${escapeHtml(String(summary.aliquota_aplicada || 0))}%</strong>
+                    <small>Imposto estimado ${formatCurrency(summary.imposto_estimado || 0)}</small>
+                </article>
+            </div>
+        `;
+    }
+
+    const listTarget = document.getElementById("simples-config-list");
+    if (listTarget) {
+        if (!state.simplesConfigs.length) {
+            listTarget.innerHTML = `<div class="empty-state">Nenhuma configuracao do Simples cadastrada.</div>`;
+            return;
+        }
+        listTarget.innerHTML = state.simplesConfigs.map((item) => `
+            <article class="finance-config-card">
+                <div class="finance-config-card-header">
+                    <strong>${escapeHtml(item.anexo || "Sem anexo")} | ${escapeHtml(String(item.aliquota))}%</strong>
+                    ${badge(item.vigente ? "Vigente" : "Historico", item.vigente ? "" : "warn")}
+                </div>
+                <div class="origin-note">Faixa: ${formatCurrency(item.faixa_faturamento_inicio || 0)} ate ${item.faixa_faturamento_fim ? formatCurrency(item.faixa_faturamento_fim) : "sem limite"}</div>
+                <div class="toolbar compact-toolbar">
+                    <div class="toolbar-group">
+                        <button type="button" class="btn btn-sm ghost-button edit-simples-config" data-id="${item.id}">Editar</button>
+                    </div>
+                </div>
+            </article>
+        `).join("");
+
+        listTarget.querySelectorAll(".edit-simples-config").forEach((button) => {
+            button.addEventListener("click", () => startEditingSimplesConfig(Number(button.dataset.id)));
+        });
+    }
+}
+
+function getFilteredFinanceEntries() {
+    const search = (state.filters.financeSearch || "").trim().toLowerCase();
+    const status = state.filters.financeStatus || "todos";
+    const customerId = state.filters.financeCustomer || "";
+    const startDate = state.filters.financeStartDate || "";
+    const endDate = state.filters.financeEndDate || "";
+    return state.finance.filter((item) => {
+        const customerMatches = !customerId || String(item.cliente_id || "") === String(customerId);
+        const statusMatches = status === "todos" || item.status === status;
+        const dueDate = item.vencimento || "";
+        const startMatches = !startDate || dueDate >= startDate;
+        const endMatches = !endDate || dueDate <= endDate;
+        const searchMatches = !search || [
+            item.descricao,
+            item.referencia,
+            item.categoria,
+            item.fornecedor_nome,
+            item.nfe_id ? `nfe ${item.nfe_id}` : "",
+        ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(search);
+        return customerMatches && statusMatches && startMatches && endMatches && searchMatches;
+    });
+}
+
+function getFilteredNfeInvoices() {
+    const search = (state.filters.nfeSearch || "").trim().toLowerCase();
+    const status = state.filters.nfeStatus || "todos";
+    const customerId = state.filters.nfeCustomer || "";
+    return state.nfeInvoices.filter((item) => {
+        const statusMatches = status === "todos" || item.status === status;
+        const customerMatches = !customerId || String(item.cliente_id || "") === String(customerId);
+        const searchMatches = !search || [
+            item.numero_nfe,
+            item.cliente?.razao_social,
+            item.finance_entry_id ? String(item.finance_entry_id) : "",
+        ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase()
+            .includes(search);
+        return statusMatches && customerMatches && searchMatches;
+    });
+}
+
+function startEditingSimplesConfig(configId) {
+    const form = document.getElementById("simples-config-form");
+    const config = state.simplesConfigs.find((item) => item.id === configId);
+    if (!form || !config) {
+        return;
+    }
+    openFinanceView("relatorios");
+    fillForm(form, {
+        faixa_faturamento_inicio: config.faixa_faturamento_inicio,
+        faixa_faturamento_fim: config.faixa_faturamento_fim || "",
+        aliquota: config.aliquota,
+        anexo: config.anexo || "",
+        vigente: String(config.vigente),
+        observacoes: config.observacoes || "",
+    });
+    form.dataset.editingId = String(config.id);
+    const note = document.getElementById("simples-config-mode-note");
+    if (note) {
+        note.classList.remove("hidden");
+        note.textContent = `Editando configuracao #${config.id}.`;
+    }
 }
 
 function renderProviderCompanies() {
@@ -3989,22 +7064,40 @@ function bindQuickActions() {
             }
         });
     });
+
+    document.querySelectorAll(".reopen-work-order").forEach((button) => {
+        if (button.dataset.quickActionBound === "true") {
+            return;
+        }
+        button.dataset.quickActionBound = "true";
+        button.addEventListener("click", async () => {
+            try {
+                await apiFetch(`/api/v1/os/${button.dataset.id}/reabrir`, { method: "POST" });
+                await afterMutation("Ordem de servico reaberta com sucesso.");
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    });
+
+    document.querySelectorAll(".reprint-work-order").forEach((button) => {
+        if (button.dataset.quickActionBound === "true") {
+            return;
+        }
+        button.dataset.quickActionBound = "true";
+        button.addEventListener("click", async () => {
+            try {
+                await print_order(button.dataset.id);
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    });
 }
 
 function getEntityByKind(kind, id) {
-    const sourceMap = {
-        customer: state.customers,
-        product: state.products,
-        pest: state.pests,
-        technician: state.technicians,
-        finance: state.finance,
-        workOrder: state.workOrders,
-        appointment: state.appointments,
-        providerCompany: state.providerCompanies,
-        user: state.users,
-        license: state.licenses,
-    };
-    return sourceMap[kind].find((item) => item.id === id) || null;
+    const collection = getEntityCollectionByKind(kind);
+    return collection?.find((item) => item.id === id) || null;
 }
 
 function syncEditingModes() {
@@ -4034,6 +7127,12 @@ function startEditing(kind, id) {
         fillForm(form, { ...item, ativo: String(item.ativo) });
         return;
     }
+    if (kind === "product") {
+        fillForm(form, { ...item, override_tributacao: String(item.override_tributacao) });
+        syncProductTaxFields();
+        hideNcmLiveResults();
+        return;
+    }
     if (kind === "providerCompany") {
         fillForm(form, item);
         Array.from(form.querySelector('[name="usuarios_vinculados_ids"]').options).forEach((option) => {
@@ -4044,6 +7143,7 @@ function startEditing(kind, id) {
         return;
     }
     if (kind === "finance") {
+        openFinanceView("lancamentos");
         fillForm(form, {
             ...item,
             cliente_id: item.cliente_id || "",
@@ -4053,6 +7153,28 @@ function startEditing(kind, id) {
             observacoes: item.observacoes || "",
             total_parcelas: item.total_parcelas || 1,
         });
+        return;
+    }
+    if (kind === "receipt") {
+        openFinanceView("recibos");
+        fillReceiptForm(item);
+        return;
+    }
+    if (kind === "nfe") {
+        clearNfeEmissionFeedback();
+        state.nfeTab = "issue";
+        openFinanceView("nfe");
+        fillForm(form, {
+            ...item,
+            cliente_id: item.cliente_id || "",
+            gerar_financeiro: item.finance_entry_id ? "true" : "false",
+            observacoes: item.observacoes || "",
+            natureza_operacao: "Venda",
+            ambiente: item.ambiente || "homologacao",
+            referencia_externa: item.referencia_externa || "",
+        });
+        fillNfeItemRowsFromInvoice(item);
+        renderNfeEmissionWorkspace();
         return;
     }
     if (kind === "user") {
@@ -4070,14 +7192,13 @@ function startEditing(kind, id) {
         return;
     }
     if (kind === "appointment") {
-        switchView("agenda");
+        openAppointmentView("new");
         fillAppointmentForm(item);
         return;
     }
     if (kind === "workOrder") {
         clearWorkOrderSaveFeedback();
-        switchView("ordens");
-        setWorkOrderWorkspaceView("new");
+        openWorkOrderView("new");
         fillWorkOrderForm(item);
         return;
     }
@@ -4098,11 +7219,29 @@ function resetFormMode(kind) {
     if (kind === "workOrder") {
         clearWorkOrderForm();
         if (wasEditing) {
-            setWorkOrderWorkspaceView("registered");
+            openWorkOrderView("registered");
         }
+    }
+    if (kind === "nfe") {
+        clearNfeEmissionFeedback();
+        const list = document.getElementById("nfe-items-list");
+        if (list) {
+            list.innerHTML = "";
+        }
+        ensureNfeItemRows();
+        renderNfeEmissionWorkspace();
     }
     if (kind === "appointment") {
         clearAppointmentForm();
+        if (wasEditing) {
+            openAppointmentView("operational");
+        }
+    }
+    if (kind === "receipt") {
+        clearReceiptForm();
+        if (wasEditing) {
+            openFinanceView("recibos");
+        }
     }
     if (kind === "providerCompany") {
         state.providerCompanyTab = "dados";
@@ -4116,6 +7255,11 @@ function resetFormMode(kind) {
     if (kind === "user") {
         form.querySelector('[name="password"]').required = true;
     }
+    if (kind === "product") {
+        syncProductTaxFields();
+        updateProductTaxSourceNote("Sem NCM vinculado. Informe um NCM para preencher automaticamente as aliquotas.");
+        hideNcmLiveResults();
+    }
 }
 
 function formIdForKind(kind) {
@@ -4125,6 +7269,8 @@ function formIdForKind(kind) {
         pest: "pest-form",
         technician: "technician-form",
         finance: "finance-form",
+        receipt: "receipt-form",
+        nfe: "nfe-form",
         workOrder: "work-order-form",
         appointment: "appointment-form",
         providerCompany: "provider-company-form",
@@ -4140,6 +7286,8 @@ function saveLabelForKind(kind) {
         pest: "Salvar praga",
         technician: "Salvar tecnico",
         finance: "Salvar lancamento",
+        receipt: "Salvar recibo",
+        nfe: state.sefazReadiness?.provider === "sefaz_direct" ? "Emitir NF-e" : "Salvar NF-e",
         workOrder: "Salvar ordem de servico",
         appointment: "Salvar agendamento",
         providerCompany: "Salvar empresa",
@@ -4152,6 +7300,10 @@ function fillForm(form, data) {
     Object.entries(data).forEach(([key, value]) => {
         const field = form.querySelector(`[name="${key}"]`);
         if (field) {
+            if (field.type === "checkbox") {
+                field.checked = Boolean(value);
+                return;
+            }
             field.value = value ?? "";
         }
     });
@@ -4202,6 +7354,24 @@ function fillWorkOrderForm(item) {
     renderWorkOrderFormHeader();
 }
 
+function fillReceiptForm(item) {
+    const form = document.getElementById("receipt-form");
+    fillForm(form, {
+        cliente_id: String(item.cliente_id),
+        os_id: item.os_id ? String(item.os_id) : "",
+        data_recebimento: item.data_recebimento,
+        valor: item.valor,
+        forma_pagamento: item.forma_pagamento,
+        descricao: item.descricao || "",
+    });
+    syncReceiptWorkOrderOptions();
+    if (item.os_id) {
+        form.querySelector('[name="os_id"]').value = String(item.os_id);
+    }
+    state.receiptPreview = item;
+    renderReceiptPreview(item);
+}
+
 function fillAppointmentForm(item) {
     const form = document.getElementById("appointment-form");
     fillForm(form, {
@@ -4215,6 +7385,7 @@ function fillAppointmentForm(item) {
         status: item.status,
         origem: item.origem,
         sincronizar_google: item.sincronizar_google ? "true" : "false",
+        enviar_whatsapp: true,
         observacoes: item.observacoes || "",
         observacoes_internas: item.observacoes_internas || "",
         instrucoes_tecnicas: item.instrucoes_tecnicas || "",
@@ -4228,24 +7399,58 @@ function fillAppointmentForm(item) {
     renderAppointmentFormHeader();
 }
 
+function fillNfeItemRowsFromInvoice(item) {
+    const list = document.getElementById("nfe-items-list");
+    if (!list) {
+        return;
+    }
+    list.innerHTML = "";
+    let payload = null;
+    try {
+        payload = item?.payload_enviado ? JSON.parse(item.payload_enviado) : null;
+    } catch {
+        payload = null;
+    }
+    const items = Array.isArray(payload?.itens) ? payload.itens : [];
+    if (!items.length) {
+        addNfeItemRow({
+            descricao: item?.observacoes ? `Servico referente a ${item.numero_nfe}` : "",
+            quantidade: "1",
+            valor_unitario: item?.valor_total || "",
+            ncm: "",
+        });
+        renderNfeEmissionWorkspace();
+        return;
+    }
+    items.forEach((entry) => addNfeItemRow(entry));
+    renderNfeEmissionWorkspace();
+}
+
 function renderWorkOrderFormHeader() {
     const title = document.getElementById("work-order-form-title");
     const description = document.getElementById("work-order-form-description");
+    const numberDisplay = document.getElementById("work-order-number-display");
     if (!title || !description) {
         return;
     }
 
     if (state.editing.workOrder) {
         const current = getEntityByKind("workOrder", state.editing.workOrder);
-        title.textContent = "Edit Order Service";
+        if (numberDisplay) {
+            numberDisplay.textContent = current?.numero || "Numero indisponivel";
+        }
+        title.textContent = "Editar ordem de servico";
         description.textContent = current
             ? `Atualize a OS ${current.numero}, revise itens, status e anexos antes de salvar as alteracoes.`
             : "Atualize os dados operacionais, itens aplicados e fotos vinculadas a esta ordem de servico.";
         return;
     }
 
-    title.textContent = "New Order Service";
-    description.textContent = "Preencha os dados operacionais, produtos aplicados, status e anexos da ordem de servico.";
+    if (numberDisplay) {
+        numberDisplay.textContent = "Sera gerado automaticamente ao salvar";
+    }
+    title.textContent = "Nova ordem de servico";
+    description.textContent = "Preencha os dados operacionais, produtos aplicados, status e anexos. O numero da OS sera gerado automaticamente em sequencia.";
 }
 
 function renderAppointmentFormHeader() {
@@ -4275,6 +7480,8 @@ async function deleteEntity(kind, id) {
         pest: "/api/v1/pragas",
         technician: "/api/v1/tecnicos",
         finance: "/api/v1/financeiro",
+        receipt: "/api/v1/recibos",
+        nfe: "/api/v1/nfe",
         workOrder: "/api/v1/os",
         providerCompany: "/api/v1/empresas-prestadoras",
         user: "/api/v1/usuarios",

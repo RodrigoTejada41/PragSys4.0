@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
+from app.core.logging import configure_logging
 from app.infrastructure.db import init_db
 from app.interfaces.api.routes import (
     appointments,
@@ -19,14 +20,18 @@ from app.interfaces.api.routes import (
     pests,
     products,
     provider_companies,
+    receipts,
+    settings as system_settings,
     technicians,
     users,
+    whatsapp,
     work_orders,
 )
 from app.modules.sefaz_nfe import routes as sefaz_nfe_routes
 from app.interfaces.web.routes import STATIC_DIR, router as web_router
 
 settings = get_settings()
+configure_logging()
 
 
 @asynccontextmanager
@@ -35,8 +40,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="3.2.5", lifespan=lifespan)
-init_db()
+app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
 
 @app.exception_handler(BusinessRuleViolation)
@@ -59,6 +63,7 @@ app.include_router(customers.router, prefix=settings.api_v1_prefix)
 app.include_router(products.router, prefix=settings.api_v1_prefix)
 app.include_router(pests.router, prefix=settings.api_v1_prefix)
 app.include_router(technicians.router, prefix=settings.api_v1_prefix)
+app.include_router(receipts.router, prefix=settings.api_v1_prefix)
 app.include_router(finance.router, prefix=settings.api_v1_prefix)
 app.include_router(fiscal.router, prefix=settings.api_v1_prefix)
 app.include_router(nfe.router, prefix=settings.api_v1_prefix)
@@ -66,6 +71,8 @@ app.include_router(sefaz_nfe_routes.router, prefix=settings.api_v1_prefix)
 app.include_router(work_orders.router, prefix=settings.api_v1_prefix)
 app.include_router(appointments.router, prefix=settings.api_v1_prefix)
 app.include_router(google_calendar.router, prefix=settings.api_v1_prefix)
+app.include_router(whatsapp.router, prefix=settings.api_v1_prefix)
+app.include_router(system_settings.router, prefix=settings.api_v1_prefix)
 app.include_router(users.router, prefix=settings.api_v1_prefix)
 app.include_router(licenses.router, prefix=settings.api_v1_prefix)
 app.include_router(provider_companies.router, prefix=settings.api_v1_prefix)

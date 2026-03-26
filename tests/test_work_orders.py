@@ -89,7 +89,7 @@ def test_create_work_order_decrements_stock_and_generates_finance(client, auth_h
 
     assert os_response.status_code == 200
     data = os_response.json()
-    assert data["numero"] == "OS-1001"
+    assert data["numero"].startswith("OS-")
     assert data["cliente"]["razao_social"] == "Mercado Central"
     assert Decimal(data["produtos"][0]["quantidade"]) == Decimal("2.50")
 
@@ -170,6 +170,204 @@ def test_create_work_order_requires_stock(client, auth_headers):
 
     assert os_response.status_code == 400
     assert "Estoque insuficiente" in os_response.json()["detail"]
+
+
+def test_create_open_work_order_allows_empty_products(client, auth_headers):
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Sem Produto",
+            "cpf_cnpj": "88888888000100",
+            "endereco": "Rua Sem Produto, 10",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11955550000",
+            "contato": "Patricia",
+        },
+    ).json()
+
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Cadastro Inicial",
+            "registro": "TEC-SEM-PROD",
+            "telefone": "11944440000",
+            "ativo": True,
+        },
+    ).json()
+
+    os_response = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "numero": "OS-SEM-PRODUTO",
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": "2026-03-20",
+            "hora_inicio": "10:00:00",
+            "local_execucao": "Area externa",
+            "garantia_ate": "2026-04-20",
+            "status": "aberta",
+            "valor_servico": "120.00",
+            "produtos": [],
+            "pragas_ids": [],
+            "gerar_financeiro": True,
+            "gerar_agendamento": False,
+        },
+    )
+
+    assert os_response.status_code == 200
+    data = os_response.json()
+    assert data["numero"].startswith("OS-")
+    assert data["produtos"] == []
+
+    financeiro_response = client.get("/api/v1/financeiro", headers=auth_headers)
+    assert financeiro_response.status_code == 200
+    assert len(financeiro_response.json()) == 1
+    assert Decimal(financeiro_response.json()[0]["valor"]) == Decimal("120.00")
+
+
+def test_reopen_work_order_reopens_linked_appointment(client, auth_headers):
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Reabertura",
+            "cpf_cnpj": "88811111000100",
+            "endereco": "Rua Reabertura, 30",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11944445555",
+            "contato": "Camila",
+        },
+    ).json()
+
+    produto = client.post(
+        "/api/v1/produtos",
+        headers=auth_headers,
+        json={
+            "nome": "Produto Reabertura",
+            "principio_ativo": "Permetrina",
+            "grupo_quimico": "Piretroide",
+            "toxicidade": "Moderada",
+            "concentracao": "5%",
+            "registro_ms": "MS-REABRIR",
+            "estoque_atual": "10.00",
+            "estoque_minimo": "1.00",
+        },
+    ).json()
+
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Reabertura",
+            "registro": "TEC-REABRIR",
+            "telefone": "11933334444",
+            "ativo": True,
+        },
+    ).json()
+
+    os_response = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "numero": "OS-REABRIR",
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": "2026-03-20",
+            "hora_inicio": "08:00:00",
+            "hora_fim": "09:00:00",
+            "local_execucao": "Deposito",
+            "observacoes": "Fluxo de reabertura",
+            "garantia_ate": "2026-04-20",
+            "status": "aberta",
+            "valor_servico": "300.00",
+            "produtos": [
+                {
+                    "produto_id": produto["id"],
+                    "quantidade": "1.00",
+                    "diluicao": "1:10",
+                }
+            ],
+            "pragas_ids": [],
+            "gerar_financeiro": False,
+            "gerar_agendamento": True,
+            "tipo_servico_agendamento": "Servico recorrente",
+            "duracao_prevista_minutos": 60,
+            "sincronizar_google_agenda": False,
+        },
+    )
+
+    assert os_response.status_code == 200
+    work_order = os_response.json()
+
+    complete_response = client.post(f"/api/v1/os/{work_order['id']}/efetuar", headers=auth_headers)
+    assert complete_response.status_code == 200
+    assert complete_response.json()["status"] == "concluida"
+
+    reopen_response = client.post(f"/api/v1/os/{work_order['id']}/reabrir", headers=auth_headers)
+    assert reopen_response.status_code == 200
+    reopened = reopen_response.json()
+    assert reopened["status"] == "aberta"
+
+    appointments_response = client.get("/api/v1/agendamentos", headers=auth_headers)
+    assert appointments_response.status_code == 200
+    linked = [item for item in appointments_response.json() if item["os_id"] == work_order["id"]]
+    assert len(linked) == 1
+    assert linked[0]["status"] == "pendente"
+
+
+def test_create_in_progress_work_order_requires_products(client, auth_headers):
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Status Sem Produto",
+            "cpf_cnpj": "77777777000100",
+            "endereco": "Rua Status, 20",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11933330000",
+            "contato": "Marcos",
+        },
+    ).json()
+
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Status",
+            "registro": "TEC-STATUS",
+            "telefone": "11922220000",
+            "ativo": True,
+        },
+    ).json()
+
+    os_response = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={
+            "numero": "OS-STATUS-SEM-PROD",
+            "cliente_id": cliente["id"],
+            "tecnico_id": tecnico["id"],
+            "data_execucao": "2026-03-20",
+            "hora_inicio": "11:00:00",
+            "local_execucao": "Area tecnica",
+            "garantia_ate": "2026-04-20",
+            "status": "em_execucao",
+            "valor_servico": "120.00",
+            "produtos": [],
+            "pragas_ids": [],
+            "gerar_financeiro": False,
+            "gerar_agendamento": False,
+        },
+    )
+
+    assert os_response.status_code == 400
+    assert "ao menos um produto" in os_response.json()["detail"].lower()
 
 
 def test_create_work_order_rejects_duplicate_products(client, auth_headers):
@@ -492,3 +690,95 @@ def test_work_order_allows_photo_upload_and_removal(client, auth_headers):
     )
     assert delete_response.status_code == 200
     assert delete_response.json()["fotos"] == []
+
+
+def test_work_order_number_is_generated_sequentially_and_cannot_be_edited(client, auth_headers):
+    cliente = client.post(
+        "/api/v1/clientes",
+        headers=auth_headers,
+        json={
+            "razao_social": "Cliente Sequencial",
+            "cpf_cnpj": "31313131000100",
+            "endereco": "Rua Sequencial, 10",
+            "cidade": "Sao Paulo",
+            "estado": "SP",
+            "telefone": "11911110000",
+            "contato": "Rita",
+        },
+    ).json()
+
+    produto = client.post(
+        "/api/v1/produtos",
+        headers=auth_headers,
+        json={
+            "nome": "Produto Sequencial",
+            "principio_ativo": "Permetrina",
+            "grupo_quimico": "Piretroide",
+            "toxicidade": "Moderada",
+            "concentracao": "5%",
+            "registro_ms": "MS-SEQUENCIAL",
+            "estoque_atual": "10.00",
+            "estoque_minimo": "1.00",
+        },
+    ).json()
+
+    tecnico = client.post(
+        "/api/v1/tecnicos",
+        headers=auth_headers,
+        json={
+            "nome": "Tecnico Sequencial",
+            "registro": "TEC-SEQUENCIAL",
+            "telefone": "11911112222",
+            "ativo": True,
+        },
+    ).json()
+
+    base_payload = {
+        "cliente_id": cliente["id"],
+        "tecnico_id": tecnico["id"],
+        "data_execucao": "2026-03-20",
+        "hora_inicio": "08:00:00",
+        "hora_fim": "09:00:00",
+        "local_execucao": "Area 1",
+        "garantia_ate": "2026-04-20",
+        "status": "aberta",
+        "valor_servico": "100.00",
+        "produtos": [{"produto_id": produto["id"], "quantidade": "1.00", "diluicao": "1:10"}],
+        "pragas_ids": [],
+        "gerar_financeiro": False,
+        "gerar_agendamento": False,
+    }
+
+    first_response = client.post("/api/v1/os", headers=auth_headers, json={**base_payload, "numero": "MANUAL-IGNORADO-1"})
+    second_response = client.post(
+        "/api/v1/os",
+        headers=auth_headers,
+        json={**base_payload, "numero": "MANUAL-IGNORADO-2", "hora_inicio": "10:00:00", "hora_fim": "11:00:00"},
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+
+    first = first_response.json()
+    second = second_response.json()
+    assert first["numero"].startswith(f"OS-{date.today().year}-")
+    assert second["numero"].startswith(f"OS-{date.today().year}-")
+    assert first["numero"] != "MANUAL-IGNORADO-1"
+    assert second["numero"] != "MANUAL-IGNORADO-2"
+
+    first_seq = int(first["numero"].rsplit("-", 1)[1])
+    second_seq = int(second["numero"].rsplit("-", 1)[1])
+    assert second_seq == first_seq + 1
+
+    updated = client.put(
+        f"/api/v1/os/{first['id']}",
+        headers=auth_headers,
+        json={
+            **base_payload,
+            "numero": "TENTATIVA-DE-ALTERAR",
+            "local_execucao": "Area editada",
+        },
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["numero"] == first["numero"]

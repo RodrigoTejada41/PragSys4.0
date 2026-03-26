@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.application.schemas import (
     AppointmentCreate,
     AppointmentDashboardRead,
+    GoogleCalendarAppointmentSyncRead,
     AppointmentRead,
     AppointmentStatusUpdate,
     AppointmentUpdate,
@@ -15,10 +16,11 @@ from app.application.scheduling_services import (
     get_appointment,
     get_appointment_dashboard,
     list_appointments,
-    sync_appointment_google_event,
+    reopen_appointment,
     update_appointment,
     update_appointment_status,
 )
+from app.application.google_calendar_service import sync_appointment_with_google_or_request_oauth
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
 from app.interfaces.api.deps import require_roles
@@ -99,12 +101,26 @@ def post_appointment_status(
 
 
 @router.post(
-    "/{appointment_id}/sync-google",
+    "/{appointment_id}/reabrir",
     response_model=AppointmentRead,
+)
+def post_appointment_reopen(
+    appointment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> AppointmentRead:
+    return reopen_appointment(db, appointment_id, current_user_id=current_user.id)
+
+
+@router.post(
+    "/{appointment_id}/sync-google",
+    response_model=GoogleCalendarAppointmentSyncRead,
 )
 def post_appointment_google_sync(
     appointment_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(["master", "admin", "operador"])),
-) -> AppointmentRead:
-    return sync_appointment_google_event(db, appointment_id, current_user_id=current_user.id)
+) -> GoogleCalendarAppointmentSyncRead:
+    return GoogleCalendarAppointmentSyncRead(
+        **sync_appointment_with_google_or_request_oauth(db, appointment_id, current_user.id)
+    )

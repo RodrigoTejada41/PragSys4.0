@@ -1,3 +1,17 @@
+import shutil
+from pathlib import Path
+from types import SimpleNamespace
+
+from app.core.config import get_settings
+from app.application.certificate_assets import resolve_certificate_model_path, resolve_technical_signature_path
+from app.application.services import (
+    _build_framed_sanitary_certificate_text,
+    _build_standard_sanitary_certificate_text,
+    _build_standard_sanitary_declaration,
+    _classify_food_risk_environment,
+)
+
+
 def _create_base_work_order(client, auth_headers):
     cliente = client.post(
         "/api/v1/clientes",
@@ -80,16 +94,156 @@ def _create_base_work_order(client, auth_headers):
 def test_all_work_order_documents_are_generated(client, auth_headers):
     work_order = _create_base_work_order(client, auth_headers)
 
-    endpoints = [
-        f"/api/v1/os/{work_order['id']}/pdf",
-        f"/api/v1/os/{work_order['id']}/relatorio-tecnico.pdf",
-        f"/api/v1/os/{work_order['id']}/certificado-sanitario.pdf",
-        f"/api/v1/os/{work_order['id']}/certificado-moldura.pdf",
-    ]
+    endpoints = {
+        f"/api/v1/os/{work_order['id']}/pdf": f'inline; filename="os-{work_order["id"]}.pdf"',
+        f"/api/v1/os/{work_order['id']}/relatorio-tecnico.pdf": f'inline; filename="relatorio-tecnico-{work_order["id"]}.pdf"',
+        f"/api/v1/os/{work_order['id']}/certificado-sanitario.pdf": f'inline; filename="certificado-sanitario-{work_order["id"]}.pdf"',
+        f"/api/v1/os/{work_order['id']}/certificado-garantia.pdf": 'inline; filename="certificado_industria_delta.pdf"',
+        f"/api/v1/os/{work_order['id']}/certificado-moldura.pdf": f'inline; filename="certificado-moldura-{work_order["id"]}.pdf"',
+    }
 
-    for endpoint in endpoints:
+    for endpoint, expected_disposition in endpoints.items():
         response = client.get(endpoint, headers=auth_headers)
         assert response.status_code == 200
         assert response.headers["content-type"] == "application/pdf"
+        assert response.headers["content-disposition"] == expected_disposition
         assert response.content.startswith(b"%PDF")
         assert len(response.content) > 1200
+
+
+def test_framed_certificate_text_covers_food_risk_compliance_language():
+    work_order = SimpleNamespace(
+        cliente=SimpleNamespace(razao_social="Industria Delta"),
+        local_execucao="Armazem de alimentos e doca de expedicao",
+        observacoes="Fluxo logistico com armazenamento e circulacao de alimentos embalados.",
+    )
+
+    risk_environment = _classify_food_risk_environment(work_order)
+    certificate_text = _build_framed_sanitary_certificate_text(work_order)
+
+    assert "armazenagem e logistica de alimentos" in risk_environment
+    assert "RDC 622/2022" in certificate_text
+    assert "RDC 216/2004" in certificate_text
+    assert "RDC 275/2002" in certificate_text
+    assert "controle de vetores e pragas urbanas" in certificate_text
+    assert "seguranca dos alimentos" in certificate_text
+    assert "controle de contaminacao" in certificate_text
+    assert "minimizacao de riscos a saude" in certificate_text
+    assert "seguranca ambiental" in certificate_text
+
+
+def test_standard_certificate_text_covers_food_risk_compliance_language():
+    work_order = SimpleNamespace(
+        cliente=SimpleNamespace(razao_social="Industria Delta"),
+        local_execucao="Area de manipulacao e estoque de alimentos",
+        observacoes="Recebimento, fracionamento e armazenamento de alimentos embalados.",
+    )
+
+    certificate_text = _build_standard_sanitary_certificate_text(work_order)
+    declaration = _build_standard_sanitary_declaration(work_order)
+
+    assert "RDC 622/2022" in certificate_text
+    assert "controle de vetores e pragas urbanas" in certificate_text
+    assert "seguranca dos alimentos" in certificate_text
+    assert "controle de contaminacao" in certificate_text
+    assert "minimizacao de riscos a saude" in certificate_text
+    assert "RDC 216/2004" in declaration
+    assert "RDC 275/2002" in declaration
+    assert "boas praticas sanitarias" in declaration
+    assert "seguranca ambiental" in declaration
+
+
+def test_certificate_generation_keeps_working_when_signature_is_missing(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("TECHNICAL_SIGNATURES_DIR", "test_assets/assinaturas_vazias")
+    monkeypatch.setenv("CERTIFICATE_MODELS_DIR", "test_assets/modelos")
+    get_settings.cache_clear()
+
+    work_order = _create_base_work_order(client, auth_headers)
+    response = client.get(f"/api/v1/os/{work_order['id']}/certificado-sanitario.pdf", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+    get_settings.cache_clear()
+
+
+def test_certificate_generation_falls_back_when_template_is_missing(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("CERTIFICATE_MODELS_DIR", "test_assets/modelos_vazios")
+    get_settings.cache_clear()
+
+    work_order = _create_base_work_order(client, auth_headers)
+    response = client.get(f"/api/v1/os/{work_order['id']}/certificado-moldura.pdf", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+    get_settings.cache_clear()
+
+
+def test_guarantee_certificate_is_generated_from_visual_template(client, auth_headers):
+    work_order = _create_base_work_order(client, auth_headers)
+    response = client.get(f"/api/v1/os/{work_order['id']}/certificado-garantia.pdf", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-disposition"] == 'inline; filename="certificado_industria_delta.pdf"'
+    assert response.content.startswith(b"%PDF")
+
+
+def test_certificate_model_path_reflects_file_creation_and_removal(monkeypatch):
+    root_dir = Path("tmp/test_document_asset_runtime/model_path")
+    if root_dir.exists():
+        shutil.rmtree(root_dir)
+    models_dir = root_dir / "modelos"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("CERTIFICATE_MODELS_DIR", str(models_dir))
+    monkeypatch.setenv("TECHNICAL_SIGNATURES_DIR", str(root_dir / "assinaturas"))
+    get_settings.cache_clear()
+
+    try:
+        assert resolve_certificate_model_path() is None
+
+        created_file = (models_dir / "certificado_moldura_oficial.png").resolve()
+        created_file.write_bytes(b"model-v1")
+        assert resolve_certificate_model_path() == created_file
+
+        created_file.unlink()
+        assert resolve_certificate_model_path() is None
+    finally:
+        get_settings.cache_clear()
+        if root_dir.exists():
+            shutil.rmtree(root_dir)
+
+
+def test_technical_signature_path_reflects_replacement_and_removal(monkeypatch):
+    root_dir = Path("tmp/test_document_asset_runtime/signature_path")
+    if root_dir.exists():
+        shutil.rmtree(root_dir)
+    signatures_dir = root_dir / "assinaturas"
+    signatures_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("TECHNICAL_SIGNATURES_DIR", str(signatures_dir))
+    monkeypatch.setenv("CERTIFICATE_MODELS_DIR", str(root_dir / "modelos"))
+    get_settings.cache_clear()
+
+    try:
+        technician = SimpleNamespace(id=7, registro="TEC-77", nome="Tecnico Cache")
+        signature_file = (signatures_dir / "tec_77.png").resolve()
+
+        assert resolve_technical_signature_path(technician) is None
+
+        signature_file.write_bytes(b"signature-v1")
+        first_resolved = resolve_technical_signature_path(technician)
+        assert first_resolved == signature_file
+        assert first_resolved.read_bytes() == b"signature-v1"
+
+        signature_file.write_bytes(b"signature-v2")
+        replaced_resolved = resolve_technical_signature_path(technician)
+        assert replaced_resolved == signature_file
+        assert replaced_resolved.read_bytes() == b"signature-v2"
+
+        signature_file.unlink()
+        assert resolve_technical_signature_path(technician) is None
+    finally:
+        get_settings.cache_clear()
+        if root_dir.exists():
+            shutil.rmtree(root_dir)

@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import jwt
 
@@ -10,17 +10,19 @@ from app.core.config import get_settings
 
 
 def get_password_hash(password: str) -> str:
+    settings = get_settings()
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac(
         "sha256",
         password.encode("utf-8"),
         salt.encode("utf-8"),
-        100_000,
+        settings.password_hash_iterations,
     )
     return f"{salt}${digest.hex()}"
 
 
 def verify_password(password: str, hashed_password: str) -> bool:
+    settings = get_settings()
     try:
         salt, expected_hash = hashed_password.split("$", 1)
     except ValueError:
@@ -30,12 +32,12 @@ def verify_password(password: str, hashed_password: str) -> bool:
         "sha256",
         password.encode("utf-8"),
         salt.encode("utf-8"),
-        100_000,
+        settings.password_hash_iterations,
     ).hex()
     return hmac.compare_digest(digest, expected_hash)
 
 
-def create_access_token(subject: str, role: str) -> str:
+def create_access_token(subject: str, role: str, company_id: Optional[int] = None) -> str:
     settings = get_settings()
     expire = datetime.now(timezone.utc) + timedelta(
         minutes=settings.access_token_expire_minutes
@@ -45,6 +47,8 @@ def create_access_token(subject: str, role: str) -> str:
         "role": role,
         "exp": expire,
     }
+    if company_id is not None:
+        payload["company_id"] = company_id
     return jwt.encode(
         payload,
         settings.jwt_secret,
