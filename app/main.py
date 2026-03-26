@@ -7,10 +7,12 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
 from app.core.logging import configure_logging
+from app.application.contract_scheduler import contract_scheduler
 from app.infrastructure.db import init_db
 from app.interfaces.api.routes import (
     appointments,
     auth,
+    contracts,
     customers,
     fiscal,
     finance,
@@ -37,7 +39,9 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    contract_scheduler.start()
     yield
+    contract_scheduler.stop()
 
 
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
@@ -59,6 +63,7 @@ def health() -> dict:
 
 
 app.include_router(auth.router, prefix=settings.api_v1_prefix)
+app.include_router(contracts.router, prefix=settings.api_v1_prefix)
 app.include_router(customers.router, prefix=settings.api_v1_prefix)
 app.include_router(products.router, prefix=settings.api_v1_prefix)
 app.include_router(pests.router, prefix=settings.api_v1_prefix)

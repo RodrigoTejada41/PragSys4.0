@@ -63,6 +63,16 @@ class Settings(BaseSettings):
     whatsapp_connect_api_url: Optional[str] = None
     whatsapp_logout_api_url: Optional[str] = None
     whatsapp_timeout_seconds: float = 15.0
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
+    smtp_sender_email: Optional[str] = None
+    smtp_sender_name: Optional[str] = None
+    contract_scheduler_enabled: bool = True
+    contract_scheduler_poll_seconds: int = 3600
     ncm_external_source_url: Optional[str] = None
     ncm_external_source_token: Optional[str] = None
     focus_nfe_api_base_url: Optional[str] = None

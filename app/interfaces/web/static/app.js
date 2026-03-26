@@ -2,6 +2,8 @@ const state = {
     token: localStorage.getItem("syspragas_token") || "",
     user: null,
     customers: [],
+    contracts: [],
+    contractDashboard: null,
     products: [],
     nfeInvoices: [],
     simplesConfigs: [],
@@ -28,6 +30,9 @@ const state = {
     licenses: [],
     providerCompanies: [],
     providerCompanyTab: "dados",
+    contractWorkspace: {
+        customerId: null,
+    },
     workOrderScreen: "new",
     financeScreen: "lancamentos",
     nfeTab: "issue",
@@ -51,6 +56,7 @@ const state = {
     },
     editing: {
         customer: null,
+        contract: null,
         product: null,
         pest: null,
         technician: null,
@@ -529,6 +535,8 @@ async function loadAllData() {
     setSyncStatus("Sincronizando...");
     const basePromises = [
         apiFetch("/api/v1/clientes"),
+        apiFetch("/api/v1/contratos"),
+        apiFetch("/api/v1/contratos/dashboard"),
         apiFetch("/api/v1/produtos"),
         apiFetch("/api/v1/pragas"),
         apiFetch("/api/v1/tecnicos"),
@@ -569,20 +577,22 @@ async function loadAllData() {
         basePromises.push(apiFetch("/api/v1/whatsapp/configuracao"));
     }
     const results = await Promise.all(basePromises);
-    const [customers, products, pests, technicians, workOrders, appointments, appointmentDashboard, whatsappStatus, googleStatus] = results;
-    const finance = canAccessFinance ? results[9] : [];
-    const cashLedger = canAccessFinance ? results[10] : [];
-    const financeDashboard = canAccessFinance ? results[11] : null;
-    const receipts = canAccessFinance ? results[12] : [];
-    const nfeInvoices = canAccessFinance ? results[13] : [];
-    const sefazReadiness = canAccessFinance ? results[14] : null;
-    const simplesConfigs = canAccessFinance ? results[15] : [];
-    const cashFlowSummary = canAccessFinance ? results[16] : null;
-    const simplesSummary = canAccessFinance ? results[17] : null;
-    const settingsState = canAccessSettings ? results[18] : null;
-    const whatsappConfig = canAccessSettings ? results[19] : null;
+    const [customers, contracts, contractDashboard, products, pests, technicians, workOrders, appointments, appointmentDashboard, whatsappStatus, googleStatus] = results;
+    const finance = canAccessFinance ? results[11] : [];
+    const cashLedger = canAccessFinance ? results[12] : [];
+    const financeDashboard = canAccessFinance ? results[13] : null;
+    const receipts = canAccessFinance ? results[14] : [];
+    const nfeInvoices = canAccessFinance ? results[15] : [];
+    const sefazReadiness = canAccessFinance ? results[16] : null;
+    const simplesConfigs = canAccessFinance ? results[17] : [];
+    const cashFlowSummary = canAccessFinance ? results[18] : null;
+    const simplesSummary = canAccessFinance ? results[19] : null;
+    const settingsState = canAccessSettings ? results[20] : null;
+    const whatsappConfig = canAccessSettings ? results[21] : null;
 
     state.customers = customers;
+    state.contracts = contracts;
+    state.contractDashboard = contractDashboard;
     state.products = products;
     state.pests = pests;
     state.technicians = technicians;
@@ -784,6 +794,7 @@ function renderSettings() {
     const multiempresaBadge = settingsState.system.multiempresa_enabled ? "Ativo" : "Unificado";
     const operationModeLabel = settingsState.system.operation_mode === "rede" ? "Rede interna" : "Local";
     const notificationsLabel = settingsState.system.notifications_enabled ? "Ativas" : "Desativadas";
+    const contractNotificationsLabel = settingsState.contracts.email_enabled ? "Email ativo" : "Email desativado";
     const googleLabel = formatIntegrationStatus(google.status || "desconectado");
     const whatsappLabel = formatIntegrationStatus(whatsapp.status || "desconectado");
     const whatsappEnabledInSettings = Boolean(settingsState.integrations.whatsapp_enabled);
@@ -797,6 +808,7 @@ function renderSettings() {
             ${settingsSummaryCard("Google Agenda", googleLabel, googleMeta)}
             ${settingsSummaryCard("WhatsApp", whatsappLabel, whatsappMeta)}
             ${settingsSummaryCard("Notificacoes", notificationsLabel, settingsState.system.notifications_enabled ? "Avisos operacionais seguem habilitados." : "Avisos operacionais desabilitados." )}
+            ${settingsSummaryCard("Contratos", contractNotificationsLabel, `${settingsState.contracts.alert_days} dias de antecedencia e armazenamento em ${settingsState.contracts.storage_dir}.`)}
             ${settingsSummaryCard("Usuarios ativos", String(state.users.length || 0), isMaster ? "Leitura da administracao global disponivel neste perfil." : "Use a area de usuarios com perfil master para governanca completa.")}
         </div>
     `;
@@ -818,6 +830,24 @@ function renderSettings() {
                 <span>Mensagem padrao do WhatsApp</span>
                 <textarea name="whatsapp_default_message" rows="4" placeholder="Mensagem automatica de agendamento">${escapeHtml(settingsState.integrations.whatsapp_default_message || "")}</textarea>
             </label>
+        </section>
+        <section class="settings-form-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Contratos</p>
+                <h4>Vigencia, alertas e armazenamento</h4>
+                <p>Defina a antecedencia do alerta, o envio de e-mail e o diretorio de arquivos dos contratos.</p>
+            </div>
+            <div class="settings-field-grid two-columns">
+                ${toggleField("contract_email_enabled", "Enviar e-mail automaticamente", "Dispara notificacoes para clientes com contrato a vencer ou vencido.", settingsState.contracts.email_enabled)}
+                <label>
+                    <span>Dias de antecedencia</span>
+                    <input name="contract_alert_days" type="number" min="1" max="365" value="${escapeHtml(String(settingsState.contracts.alert_days || 15))}">
+                </label>
+                <label class="full-width">
+                    <span>Diretorio de armazenamento</span>
+                    <input name="contract_storage_dir" value="${escapeHtml(settingsState.contracts.storage_dir || "uploads/contratos")}">
+                </label>
+            </div>
         </section>
         <section class="settings-form-section">
             <div class="section-heading compact">
@@ -999,6 +1029,11 @@ function getSystemSettingsPayload(form) {
             whatsapp_auto_send: form.querySelector('[name="whatsapp_auto_send"]').checked,
             whatsapp_default_message: form.querySelector('[name="whatsapp_default_message"]').value.trim(),
         },
+        contracts: {
+            alert_days: Number(form.querySelector('[name="contract_alert_days"]').value || 15),
+            email_enabled: form.querySelector('[name="contract_email_enabled"]').checked,
+            storage_dir: form.querySelector('[name="contract_storage_dir"]').value.trim(),
+        },
         system: {
             multiempresa_enabled: form.querySelector('[name="multiempresa_enabled"]').checked,
             operation_mode: form.querySelector('[name="operation_mode"]').value,
@@ -1065,6 +1100,7 @@ function buildForms() {
         <div class="form-grid">
             <label><span>Razao social</span><input name="razao_social" required></label>
             <label><span>CPF/CNPJ</span><input name="cpf_cnpj" required></label>
+            <label><span>E-mail</span><input name="email" type="email" placeholder="cliente@empresa.com"></label>
             <div class="inline-actions compact-actions full-width">
                 <button type="button" class="btn btn-default ghost-button" id="customer-cnpj-lookup">Buscar por CNPJ</button>
             </div>
@@ -1082,6 +1118,25 @@ function buildForms() {
             <label class="full-width"><span>Contato</span><input name="contato" required></label>
         </div>
         ${formActionHtml("customer", "Salvar cliente", "Cancelar edicao")}
+    `;
+
+    document.getElementById("contract-form").innerHTML = `
+        <div class="section-heading compact">
+            <h3>Novo contrato</h3>
+            <p>Cadastre descricao, periodo, observacoes e o arquivo vinculado ao cliente selecionado.</p>
+        </div>
+        <div class="form-grid">
+            <label class="full-width"><span>Cliente selecionado</span><input name="cliente_nome" readonly placeholder="Selecione um cliente na tabela acima"></label>
+            <label class="full-width"><span>Nome ou descricao do contrato</span><input name="nome" required></label>
+            <label><span>Data de inicio</span><input name="data_inicio" type="date" required></label>
+            <label><span>Data de vencimento</span><input name="data_vencimento" type="date" required></label>
+            <label class="full-width"><span>Arquivo do contrato</span><input name="arquivo" type="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.txt"></label>
+            <label class="full-width"><span>Observacoes</span><textarea name="observacoes" rows="4" placeholder="Observacoes internas ou contexto da vigencia"></textarea></label>
+        </div>
+        <div class="contract-file-actions">
+            <span class="origin-note" id="contract-file-note">Anexe PDF, DOC, DOCX, imagem ou TXT ate 10 MB.</span>
+        </div>
+        ${formActionHtml("contract", "Salvar contrato", "Cancelar edicao")}
     `;
 
     document.getElementById("product-form").innerHTML = `
@@ -2384,6 +2439,7 @@ async function lookupCustomerByCnpj() {
         fillForm(form, {
             razao_social: result.razao_social || "",
             contato: result.nome_fantasia || result.razao_social || "",
+            email: result.email || "",
             telefone: result.telefone || "",
             cep: formatCep(result.cep || ""),
             endereco: result.endereco || "",
@@ -2430,10 +2486,37 @@ function bindCrudForms() {
     bindForm("customer-form", "customer", async (form) => {
         const payload = objectFromForm(form);
         payload.cep = digitsOnly(payload.cep || "") || null;
+        payload.email = payload.email || null;
         payload.numero = payload.numero || null;
         payload.complemento = payload.complemento || null;
         payload.bairro = payload.bairro || null;
         await submitCrud("customer", "/api/v1/clientes", payload);
+    });
+
+    bindForm("contract-form", "contract", async (form) => {
+        const customerId = Number(state.contractWorkspace.customerId || 0);
+        if (!customerId) {
+            throw new Error("Selecione um cliente antes de salvar um contrato.");
+        }
+        const formData = new FormData();
+        formData.append("nome", form.querySelector('[name="nome"]').value);
+        formData.append("data_inicio", form.querySelector('[name="data_inicio"]').value);
+        formData.append("data_vencimento", form.querySelector('[name="data_vencimento"]').value);
+        formData.append("observacoes", form.querySelector('[name="observacoes"]').value || "");
+        const fileField = form.querySelector('[name="arquivo"]');
+        if (fileField?.files?.[0]) {
+            formData.append("arquivo", fileField.files[0]);
+        }
+
+        const id = state.editing.contract;
+        const endpoint = id ? `/api/v1/contratos/${id}` : `/api/v1/clientes/${customerId}/contratos`;
+        const method = id ? "PUT" : "POST";
+        const result = await apiFetch(endpoint, { method, body: formData });
+        resetFormMode("contract");
+        await afterMutation(id ? "Contrato atualizado com sucesso." : "Contrato salvo com sucesso.", {
+            kind: "contract",
+            entity: result,
+        });
     });
 
     bindForm("product-form", "product", async (form) => {
@@ -2636,6 +2719,7 @@ async function submitCrud(kind, baseUrl, payload) {
 function getEntityCollectionByKind(kind) {
     const sourceMap = {
         customer: state.customers,
+        contract: state.contracts,
         product: state.products,
         pest: state.pests,
         technician: state.technicians,
@@ -4452,9 +4536,11 @@ function renderDashboard() {
     const filteredOrders = getFilteredWorkOrders();
     const filteredStock = getFilteredProductsForDashboard();
     const filteredFinance = getFilteredFinance();
+    const contractDashboard = state.contractDashboard || { a_vencer: 0, vencidos: 0, a_vencer_alertas: [], vencidos_alertas: [] };
 
     document.getElementById("metrics-grid").innerHTML = [
         metric("Clientes", state.customers.length, "Base operacional ativa"),
+        metric("Contratos", state.contracts.length, "Contratos monitorados por cliente"),
         metric("Produtos", filteredStock.length, "Produtos visiveis no filtro"),
         metric("Ordens", filteredOrders.length, "Ordens encontradas"),
         metric("Financeiro", filteredFinance.length, "Lancamentos no radar"),
@@ -4504,6 +4590,27 @@ function renderDashboard() {
         "Nenhum lancamento financeiro encontrado para os filtros atuais.",
         { pageLength: 4 },
     );
+
+    const contractAlerts = [
+        ...(contractDashboard.vencidos_alertas || []).map((item) => ({ ...item, visualStatus: "danger" })),
+        ...(contractDashboard.a_vencer_alertas || []).map((item) => ({ ...item, visualStatus: "warn" })),
+    ];
+    document.getElementById("contract-alerts").innerHTML = contractAlerts.length
+        ? `<div class="alert-list">${contractAlerts
+            .slice(0, 8)
+            .map(
+                (item) => `
+            <div class="alert-item">
+                <div>
+                    <strong>${escapeHtml(item.nome)}</strong>
+                    <span class="origin-note">${escapeHtml(item.cliente_nome)} • vence em ${formatDate(item.data_vencimento)}</span>
+                </div>
+                <span class="badge ${item.visualStatus}">${item.status === "vencido" ? "Vencido" : `A vencer (${item.dias_para_vencimento}d)`}</span>
+            </div>
+        `,
+            )
+            .join("")}</div>`
+        : `<div class="empty-state">Nenhum contrato em alerta no momento.</div>`;
 
     renderDashboardWidgets(filteredOrders, filteredStock, filteredFinance);
     renderDashboardCharts(filteredOrders, filteredFinance);
@@ -5333,7 +5440,7 @@ function getFilteredFinance() {
 function renderCustomers() {
     setTableContent(
         "customers-table",
-        ["Razao social", "Documento", "Cidade", "CEP", "Contato", "Telefone", "Acoes"],
+        ["Razao social", "Documento", "Cidade", "CEP", "Contato", "Telefone", "E-mail", "Acoes"],
         state.customers.map((item) => [
             item.razao_social,
             item.cpf_cnpj,
@@ -5341,12 +5448,162 @@ function renderCustomers() {
             item.cep ? formatCep(item.cep) : "-",
             item.contato,
             item.telefone,
-            actionButtons("customer", item.id),
+            item.email || "-",
+            actionButtons(
+                "customer",
+                item.id,
+                actionButton("secondary customer-contracts-button", "Contratos", `data-customer-id="${item.id}"`),
+            ),
         ]),
         "Nenhum cliente cadastrado.",
-        { nonSortableTargets: [6] },
+        { nonSortableTargets: [7] },
     );
     bindEntityActions("customer");
+    bindCustomerContractSelectors();
+    renderCustomerContractsWorkspace();
+}
+
+function bindCustomerContractSelectors() {
+    document.querySelectorAll(".customer-contracts-button").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", () => {
+            state.contractWorkspace.customerId = Number(button.dataset.customerId);
+            state.editing.contract = null;
+            resetFormMode("contract");
+            renderCustomerContractsWorkspace();
+        });
+    });
+}
+
+function currentContractCustomer() {
+    return getEntityByKind("customer", Number(state.contractWorkspace.customerId || 0));
+}
+
+function currentCustomerContracts() {
+    const customerId = Number(state.contractWorkspace.customerId || 0);
+    return state.contracts.filter((item) => item.cliente_id === customerId);
+}
+
+function contractStatusBadge(status) {
+    if (status === "vencido") {
+        return badge("Vencido", "danger");
+    }
+    if (status === "a_vencer") {
+        return badge("A vencer", "warn");
+    }
+    return badge("Ativo", "");
+}
+
+function renderCustomerContractsWorkspace() {
+    const summary = document.getElementById("customer-contracts-summary");
+    const table = document.getElementById("customer-contracts-table");
+    const form = document.getElementById("contract-form");
+    const headingCopy = document.getElementById("customer-contracts-heading-copy");
+    if (!summary || !table || !form || !headingCopy) {
+        return;
+    }
+
+    const customer = currentContractCustomer();
+    if (!customer) {
+        summary.innerHTML = `<div class="empty-state">Selecione um cliente na tabela para liberar a gestao de contratos.</div>`;
+        table.innerHTML = `<div class="empty-state">Nenhum cliente selecionado.</div>`;
+        fillForm(form, { cliente_nome: "" });
+        headingCopy.textContent = "Selecione um cliente na tabela para cadastrar, consultar e acompanhar contratos vinculados.";
+        return;
+    }
+
+    const items = currentCustomerContracts();
+    const overdueCount = items.filter((item) => item.status === "vencido").length;
+    const dueSoonCount = items.filter((item) => item.status === "a_vencer").length;
+    const activeCount = items.filter((item) => item.status === "ativo").length;
+    headingCopy.textContent = `Cliente selecionado: ${customer.razao_social}. Cadastre novos contratos ou acompanhe os existentes abaixo.`;
+    fillForm(form, { cliente_nome: customer.razao_social });
+
+    summary.innerHTML = `
+        <div class="contract-summary-grid">
+            <article class="contract-summary-card">
+                <span>Total</span>
+                <strong>${items.length}</strong>
+                <p class="origin-note">${escapeHtml(customer.email || "Cliente sem e-mail cadastrado")}</p>
+            </article>
+            <article class="contract-summary-card">
+                <span>Ativos</span>
+                <strong>${activeCount}</strong>
+                <p class="origin-note">Contratos vigentes fora da janela de alerta.</p>
+            </article>
+            <article class="contract-summary-card is-warn">
+                <span>A vencer</span>
+                <strong>${dueSoonCount}</strong>
+                <p class="origin-note">Dentro da janela configurada para notificacao.</p>
+            </article>
+            <article class="contract-summary-card is-danger">
+                <span>Vencidos</span>
+                <strong>${overdueCount}</strong>
+                <p class="origin-note">Exigem renovacao ou regularizacao.</p>
+            </article>
+        </div>
+    `;
+
+    setTableContent(
+        "customer-contracts-table",
+        ["Contrato", "Inicio", "Vencimento", "Status", "Arquivo", "Acoes"],
+        items.map((item) => [
+            `<div>${escapeHtml(item.nome)}<div class="origin-note">${escapeHtml(item.observacoes || "")}</div></div>`,
+            formatDate(item.data_inicio),
+            formatDate(item.data_vencimento),
+            contractStatusBadge(item.status),
+            item.arquivo_nome_original ? escapeHtml(item.arquivo_nome_original) : "-",
+            actionButtons(
+                "contract",
+                item.id,
+                [
+                    actionButton("secondary view-contract-file", "Visualizar", `data-id="${item.id}" ${item.arquivo_disponivel ? "" : "disabled"}`),
+                    actionButton("secondary download-contract-file", "Baixar", `data-id="${item.id}" ${item.arquivo_disponivel ? "" : "disabled"}`),
+                ].join(""),
+            ),
+        ]),
+        "Nenhum contrato cadastrado para este cliente.",
+        { nonSortableTargets: [5] },
+    );
+    bindEntityActions("contract");
+    bindContractFileActions();
+}
+
+function bindContractFileActions() {
+    document.querySelectorAll(".view-contract-file").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", async () => {
+            try {
+                const blob = await apiFetch(`/api/v1/contratos/${button.dataset.id}/arquivo`);
+                const contract = getEntityByKind("contract", Number(button.dataset.id));
+                openBlobPreview(blob, contract?.arquivo_nome_original || `contrato-${button.dataset.id}`);
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    });
+
+    document.querySelectorAll(".download-contract-file").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", async () => {
+            try {
+                const blob = await apiFetch(`/api/v1/contratos/${button.dataset.id}/arquivo?download=true`);
+                const contract = getEntityByKind("contract", Number(button.dataset.id));
+                downloadBlob(blob, contract?.arquivo_nome_original || `contrato-${button.dataset.id}`);
+            } catch (error) {
+                toast(error.message);
+            }
+        });
+    });
 }
 
 function renderProducts() {
@@ -6883,6 +7140,7 @@ function badge(label, tone) {
 function renderDashboardWidgets(filteredOrders, filteredStock, filteredFinance) {
     const openOrders = filteredOrders.filter((item) => item.status === "aberta" || item.status === "em_execucao").length;
     const completedOrders = filteredOrders.filter((item) => item.status === "concluida").length;
+    const contractDashboard = state.contractDashboard || { a_vencer: 0, vencidos: 0 };
     const pendingFinance = state.financeDashboard
         ? Number(state.financeDashboard.total_a_receber || 0)
         : filteredFinance
@@ -6894,6 +7152,8 @@ function renderDashboardWidgets(filteredOrders, filteredStock, filteredFinance) 
     setText("widget-completed-orders", String(completedOrders));
     setText("widget-pending-finance", formatCurrency(pendingFinance));
     setText("widget-critical-stock", String(criticalStock));
+    setText("widget-contracts-due-soon", String(contractDashboard.a_vencer || 0));
+    setText("widget-contracts-overdue", String(contractDashboard.vencidos || 0));
 }
 
 function renderDashboardCharts(filteredOrders, filteredFinance) {
@@ -7148,6 +7408,25 @@ function startEditing(kind, id) {
         fillForm(form, { ...item, ativo: String(item.ativo) });
         return;
     }
+    if (kind === "contract") {
+        state.contractWorkspace.customerId = item.cliente_id;
+        switchView("clientes");
+        fillForm(form, {
+            cliente_nome: item.cliente_nome || "",
+            nome: item.nome,
+            data_inicio: item.data_inicio,
+            data_vencimento: item.data_vencimento,
+            observacoes: item.observacoes || "",
+        });
+        const fileNote = document.getElementById("contract-file-note");
+        if (fileNote) {
+            fileNote.textContent = item.arquivo_nome_original
+                ? `Arquivo atual: ${item.arquivo_nome_original}. Envie um novo arquivo apenas se quiser substituir o existente.`
+                : "Nenhum arquivo anexado. Anexe PDF, DOC, DOCX, imagem ou TXT ate 10 MB.";
+        }
+        renderCustomerContractsWorkspace();
+        return;
+    }
     if (kind === "product") {
         fillForm(form, { ...item, override_tributacao: String(item.override_tributacao) });
         syncProductTaxFields();
@@ -7237,6 +7516,14 @@ function resetFormMode(kind) {
     const note = form.querySelector(`[data-mode-note="${kind}"]`);
     note.classList.add("hidden");
     note.textContent = "";
+    if (kind === "contract") {
+        const customer = getEntityByKind("customer", Number(state.contractWorkspace.customerId || 0));
+        fillForm(form, { cliente_nome: customer?.razao_social || "" });
+        const fileNote = document.getElementById("contract-file-note");
+        if (fileNote) {
+            fileNote.textContent = "Anexe PDF, DOC, DOCX, imagem ou TXT ate 10 MB.";
+        }
+    }
     if (kind === "workOrder") {
         clearWorkOrderForm();
         if (wasEditing) {
@@ -7286,6 +7573,7 @@ function resetFormMode(kind) {
 function formIdForKind(kind) {
     return {
         customer: "customer-form",
+        contract: "contract-form",
         product: "product-form",
         pest: "pest-form",
         technician: "technician-form",
@@ -7303,6 +7591,7 @@ function formIdForKind(kind) {
 function saveLabelForKind(kind) {
     return {
         customer: "Salvar cliente",
+        contract: "Salvar contrato",
         product: "Salvar produto",
         pest: "Salvar praga",
         technician: "Salvar tecnico",
@@ -7497,6 +7786,7 @@ function renderAppointmentFormHeader() {
 async function deleteEntity(kind, id) {
     const endpointMap = {
         customer: "/api/v1/clientes",
+        contract: "/api/v1/contratos",
         product: "/api/v1/produtos",
         pest: "/api/v1/pragas",
         technician: "/api/v1/tecnicos",

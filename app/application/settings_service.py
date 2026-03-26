@@ -4,6 +4,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.application.schemas import (
+    SettingsContractsRead,
     SettingsEnvironmentRead,
     SettingsIntegrationsRead,
     SettingsSystemRead,
@@ -20,6 +21,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "whatsapp_enabled": False,
     "whatsapp_auto_send": True,
     "whatsapp_default_message": "Ola {nome_cliente}, tudo bem?\n\nSeu agendamento foi confirmado com sucesso!\n\nData: {data}\nHora: {hora}\nTecnico: {tecnico}\nServico: {servico}\n\nQualquer duvida estamos a disposicao.",
+    "contract_alert_days": 15,
+    "contract_email_enabled": False,
+    "contract_storage_dir": "uploads/contratos",
     "multiempresa_enabled": True,
     "operation_mode": "local",
     "notifications_enabled": True,
@@ -85,11 +89,21 @@ def update_system_settings(db: Session, payload: SystemSettingsUpdate, current_u
     updates: dict[str, Any] = {}
     if payload.integrations:
         updates.update({key: value for key, value in payload.integrations.model_dump().items() if value is not None})
+    if payload.contracts:
+        updates.update(
+            {
+                f"contract_{key}": value
+                for key, value in payload.contracts.model_dump().items()
+                if value is not None
+            }
+        )
     if payload.system:
         updates.update({key: value for key, value in payload.system.model_dump().items() if value is not None})
 
     if "operation_mode" in updates and updates["operation_mode"] not in {"local", "rede"}:
         raise BusinessRuleViolation("O modo de operacao deve ser 'local' ou 'rede'.")
+    if "contract_storage_dir" in updates and not str(updates["contract_storage_dir"]).strip():
+        raise BusinessRuleViolation("O diretorio de contratos nao pode ficar vazio.")
 
     for key, value in updates.items():
         set_setting_value(db, key, value, updated_by_user_id=current_user.id)
@@ -107,6 +121,11 @@ def get_system_settings(db: Session) -> SystemSettingsRead:
             whatsapp_enabled=get_boolean_setting(db, "whatsapp_enabled", fallback=settings.whatsapp_enabled),
             whatsapp_auto_send=get_boolean_setting(db, "whatsapp_auto_send", fallback=True),
             whatsapp_default_message=str(get_setting_value(db, "whatsapp_default_message", DEFAULT_SETTINGS["whatsapp_default_message"])),
+        ),
+        contracts=SettingsContractsRead(
+            alert_days=int(get_setting_value(db, "contract_alert_days", DEFAULT_SETTINGS["contract_alert_days"])),
+            email_enabled=get_boolean_setting(db, "contract_email_enabled", fallback=False),
+            storage_dir=str(get_setting_value(db, "contract_storage_dir", DEFAULT_SETTINGS["contract_storage_dir"])),
         ),
         system=SettingsSystemRead(
             multiempresa_enabled=get_boolean_setting(db, "multiempresa_enabled", fallback=True),

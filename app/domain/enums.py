@@ -47,6 +47,12 @@ class LicenseStatus(str, Enum):
     SUSPENSA = "suspensa"
 
 
+class ContractStatus(str, Enum):
+    ATIVO = "ativo"
+    VENCIDO = "vencido"
+    A_VENCER = "a_vencer"
+
+
 class AppointmentStatus(str, Enum):
     PENDENTE = "pendente"
     CONFIRMADO = "confirmado"

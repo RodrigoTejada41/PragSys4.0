@@ -44,6 +44,7 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert response.status_code == 200
     payload = response.json()
     assert "integrations" in payload
+    assert "contracts" in payload
     assert "system" in payload
     assert payload["system"]["operation_mode"] in {"local", "rede"}
 
@@ -56,6 +57,11 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
                 "whatsapp_enabled": False,
                 "whatsapp_auto_send": False,
                 "whatsapp_default_message": "Agendamento atualizado automaticamente.",
+            },
+            "contracts": {
+                "alert_days": 30,
+                "email_enabled": True,
+                "storage_dir": "uploads/contratos-teste",
             },
             "system": {
                 "multiempresa_enabled": False,
@@ -72,6 +78,9 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert updated["integrations"]["whatsapp_enabled"] is False
     assert updated["integrations"]["whatsapp_auto_send"] is False
     assert updated["integrations"]["whatsapp_default_message"] == "Agendamento atualizado automaticamente."
+    assert updated["contracts"]["alert_days"] == 30
+    assert updated["contracts"]["email_enabled"] is True
+    assert updated["contracts"]["storage_dir"] == "uploads/contratos-teste"
     assert updated["system"]["multiempresa_enabled"] is False
     assert updated["system"]["operation_mode"] == "rede"
     assert updated["system"]["notifications_enabled"] is False

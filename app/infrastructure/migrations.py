@@ -399,12 +399,67 @@ def _migration_20260326_001_performance_indexes(engine: Engine) -> None:
     _create_index_if_missing(engine, "os_pragas", "ix_os_pragas_praga_id", ["praga_id"])
 
 
+def _migration_20260326_002_contracts_module(engine: Engine) -> None:
+    _add_column_if_missing(engine, "clientes", "email", "email VARCHAR(150)")
+    _create_index_if_missing(engine, "clientes", "ix_clientes_email", ["email"])
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS contratos (
+                    id INTEGER PRIMARY KEY,
+                    cliente_id INTEGER NOT NULL,
+                    nome VARCHAR(180) NOT NULL,
+                    data_inicio DATE NOT NULL,
+                    data_vencimento DATE NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'ativo',
+                    observacoes TEXT,
+                    arquivo_nome_original VARCHAR(255),
+                    arquivo_nome_armazenado VARCHAR(255) UNIQUE,
+                    arquivo_content_type VARCHAR(120),
+                    arquivo_tamanho INTEGER,
+                    arquivo_caminho VARCHAR(500),
+                    last_notification_status VARCHAR(20),
+                    last_notification_sent_at DATETIME,
+                    last_notification_error TEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    empresa_prestadora_id INTEGER
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE contratos
+                SET empresa_prestadora_id = (
+                    SELECT clientes.empresa_prestadora_id
+                    FROM clientes
+                    WHERE clientes.id = contratos.cliente_id
+                )
+                WHERE empresa_prestadora_id IS NULL
+                """
+            )
+        )
+
+    _create_index_if_missing(engine, "contratos", "ix_contratos_cliente_id", ["cliente_id"])
+    _create_index_if_missing(engine, "contratos", "ix_contratos_status", ["status"])
+    _create_index_if_missing(engine, "contratos", "ix_contratos_data_vencimento", ["data_vencimento"])
+    _create_index_if_missing(engine, "contratos", "ix_contratos_empresa_prestadora_id", ["empresa_prestadora_id"])
+    _create_index_if_missing(engine, "contratos", "ix_contratos_last_notification_status", ["last_notification_status"])
+    _create_index_if_missing(engine, "contratos", "ix_contratos_cliente_status", ["cliente_id", "status"])
+    _create_index_if_missing(engine, "contratos", "ix_contratos_status_vencimento", ["status", "data_vencimento"])
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
     ("20260325_002_system_settings", _migration_20260325_002_system_settings),
     ("20260325_003_whatsapp_template_refresh", _migration_20260325_003_whatsapp_template_refresh),
     ("20260326_001_performance_indexes", _migration_20260326_001_performance_indexes),
+    ("20260326_002_contracts_module", _migration_20260326_002_contracts_module),
 ]
 
 

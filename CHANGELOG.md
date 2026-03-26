@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.1.1] - 2026-03-26
+
+- Modulo de contratos integrado ao cadastro de clientes com entidade propria, relacionamento `1:N`, status automatico e dashboard de alertas.
+- Cadastro de clientes passou a suportar `email` opcional para habilitar notificacoes contratuais sem quebrar compatibilidade com registros existentes.
+- Upload, visualizacao, download e substituicao de arquivos contratuais adicionados com armazenamento local configuravel e validacao de tipo/tamanho.
+- Configuracoes dinamicas passaram a incluir antecedencia do alerta contratual, chave de envio automatico por e-mail e diretorio de armazenamento.
+- Rotina automatica diaria de contratos adicionada no `lifespan` da aplicacao para recalculo de status e disparo de notificacoes SMTP.
+- API expandida com endpoints de contratos globais, contratos por cliente, dashboard contratual, arquivo e rotina administrativa de sincronizacao.
+- Interface web de clientes ganhou area dedicada para contratos, com selecao por cliente, resumo operacional e acoes de arquivo.
+- Dashboard passou a destacar contratos a vencer e vencidos no radar operacional.
+- Documentacao tecnica adicionada para o modulo em `docs/contracts-module.md` e referencias funcionais/API atualizadas.
+- Suite validada apos a entrega com `84 passed in 46.98s`.
+
 ## [4.1.0] - 2026-03-26
 
 - Versionamento elevado para `4.1.0` em `pyproject.toml`, configuracao da aplicacao e `.env.example`.

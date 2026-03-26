@@ -146,6 +146,7 @@ def _normalize_company_payload(payload: ProviderCompanyCreate) -> dict:
 def _normalize_customer_payload(payload) -> dict:
     data = payload.model_dump()
     data["cpf_cnpj"] = _normalize_cnpj(data.get("cpf_cnpj"))
+    data["email"] = (data.get("email") or "").strip().lower() or None
     data["cep"] = _normalize_cep(data.get("cep"))
     data["estado"] = data.get("estado", "").upper()
     return data

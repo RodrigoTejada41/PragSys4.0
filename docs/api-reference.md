@@ -32,12 +32,33 @@ Responsabilidade:
 ### Clientes
 
 - `GET /clientes`
-- `GET /clientes/{id}`
 - `GET /clientes/consultar-cnpj/{cnpj}`
 - `GET /clientes/consultar-cep/{cep}`
 - `POST /clientes`
 - `PUT /clientes/{id}`
 - `DELETE /clientes/{id}`
+
+Observacoes:
+
+- payload do cliente agora aceita `email` opcional.
+
+### Contratos
+
+- `GET /contratos`
+- `GET /contratos/dashboard`
+- `GET /contratos/{id}`
+- `PUT /contratos/{id}`
+- `DELETE /contratos/{id}`
+- `GET /contratos/{id}/arquivo`
+- `POST /contratos/rotina/sincronizar`
+- `GET /clientes/{customer_id}/contratos`
+- `POST /clientes/{customer_id}/contratos`
+
+Observacoes:
+
+- criacao e edicao de contratos usam `multipart/form-data`;
+- o arquivo do contrato e opcional;
+- downloads e visualizacao retornam binario com `Content-Disposition` apropriado.
 
 ### Empresas prestadoras
 

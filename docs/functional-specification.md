@@ -36,7 +36,18 @@ O SysPragas e um sistema operacional para empresas de controle de pragas com foc
 
 - CRUD completo;
 - consulta auxiliar de CNPJ e CEP por servico externo;
+- suporte a e-mail opcional para comunicacoes automatizadas;
 - uso como entidade central para OS e financeiro.
+
+### Contratos
+
+- multiplos contratos por cliente;
+- cadastro de periodo, descricao e observacoes;
+- upload e substituicao de arquivo contratual;
+- status automatico por vencimento;
+- alertas visuais de contratos a vencer e vencidos;
+- notificacao por e-mail com base em configuracao do sistema;
+- rotina automatica para recalculo diario do status.
 
 ### Produtos
 
@@ -88,6 +99,9 @@ O SysPragas e um sistema operacional para empresas de controle de pragas com foc
 - pagamentos parciais devem atualizar saldo e registrar movimento de caixa;
 - importacoes de XML devem rejeitar nota duplicada;
 - dados de CNPJ e CEP devem ser normalizados antes de persistir.
+- contratos nao podem ter vencimento anterior ao inicio.
+- contratos devem refletir status automaticamente sem edicao manual.
+- notificacoes contratuais nao devem duplicar envio para o mesmo status.
 
 ## Requisitos de qualidade
 

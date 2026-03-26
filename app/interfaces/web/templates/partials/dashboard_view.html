@@ -84,6 +84,24 @@
                 </div>
             </div>
         </div>
+        <div class="col-lg-3 col-sm-6">
+            <div class="info-box">
+                <span class="info-box-icon bg-warning"><i class="fas fa-file-signature"></i></span>
+                <div class="info-box-content">
+                    <span class="info-box-text">Contratos a vencer</span>
+                    <span class="info-box-number" id="widget-contracts-due-soon">0</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-sm-6">
+            <div class="info-box">
+                <span class="info-box-icon bg-danger"><i class="fas fa-file-excel"></i></span>
+                <div class="info-box-content">
+                    <span class="info-box-text">Contratos vencidos</span>
+                    <span class="info-box-number" id="widget-contracts-overdue">0</span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="row">
@@ -145,6 +163,16 @@
                         <p>Lancamentos recentes conforme os filtros aplicados.</p>
                     </div>
                     <div id="dashboard-finance-table"></div>
+                </div>
+            </section>
+
+            <section class="card panel">
+                <div class="card-body">
+                    <div class="section-heading">
+                        <h3>Contratos no radar</h3>
+                        <p>Vencimentos proximos e contratos expirados com destaque operacional.</p>
+                    </div>
+                    <div id="contract-alerts"></div>
                 </div>
             </section>
         </div>

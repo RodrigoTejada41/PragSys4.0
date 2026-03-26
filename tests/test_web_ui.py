@@ -29,6 +29,10 @@ def test_static_app_js_includes_appointment_availability_feedback(client):
     assert "Conectar via QR" in response.text
     assert "Conectar WhatsApp" in response.text
     assert "Autenticacao por QR Code" in response.text
+    assert "Selecione um cliente antes de salvar um contrato." in response.text
+    assert "Contrato salvo com sucesso." in response.text
+    assert "Diretorio de armazenamento" in response.text
+    assert "Enviar e-mail automaticamente" in response.text
     assert "Reabrir agendamento" in response.text
     assert "Periodo inicial" in response.text
     assert "Periodo final" in response.text

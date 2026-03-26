@@ -583,6 +583,56 @@ textarea {
     align-items: start;
 }
 
+.customers-module-shell,
+.customer-contracts-layout,
+.contract-summary-grid {
+    display: grid;
+    gap: 18px;
+}
+
+.customer-contracts-panel .card.panel {
+    box-shadow: none;
+}
+
+.customer-contracts-layout {
+    grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);
+    align-items: start;
+}
+
+.contract-summary-grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    margin-bottom: 18px;
+}
+
+.contract-summary-card {
+    padding: 16px 18px;
+    border-radius: 18px;
+    border: 1px solid rgba(30, 42, 34, 0.08);
+    background: var(--sys-surface-soft);
+}
+
+.contract-summary-card strong {
+    display: block;
+    font-size: 1.5rem;
+    margin-top: 6px;
+}
+
+.contract-summary-card.is-danger {
+    background: rgba(177, 69, 52, 0.08);
+    border-color: rgba(177, 69, 52, 0.18);
+}
+
+.contract-summary-card.is-warn {
+    background: rgba(205, 149, 12, 0.08);
+    border-color: rgba(205, 149, 12, 0.18);
+}
+
+.contract-file-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
 .finance-module-shell {
     display: grid;
     gap: 18px;

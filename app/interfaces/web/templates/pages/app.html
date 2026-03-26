@@ -4,7 +4,53 @@
 {% block content %}
     {% include "partials/dashboard_view.html" %}
 
-    {{ crud_view("clientes", "Novo cliente", "Cadastre razao social, documento e endereco operacional.", "customer-form", "Base de clientes", "Consulta rapida para equipe tecnica, administrativa e financeira.", "customers-table") }}
+    <section class="view" id="view-clientes">
+        <div class="customers-module-shell">
+            <div class="split-panel">
+                <section class="card panel form-panel">
+                    <div class="card-body">
+                        <div class="section-heading">
+                            <h3>Novo cliente</h3>
+                            <p>Cadastre razao social, documento, contato, e-mail e endereco operacional.</p>
+                        </div>
+                        <form id="customer-form" class="data-form"></form>
+                    </div>
+                </section>
+                <section class="card panel">
+                    <div class="card-body">
+                        <div class="section-heading">
+                            <h3>Base de clientes</h3>
+                            <p>Consulta rapida para equipe tecnica, administrativa, financeira e gestao contratual.</p>
+                        </div>
+                        <div id="customers-table"></div>
+                    </div>
+                </section>
+            </div>
+
+            <section class="card panel customer-contracts-panel">
+                <div class="card-body">
+                    <div class="section-heading">
+                        <p class="eyebrow">Contratos</p>
+                        <h3>Gestao de contratos por cliente</h3>
+                        <p id="customer-contracts-heading-copy">Selecione um cliente na tabela para cadastrar, consultar e acompanhar contratos vinculados.</p>
+                    </div>
+                    <div id="customer-contracts-summary"></div>
+                    <div class="split-panel customer-contracts-layout">
+                        <section class="card panel form-panel">
+                            <div class="card-body">
+                                <form id="contract-form" class="data-form"></form>
+                            </div>
+                        </section>
+                        <section class="card panel">
+                            <div class="card-body">
+                                <div id="customer-contracts-table"></div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </section>
 
     {{ crud_view("produtos", "Novo produto", "Controle principio ativo, estoque atual e rastreabilidade de uso.", "product-form", "Estoque tecnico", "Itens disponiveis para aplicacao nas ordens de servico.", "products-table") }}
 

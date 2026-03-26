@@ -94,6 +94,7 @@ class Customer(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     razao_social: Mapped[str] = mapped_column(String(150), nullable=False)
     cpf_cnpj: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(150), nullable=True, index=True)
     cep: Mapped[Optional[str]] = mapped_column(String(9), nullable=True)
     endereco: Mapped[str] = mapped_column(String(255), nullable=False)
     numero: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
@@ -114,6 +115,44 @@ class Customer(Base):
     agendamentos: Mapped[List["Appointment"]] = relationship(back_populates="cliente")
     notas_fiscais: Mapped[List["NfeInvoice"]] = relationship(back_populates="cliente")
     recibos: Mapped[List["Receipt"]] = relationship(back_populates="cliente")
+    contratos: Mapped[List["Contract"]] = relationship(
+        back_populates="cliente",
+        cascade="all, delete-orphan",
+        order_by="Contract.data_vencimento.asc()",
+    )
+
+
+class Contract(Base):
+    __tablename__ = "contratos"
+    __table_args__ = (
+        Index("ix_contratos_cliente_status", "cliente_id", "status"),
+        Index("ix_contratos_status_vencimento", "status", "data_vencimento"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cliente_id: Mapped[int] = mapped_column(ForeignKey("clientes.id"), nullable=False, index=True)
+    nome: Mapped[str] = mapped_column(String(180), nullable=False)
+    data_inicio: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    data_vencimento: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ativo", index=True)
+    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    arquivo_nome_original: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    arquivo_nome_armazenado: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, unique=True)
+    arquivo_content_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    arquivo_tamanho: Mapped[Optional[int]] = mapped_column(nullable=True)
+    arquivo_caminho: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    last_notification_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    last_notification_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_notification_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+        index=True,
+    )
+
+    cliente: Mapped["Customer"] = relationship(back_populates="contratos")
 
 
 class NcmTaxProfile(Base):

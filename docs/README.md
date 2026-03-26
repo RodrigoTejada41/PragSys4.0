@@ -13,6 +13,7 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - `installation-local.md`: como instalar e executar o sistema localmente sem Docker.
 - `installation-network.md`: como executar o sistema em rede interna.
 - `multitenancy-architecture.md`: estrategia tecnica de multempresa por `empresa_prestadora_id`.
+- `contracts-module.md`: modulo de contratos com arquivos, vencimento, notificacoes e rotina automatica.
 - `whatsapp-qr-bridge.md`: execucao e configuracao do bridge local de WhatsApp com QR Code baseado em Baileys.
 - `github-publishing.md`: padrao de organizacao e publicacao do repositorio.
 - `technical-report-4.0.0.md`: relatorio tecnico consolidado da fase 4.0.0.
@@ -29,6 +30,7 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - consulte `api-reference.md` antes de mudar contratos HTTP;
 - consulte `installation-local.md` e `installation-network.md` antes de subir ambientes;
 - consulte `multitenancy-architecture.md` antes de tocar em isolamento por empresa;
+- consulte `contracts-module.md` antes de alterar vencimento, arquivos ou notificacoes contratuais;
 - consulte `whatsapp-qr-bridge.md` antes de ativar ou manter a integracao de WhatsApp por QR Code;
 - consulte `github-publishing.md` antes de preparar entrega para GitHub;
 - consulte `technical-report-4.0.0.md` para entender o escopo tecnico da release maior;

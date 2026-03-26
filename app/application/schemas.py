@@ -8,6 +8,7 @@ from app.domain.enums import (
     AppointmentSource,
     AppointmentStatus,
     CashFlowType,
+    ContractStatus,
     FinanceStatus,
     FinanceType,
     GoogleSyncStatus,
@@ -124,6 +125,7 @@ class LicenseRead(LicenseBase):
 class CustomerBase(BaseModel):
     razao_social: str
     cpf_cnpj: str
+    email: Optional[str] = None
     cep: Optional[str] = None
     endereco: str
     numero: Optional[str] = None
@@ -828,6 +830,12 @@ class SettingsIntegrationsRead(BaseModel):
     whatsapp_default_message: str
 
 
+class SettingsContractsRead(BaseModel):
+    alert_days: int
+    email_enabled: bool
+    storage_dir: str
+
+
 class SettingsSystemRead(BaseModel):
     multiempresa_enabled: bool
     operation_mode: str
@@ -844,6 +852,7 @@ class SettingsEnvironmentRead(BaseModel):
 
 class SystemSettingsRead(BaseModel):
     integrations: SettingsIntegrationsRead
+    contracts: SettingsContractsRead
     system: SettingsSystemRead
     environment: SettingsEnvironmentRead
 
@@ -855,6 +864,12 @@ class SettingsIntegrationsUpdate(BaseModel):
     whatsapp_default_message: Optional[str] = None
 
 
+class SettingsContractsUpdate(BaseModel):
+    alert_days: Optional[int] = Field(default=None, ge=1, le=365)
+    email_enabled: Optional[bool] = None
+    storage_dir: Optional[str] = None
+
+
 class SettingsSystemUpdate(BaseModel):
     multiempresa_enabled: Optional[bool] = None
     operation_mode: Optional[str] = None
@@ -864,7 +879,73 @@ class SettingsSystemUpdate(BaseModel):
 
 class SystemSettingsUpdate(BaseModel):
     integrations: Optional[SettingsIntegrationsUpdate] = None
+    contracts: Optional[SettingsContractsUpdate] = None
     system: Optional[SettingsSystemUpdate] = None
+
+
+class ContractBase(BaseModel):
+    nome: str = Field(min_length=3, max_length=180)
+    data_inicio: date
+    data_vencimento: date
+    observacoes: Optional[str] = Field(default=None, max_length=4000)
+
+    def model_post_init(self, __context) -> None:
+        if self.data_vencimento < self.data_inicio:
+            raise ValueError("A data de vencimento nao pode ser anterior a data de inicio.")
+
+
+class ContractCreate(ContractBase):
+    pass
+
+
+class ContractUpdate(ContractBase):
+    pass
+
+
+class ContractRead(BaseModel):
+    id: int
+    cliente_id: int
+    cliente_nome: str
+    cliente_email: Optional[str] = None
+    nome: str
+    data_inicio: date
+    data_vencimento: date
+    status: ContractStatus
+    observacoes: Optional[str] = None
+    arquivo_nome_original: Optional[str] = None
+    arquivo_content_type: Optional[str] = None
+    arquivo_tamanho: Optional[int] = None
+    arquivo_disponivel: bool = False
+    dias_para_vencimento: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ContractAlertRead(BaseModel):
+    id: int
+    cliente_id: int
+    cliente_nome: str
+    nome: str
+    data_vencimento: date
+    status: ContractStatus
+    dias_para_vencimento: int
+
+
+class ContractDashboardRead(BaseModel):
+    total: int
+    ativos: int
+    vencidos: int
+    a_vencer: int
+    alert_days: int
+    vencidos_alertas: List[ContractAlertRead] = Field(default_factory=list)
+    a_vencer_alertas: List[ContractAlertRead] = Field(default_factory=list)
+
+
+class ContractMaintenanceRead(BaseModel):
+    processed: int
+    updated_statuses: int
+    email_sent: int
+    email_failed: int
 
 
 UserCreate.model_rebuild()
