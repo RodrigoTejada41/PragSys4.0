@@ -57,6 +57,14 @@ Observacao:
 5. O status deve mudar para ativo e o numero conectado passa a aparecer na tela.
 6. Agendamentos passam a poder enviar mensagens automaticas e manuais.
 
+## Comportamento operacional
+
+- o bridge aguarda alguns segundos pela emissao do QR antes de responder, reduzindo o caso em que a API retornava `connecting` sem `qr_code`;
+- se a sessao estiver travada, expirada ou com credenciais persistidas corrompidas, o fluxo de conexao pode regenerar a sessao e limpar os arquivos de autenticacao automaticamente;
+- o endpoint de logout remove a sessao ativa e purga as credenciais persistidas para permitir nova autenticacao limpa;
+- o backend Python faz tentativas curtas adicionais para obter o QR, inclusive pedindo regeneracao quando o conector sinaliza expiracao;
+- logs foram adicionados no bridge e no backend para geracao do QR, status da conexao, logout e envio de mensagens.
+
 ## Persistencia da sessao
 
 As credenciais ficam em:
@@ -64,6 +72,8 @@ As credenciais ficam em:
 - `services/whatsapp-bridge/sessions/`
 
 Essa pasta deve ser preservada para manter a sessao autenticada.
+
+Quando for necessario forcar uma nova autenticacao, o proprio logout do sistema ou a regeneracao de sessao limpa esses arquivos para evitar reuso de estado inconsistente.
 
 ## Docker opcional
 

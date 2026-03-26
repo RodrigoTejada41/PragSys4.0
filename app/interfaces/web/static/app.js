@@ -845,6 +845,20 @@ function renderSettings() {
         <p class="form-error hidden"></p>
     `;
 
+    const shouldShowWhatsAppQrPanel = Boolean(
+        whatsapp.supports_qr && (
+            whatsappQr.qr_image_data_url
+            || whatsappQr.qr_code
+            || whatsappQr.message
+            || whatsappQr.status
+            || ["aguardando_conexao", "erro"].includes(whatsapp.status)
+        )
+    );
+    const whatsappQrMessage = whatsappQr.message
+        || (whatsapp.status === "aguardando_conexao"
+            ? "A sessao esta sendo preparada. Se o QR nao aparecer em alguns segundos, clique novamente em Conectar via QR."
+            : "Leia o QR Code abaixo com o WhatsApp para conectar a sessao.");
+
     integrations.innerHTML = `
         <section class="settings-side-section">
             <div class="section-heading compact">
@@ -883,14 +897,15 @@ function renderSettings() {
                 <button type="button" class="btn btn-default ghost-button" data-settings-action="whatsapp-logout" ${whatsapp.supports_qr ? "" : "disabled"}>Desconectar sessao</button>
                 <button type="button" class="btn btn-default ghost-button" data-integration-action="refresh-whatsapp">Atualizar status</button>
             </div>
-            ${whatsappQr.qr_image_data_url || whatsappQr.qr_code || whatsappQr.message ? `
+            ${shouldShowWhatsAppQrPanel ? `
                 <div class="whatsapp-qr-panel">
                     <div class="section-heading compact">
                         <h4>Autenticacao por QR Code</h4>
-                        <p>${escapeHtml(whatsappQr.message || "Leia o QR Code abaixo com o WhatsApp para conectar a sessao.")}</p>
+                        <p>${escapeHtml(whatsappQrMessage)}</p>
                     </div>
                     ${whatsappQr.qr_image_data_url ? `<img class="whatsapp-qr-image" src="${escapeHtml(whatsappQr.qr_image_data_url)}" alt="QR Code do WhatsApp">` : ""}
                     ${!whatsappQr.qr_image_data_url && whatsappQr.qr_code ? `<pre class="whatsapp-qr-text">${escapeHtml(whatsappQr.qr_code)}</pre>` : ""}
+                    ${!whatsappQr.qr_image_data_url && !whatsappQr.qr_code ? `<div class="empty-state">QR Code ainda nao recebido. Aguarde alguns segundos ou clique novamente em Conectar via QR.</div>` : ""}
                     <div class="settings-side-list">
                         ${settingsInfoRow("Status da sessao", whatsappQr.status || "aguardando_conexao")}
                         ${settingsInfoRow("Instancia", whatsappQr.instance_name || whatsapp.instance_name || "Nao identificada")}
@@ -4826,8 +4841,14 @@ async function connectWhatsAppQr() {
     state.integrations.whatsappQr = await apiFetch("/api/v1/whatsapp/sessao/qr", {
         method: "POST",
     });
-    await refreshAppointmentIntegrationStatus();
+    renderSettings();
+    renderAppointments();
     switchView("configuracoes");
+    try {
+        await refreshAppointmentIntegrationStatus();
+    } catch (error) {
+        console.warn("Falha ao atualizar status do WhatsApp apos solicitar QR.", error);
+    }
     toast(state.integrations.whatsappQr.message || "Leia o QR Code do WhatsApp para conectar a sessao.");
 }
 

@@ -216,6 +216,103 @@ def test_whatsapp_qr_session_endpoint_returns_qr_payload(client, auth_headers, m
     assert payload["qr_image_data_url"].startswith("data:image/png;base64,")
 
 
+def test_whatsapp_qr_session_endpoint_retries_until_qr_is_available(client, auth_headers, monkeypatch):
+    configure_whatsapp_qr(monkeypatch)
+    call_counter = {"count": 0}
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, payload):
+            self._payload = payload
+            self.content = b"{}"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    monkeypatch.setattr("app.modules.whatsapp.service.time.sleep", lambda *_args, **_kwargs: None)
+
+    def fake_get(*args, **kwargs):
+        call_counter["count"] += 1
+        if call_counter["count"] == 1:
+            return FakeResponse(
+                {
+                    "status": "connecting",
+                    "message": "Aguardando geracao do QR Code",
+                }
+            )
+        return FakeResponse(
+            {
+                "status": "connecting",
+                "code": "qr-late",
+                "base64": "cXItbGF0ZQ==",
+                "expires_at": "2026-03-26T20:00:00Z",
+            }
+        )
+
+    monkeypatch.setattr("app.modules.whatsapp.service.httpx.get", fake_get)
+
+    response = client.post("/api/v1/whatsapp/sessao/qr", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert call_counter["count"] == 2
+    assert payload["qr_code"] == "qr-late"
+    assert payload["qr_image_data_url"].startswith("data:image/png;base64,")
+    assert payload["expires_at"] == "2026-03-26T20:00:00Z"
+
+
+def test_whatsapp_qr_session_endpoint_regenerates_after_expired_qr(client, auth_headers, monkeypatch):
+    configure_whatsapp_qr(monkeypatch)
+    regenerate_flags = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def __init__(self, payload):
+            self._payload = payload
+            self.content = b"{}"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    monkeypatch.setattr("app.modules.whatsapp.service.time.sleep", lambda *_args, **_kwargs: None)
+
+    def fake_get(*args, **kwargs):
+        params = kwargs.get("params") or {}
+        regenerate_flags.append(params.get("regenerate"))
+        if params.get("regenerate") == "1":
+            return FakeResponse(
+                {
+                    "status": "connecting",
+                    "code": "qr-renewed",
+                    "base64": "cXItcmVuZXdlZA==",
+                }
+            )
+        return FakeResponse(
+            {
+                "status": "qr_expired",
+                "message": "QR Code expirado. Gere um novo QR.",
+            }
+        )
+
+    monkeypatch.setattr("app.modules.whatsapp.service.httpx.get", fake_get)
+
+    response = client.post("/api/v1/whatsapp/sessao/qr", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert regenerate_flags == [None, "1"]
+    assert payload["qr_code"] == "qr-renewed"
+    assert payload["status"] == "connecting"
+
+
 def test_whatsapp_logout_endpoint_disconnects_qr_session(client, auth_headers, monkeypatch):
     configure_whatsapp_qr(monkeypatch)
 

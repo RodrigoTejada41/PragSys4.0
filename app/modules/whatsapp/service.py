@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Optional, Protocol, Union
 
@@ -21,6 +22,8 @@ from app.modules.whatsapp.utils import (
 )
 
 logger = logging.getLogger(__name__)
+QR_RETRY_INTERVAL_SECONDS = 1.0
+QR_MAX_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
@@ -234,6 +237,109 @@ def _resolve_qr_url(config: WhatsAppIntegrationConfig) -> Optional[str]:
     return None
 
 
+def _resolve_status_url(config: WhatsAppIntegrationConfig) -> Optional[str]:
+    if config.status_api_url:
+        return config.status_api_url
+    if config.provider == "evolution" and config.api_base_url and config.instance_name:
+        return f"{config.api_base_url.rstrip('/')}/instance/connectionState/{config.instance_name}"
+    if config.provider == "custom" and config.api_base_url:
+        return f"{config.api_base_url.rstrip('/')}/status"
+    return None
+
+
+def _parse_json_response(response: httpx.Response) -> dict:
+    return response.json() if response.content else {}
+
+
+def _extract_qr_session_payload(payload: dict, config: WhatsAppIntegrationConfig) -> WhatsAppQrSessionStatus:
+    qr_code = (
+        payload.get("qr_code")
+        or payload.get("qr")
+        or payload.get("code")
+        or payload.get("qrcode")
+    )
+    qr_image = (
+        payload.get("qr_image_data_url")
+        or payload.get("qr_image")
+        or payload.get("image")
+        or payload.get("base64")
+    )
+    if qr_image and not str(qr_image).startswith("data:image"):
+        qr_image = f"data:image/png;base64,{qr_image}"
+    pairing_code = payload.get("pairingCode") or payload.get("pairing_code")
+    status = payload.get("status") or ("aguardando_conexao" if qr_code or qr_image else "erro")
+    return WhatsAppQrSessionStatus(
+        status=str(status),
+        provider=config.provider,
+        instance_name=payload.get("instance_name") or payload.get("instance", {}).get("instanceName") or config.instance_name or config.sender_id,
+        qr_code=qr_code,
+        qr_image_data_url=qr_image,
+        pairing_code=pairing_code,
+        expires_at=payload.get("expires_at") or payload.get("ttl"),
+        message=payload.get("message") or "Leia o QR Code com o WhatsApp para conectar esta sessao.",
+        error_message=payload.get("error"),
+    )
+
+
+def _should_retry_qr_session(status: WhatsAppQrSessionStatus) -> bool:
+    normalized = str(status.status or "").strip().lower()
+    message = str(status.message or "").strip().lower()
+    error_message = str(status.error_message or "").strip().lower()
+    expired_tokens = ("expired", "expirado", "qr_expired", "time out", "timeout")
+    if status.qr_code or status.qr_image_data_url:
+        return False
+    if normalized in {"open", "ativo"}:
+        return False
+    if any(token in message for token in expired_tokens) or any(token in error_message for token in expired_tokens):
+        return True
+    return normalized in {"connecting", "aguardando_conexao", "pending", "qr", "closed", "desconectado", "erro", "qr_expired"}
+
+
+def _request_qr_payload(
+    config: WhatsAppIntegrationConfig,
+    *,
+    regenerate: bool,
+) -> WhatsAppQrSessionStatus:
+    headers = _build_auth_headers(config)
+    session_payload = {
+        "instance_name": config.instance_name,
+        "sender_id": config.sender_id,
+    }
+    qr_url = _resolve_qr_url(config)
+    if not qr_url:
+        raise BusinessRuleViolation("Nao foi possivel determinar o endpoint de QR Code do conector WhatsApp.")
+
+    request_kwargs = {"headers": headers, "timeout": config.timeout_seconds}
+    if config.provider == "evolution":
+        params = {}
+        if regenerate:
+            params["regenerate"] = "1"
+        response = httpx.get(qr_url, params=params, **request_kwargs)
+    else:
+        params = dict(session_payload)
+        if regenerate:
+            params["regenerate"] = "1"
+        response = httpx.get(qr_url, params=params, **request_kwargs)
+    response.raise_for_status()
+    payload = _parse_json_response(response)
+    return _extract_qr_session_payload(payload, config)
+
+
+def _connect_qr_session(config: WhatsAppIntegrationConfig, *, regenerate: bool) -> None:
+    connect_url = _resolve_connect_url(config)
+    if not connect_url:
+        return
+    headers = _build_auth_headers(config)
+    payload = {
+        "instance_name": config.instance_name,
+        "sender_id": config.sender_id,
+    }
+    if regenerate:
+        payload["regenerate"] = True
+    response = httpx.post(connect_url, json=payload, headers=headers, timeout=config.timeout_seconds)
+    response.raise_for_status()
+
+
 def _resolve_connect_url(config: WhatsAppIntegrationConfig) -> Optional[str]:
     if config.connect_api_url:
         return config.connect_api_url
@@ -292,16 +398,6 @@ def get_whatsapp_configuration_status(db: Session) -> dict:
         "auth_configured": bool(config.auth_token or config.api_key),
         "supports_qr": config.supports_qr,
     }
-
-
-def _resolve_status_url(config: WhatsAppIntegrationConfig) -> Optional[str]:
-    if config.status_api_url:
-        return config.status_api_url
-    if config.provider == "evolution" and config.api_base_url and config.instance_name:
-        return f"{config.api_base_url.rstrip('/')}/instance/connectionState/{config.instance_name}"
-    if config.provider == "custom" and config.api_base_url:
-        return f"{config.api_base_url.rstrip('/')}/status"
-    return None
 
 
 def _normalize_connection_status(payload: Optional[dict], config: WhatsAppIntegrationConfig) -> WhatsAppConnectionStatus:
@@ -404,7 +500,8 @@ class WhatsAppService:
         try:
             response = httpx.get(status_url, headers=headers, timeout=config.timeout_seconds)
             response.raise_for_status()
-            payload = response.json() if response.content else {}
+            payload = _parse_json_response(response)
+            logger.info("WhatsApp status resolved provider=%s status_url=%s payload=%s", config.provider, status_url, payload)
             return _normalize_connection_status(payload, config)
         except httpx.TimeoutException:
             logger.warning("WhatsApp status check timed out for %s", status_url)
@@ -461,60 +558,35 @@ def request_whatsapp_qr_session(db: Session) -> dict:
     if not config.api_base_url:
         raise BusinessRuleViolation("Configure a URL base do conector WhatsApp Web para gerar o QR Code.")
 
-    headers = _build_auth_headers(config)
-    session_payload = {
-        "instance_name": config.instance_name,
-        "sender_id": config.sender_id,
-    }
-    connect_url = _resolve_connect_url(config)
-    qr_url = _resolve_qr_url(config)
-    if not qr_url:
-        raise BusinessRuleViolation("Nao foi possivel determinar o endpoint de QR Code do conector WhatsApp.")
-
+    logger.info("WhatsApp QR requested provider=%s instance=%s", config.provider, config.instance_name or config.sender_id)
     try:
-        if connect_url:
-            httpx.post(connect_url, json=session_payload, headers=headers, timeout=config.timeout_seconds)
-        request_kwargs = {"headers": headers, "timeout": config.timeout_seconds}
-        if config.provider == "evolution":
-            response = httpx.get(qr_url, **request_kwargs)
-        else:
-            response = httpx.get(qr_url, params=session_payload, **request_kwargs)
-        response.raise_for_status()
-        payload = response.json() if response.content else {}
+        _connect_qr_session(config, regenerate=False)
+        qr_status = _request_qr_payload(config, regenerate=False)
+        for attempt in range(2, QR_MAX_ATTEMPTS + 1):
+            if not _should_retry_qr_session(qr_status):
+                break
+            logger.info(
+                "WhatsApp QR retry scheduled provider=%s instance=%s attempt=%s status=%s",
+                config.provider,
+                config.instance_name or config.sender_id,
+                attempt,
+                qr_status.status,
+            )
+            time.sleep(QR_RETRY_INTERVAL_SECONDS)
+            qr_status = _request_qr_payload(config, regenerate=True)
     except httpx.TimeoutException as exc:
         raise BusinessRuleViolation("Timeout ao solicitar o QR Code do WhatsApp.") from exc
     except (httpx.HTTPError, ValueError) as exc:
         detail = exc.response.text if getattr(exc, "response", None) is not None else str(exc)
         raise BusinessRuleViolation(f"Falha ao obter QR Code do WhatsApp: {compact_error_message(detail)}") from exc
-
-    qr_code = (
-        payload.get("qr_code")
-        or payload.get("qr")
-        or payload.get("code")
-        or payload.get("qrcode")
+    logger.info(
+        "WhatsApp QR resolved provider=%s instance=%s status=%s has_qr=%s",
+        config.provider,
+        qr_status.instance_name,
+        qr_status.status,
+        bool(qr_status.qr_code or qr_status.qr_image_data_url),
     )
-    qr_image = (
-        payload.get("qr_image_data_url")
-        or payload.get("qr_image")
-        or payload.get("image")
-        or payload.get("base64")
-    )
-    if qr_image and not str(qr_image).startswith("data:image"):
-        qr_image = f"data:image/png;base64,{qr_image}"
-    pairing_code = payload.get("pairingCode") or payload.get("pairing_code")
-
-    status = payload.get("status") or ("aguardando_conexao" if qr_code or qr_image else "erro")
-    return WhatsAppQrSessionStatus(
-        status=str(status),
-        provider=config.provider,
-        instance_name=payload.get("instance_name") or config.instance_name or config.sender_id,
-        qr_code=qr_code,
-        qr_image_data_url=qr_image,
-        pairing_code=pairing_code,
-        expires_at=payload.get("expires_at") or payload.get("ttl"),
-        message=payload.get("message") or "Leia o QR Code com o WhatsApp para conectar esta sessao.",
-        error_message=payload.get("error"),
-    ).__dict__
+    return qr_status.__dict__
 
 
 def logout_whatsapp_session(db: Session) -> dict:
@@ -536,6 +608,7 @@ def logout_whatsapp_session(db: Session) -> dict:
         else:
             response = httpx.post(logout_url, json=payload, headers=headers, timeout=config.timeout_seconds)
         response.raise_for_status()
+        logger.info("WhatsApp session logout completed provider=%s instance=%s", config.provider, config.instance_name)
     except httpx.TimeoutException as exc:
         raise BusinessRuleViolation("Timeout ao encerrar a sessao do WhatsApp.") from exc
     except httpx.HTTPError as exc:
@@ -579,6 +652,13 @@ def send_appointment_whatsapp_message(
         template = str(get_setting_value(db, "whatsapp_default_message", DEFAULT_APPOINTMENT_WHATSAPP_TEMPLATE) or "").strip()
         rendered_message = build_appointment_whatsapp_message(appointment, template=template)
         normalized_phone = normalize_whatsapp_phone(destination_phone)
+        logger.info(
+            "WhatsApp send requested appointment_id=%s automatic=%s provider=%s destination=%s",
+            appointment.id,
+            automatic,
+            config.provider,
+            normalized_phone,
+        )
         if not get_boolean_setting(db, "whatsapp_enabled", fallback=config.enabled):
             raise BusinessRuleViolation("Integracao WhatsApp desabilitada nas configuracoes do sistema.")
         if not config.enabled:
@@ -586,6 +666,14 @@ def send_appointment_whatsapp_message(
         if not config.is_ready:
             raise BusinessRuleViolation("Configuracao da integracao WhatsApp incompleta.")
         result = send_whatsapp_message(normalized_phone, rendered_message)
+        logger.info(
+            "WhatsApp send succeeded appointment_id=%s automatic=%s provider=%s destination=%s external_message_id=%s",
+            appointment.id,
+            automatic,
+            result.provider,
+            normalized_phone,
+            result.external_message_id,
+        )
         create_appointment_whatsapp_log(
             db,
             appointment_id=appointment.id,
@@ -609,6 +697,14 @@ def send_appointment_whatsapp_message(
     except (BusinessRuleViolation, httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
         error_message = _resolve_error_message(exc)
         normalized_phone = "".join(char for char in destination_phone if char.isdigit()) or destination_phone or "-"
+        logger.warning(
+            "WhatsApp send failed appointment_id=%s automatic=%s provider=%s destination=%s error=%s",
+            appointment.id,
+            automatic,
+            config.provider,
+            normalized_phone,
+            compact_error_message(error_message),
+        )
         create_appointment_whatsapp_log(
             db,
             appointment_id=appointment.id,
