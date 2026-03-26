@@ -428,6 +428,75 @@ def test_create_appointment_sends_whatsapp_via_qr_connector(client, auth_headers
     assert payload["whatsapp_logs"][0]["external_message_id"] == "msg-evolution-001"
 
 
+def test_create_appointment_respects_persisted_whatsapp_toggle_even_when_env_default_is_disabled(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("WHATSAPP_ENABLED", "false")
+    monkeypatch.setenv("WHATSAPP_PROVIDER", "evolution")
+    monkeypatch.setenv("WHATSAPP_API_BASE_URL", "https://whatsapp.example.test")
+    monkeypatch.setenv("WHATSAPP_API_KEY", "api-key-teste")
+    monkeypatch.setenv("WHATSAPP_INSTANCE_NAME", "instancia-qr")
+    monkeypatch.delenv("WHATSAPP_STATUS_API_URL", raising=False)
+    monkeypatch.delenv("WHATSAPP_QR_API_URL", raising=False)
+    monkeypatch.delenv("WHATSAPP_CONNECT_API_URL", raising=False)
+    monkeypatch.delenv("WHATSAPP_LOGOUT_API_URL", raising=False)
+    get_settings.cache_clear()
+
+    settings_response = client.put(
+        "/api/v1/settings",
+        headers=auth_headers,
+        json={
+            "integrations": {
+                "whatsapp_enabled": True,
+                "whatsapp_auto_send": True,
+            }
+        },
+    )
+    assert settings_response.status_code == 200
+
+    class FakeResponse:
+        status_code = 200
+        content = b'{"key":{"id":"msg-evolution-002"}}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"key": {"id": "msg-evolution-002"}}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        assert url == "https://whatsapp.example.test/message/sendText/instancia-qr"
+        assert json["number"].startswith("55")
+        assert "Controle com toggle persistido" in json["text"]
+        return FakeResponse()
+
+    monkeypatch.setattr("app.modules.whatsapp.service.httpx.post", fake_post)
+
+    customer = create_customer(client, auth_headers, "506")
+    technician = create_technician(client, auth_headers, "506")
+    target_date = (date.today() + timedelta(days=7)).isoformat()
+
+    response = client.post(
+        "/api/v1/agendamentos",
+        headers=auth_headers,
+        json={
+            "cliente_id": customer["id"],
+            "tecnico_id": technician["id"],
+            "tipo_servico": "Controle com toggle persistido",
+            "data_agendamento": target_date,
+            "hora_agendamento": "16:15:00",
+            "duracao_prevista_minutos": 60,
+            "status": "pendente",
+            "origem": "manual",
+            "sincronizar_google": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["whatsapp_status"] == "enviado"
+    assert payload["whatsapp_logs"][0]["provider"] == "evolution"
+    assert payload["whatsapp_logs"][0]["external_message_id"] == "msg-evolution-002"
+
+
 def test_create_appointment_keeps_record_and_logs_whatsapp_failure_for_invalid_phone(client, auth_headers, monkeypatch):
     configure_whatsapp(monkeypatch)
     monkeypatch.setattr("app.modules.whatsapp.service._build_client", lambda config: None)

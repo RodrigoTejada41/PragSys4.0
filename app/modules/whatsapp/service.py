@@ -631,6 +631,7 @@ def send_appointment_whatsapp_message(
 ):
     appointment = _get_appointment_or_fail(db, appointment_id)
     config = load_whatsapp_config()
+    effective_enabled = get_boolean_setting(db, "whatsapp_enabled", fallback=config.enabled)
     destination_phone = appointment.telefone or ""
     rendered_message = ""
 
@@ -659,9 +660,7 @@ def send_appointment_whatsapp_message(
             config.provider,
             normalized_phone,
         )
-        if not get_boolean_setting(db, "whatsapp_enabled", fallback=config.enabled):
-            raise BusinessRuleViolation("Integracao WhatsApp desabilitada nas configuracoes do sistema.")
-        if not config.enabled:
+        if not effective_enabled:
             raise BusinessRuleViolation("Integracao WhatsApp desabilitada nas configuracoes do sistema.")
         if not config.is_ready:
             raise BusinessRuleViolation("Configuracao da integracao WhatsApp incompleta.")
