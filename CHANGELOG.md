@@ -7,7 +7,10 @@
 - Infraestrutura de testes otimizada com banco-template por processo, reducao de I/O repetitivo e assets temporarios compartilhados por sessao.
 - Custo de hash de senha tornou-se configuravel, preservando padrao forte em runtime real e permitindo execucao de testes mais leve.
 - Fixture de autenticacao passou a emitir token direto sobre o usuario seeded, evitando login HTTP repetitivo na suite.
-- Suite completa revalidada apos as mudancas com reducao de tempo de aproximadamente 14m30s para cerca de 44s.
+- Consultas frequentes receberam indices dedicados e migracao de performance segura para `produtos`, `financeiro`, `os_produtos` e `os_pragas`.
+- Carregamento ORM das colecoes de Ordem de Servico foi ajustado para `selectinload`, reduzindo custo de consultas com relacionamentos.
+- Suite passou a expor marcadores `unit`, `integration`, `documents` e `external` para execucao seletiva em desenvolvimento e CI.
+- Suite completa revalidada apos as mudancas com reducao de tempo de aproximadamente 14m30s para cerca de 42s.
 
 ## [4.0.0] - 2026-03-25
 

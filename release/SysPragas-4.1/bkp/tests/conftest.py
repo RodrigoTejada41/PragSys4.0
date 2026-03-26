@@ -31,6 +31,22 @@ TEST_DB_TEMPLATE_PATH = Path(f"test_syspragas_template_{TEST_RUN_ID}.db")
 TEST_ASSETS_ROOT = Path("test_assets") / TEST_RUN_ID
 TEST_SIGNATURES_DIR = TEST_ASSETS_ROOT / "assinaturas_tecnicas"
 TEST_MODELS_DIR = TEST_ASSETS_ROOT / "modelos"
+TEST_MARKERS_BY_FILE = {
+    "test_nfe_direct_module.py": ("unit",),
+    "test_web_ui.py": ("integration",),
+    "test_documents.py": ("integration", "documents"),
+    "test_appointments.py": ("integration",),
+    "test_auth.py": ("integration",),
+    "test_crud_operations.py": ("integration",),
+    "test_financial_module.py": ("integration",),
+    "test_multitenancy.py": ("integration",),
+    "test_nfe_external_integration.py": ("integration", "external"),
+    "test_rbac.py": ("integration",),
+    "test_receipts.py": ("integration",),
+    "test_settings.py": ("integration",),
+    "test_whatsapp_integration.py": ("integration", "external"),
+    "test_work_orders.py": ("integration",),
+}
 
 
 def _set_database_url(db_path: Path) -> None:
@@ -107,3 +123,10 @@ def auth_headers(client: TestClient) -> dict:
     finally:
         session.close()
     return {"Authorization": f"Bearer {token}"}
+
+
+def pytest_collection_modifyitems(items):
+    for item in items:
+        markers = TEST_MARKERS_BY_FILE.get(item.fspath.basename, ())
+        for marker in markers:
+            item.add_marker(getattr(pytest.mark, marker))

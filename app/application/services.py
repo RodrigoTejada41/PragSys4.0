@@ -18,7 +18,7 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.config import get_settings
 from app.application.certificate_assets import resolve_certificate_model_path, resolve_technical_signature_path
@@ -1444,10 +1444,10 @@ def _work_order_query(db: Session, current_user: Optional[User] = None):
     query = db.query(WorkOrder).options(
         joinedload(WorkOrder.cliente),
         joinedload(WorkOrder.tecnico),
-        joinedload(WorkOrder.produtos).joinedload(WorkOrderProduct.produto),
-        joinedload(WorkOrder.pragas).joinedload(WorkOrderPest.praga),
-        joinedload(WorkOrder.fotos),
-        joinedload(WorkOrder.financeiros),
+        selectinload(WorkOrder.produtos).joinedload(WorkOrderProduct.produto),
+        selectinload(WorkOrder.pragas).joinedload(WorkOrderPest.praga),
+        selectinload(WorkOrder.fotos),
+        selectinload(WorkOrder.financeiros),
     )
     return _apply_company_scope(query, WorkOrder, current_user)
 

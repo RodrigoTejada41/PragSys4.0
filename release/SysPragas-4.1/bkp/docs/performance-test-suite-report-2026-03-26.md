@@ -5,8 +5,8 @@ Data da analise: 2026-03-26
 ## Resumo executivo
 
 - Suite antes da otimizacao: `76 passed in 870.63s (0:14:30)`
-- Suite depois da otimizacao: `76 passed in 44.34s`
-- Reducao absoluta: `826.29s`
+- Suite depois da otimizacao: `76 passed in 42.03s`
+- Reducao absoluta: `828.60s`
 - Reducao percentual aproximada: `95.0%`
 
 O principal gargalo nao estava no corpo dos testes, mas na infraestrutura de teste:
@@ -28,6 +28,17 @@ O principal gargalo nao estava no corpo dos testes, mas na infraestrutura de tes
 - nomes de arquivos temporarios ficaram isolados por PID, evitando lock entre execucoes concorrentes.
 - `auth_headers` deixou de depender de login HTTP em todos os testes e passou a emitir token diretamente a partir do usuario seeded.
 
+### Banco e acesso a dados
+
+- adicionados indices dedicados para consultas frequentes em `produtos`, `financeiro`, `os_produtos` e `os_pragas`;
+- migracao `20260326_001_performance_indexes` criada para aplicar os indices sem quebrar bases existentes;
+- carregamento das colecoes de Ordem de Servico passou de `joinedload` para `selectinload`, reduzindo explosao de linhas em consultas com muitos relacionamentos.
+
+### Organizacao da suite
+
+- marcadores `unit`, `integration`, `documents` e `external` adicionados ao `pytest`;
+- marcacao automatica centralizada em `tests/conftest.py`, sem precisar espalhar anotacoes por todos os arquivos.
+
 ### Configuracao de seguranca
 
 - `password_hash_iterations` passou a ser configuravel via settings;
@@ -39,21 +50,25 @@ O principal gargalo nao estava no corpo dos testes, mas na infraestrutura de tes
 - `tests/conftest.py`
 - `app/core/config.py`
 - `app/core/security.py`
+- `app/application/services.py`
+- `app/infrastructure/models.py`
+- `app/infrastructure/migrations.py`
+- `pyproject.toml`
 
 ## Top 10 testes mais lentos apos a otimizacao
 
 Tempos de `call`, que agora representam melhor o custo funcional real:
 
-1. `tests/test_documents.py::test_guarantee_certificate_is_generated_from_visual_template` - `1.62s`
-2. `tests/test_documents.py::test_all_work_order_documents_are_generated` - `1.51s`
-3. `tests/test_crud_operations.py::test_update_and_delete_core_records` - `1.49s`
-4. `tests/test_rbac.py::test_operador_can_use_os_but_cannot_access_finance_or_license_management` - `1.14s`
-5. `tests/test_multitenancy.py::test_company_data_isolated_across_core_modules` - `1.11s`
-6. `tests/test_work_orders.py::test_reopen_work_order_reopens_linked_appointment` - `1.02s`
-7. `tests/test_work_orders.py::test_quick_actions_complete_and_settle_work_order_and_finance` - `0.98s`
-8. `tests/test_appointments.py::test_work_order_generates_and_updates_linked_appointment` - `0.88s`
-9. `tests/test_crud_operations.py::test_update_and_delete_work_order_reconcile_stock_and_finance` - `0.85s`
-10. `tests/test_receipts.py::test_receipt_update_syncs_finance_and_blocks_direct_finance_edit` - `0.82s`
+1. `tests/test_documents.py::test_all_work_order_documents_are_generated` - `1.55s`
+2. `tests/test_documents.py::test_guarantee_certificate_is_generated_from_visual_template` - `1.53s`
+3. `tests/test_crud_operations.py::test_update_and_delete_core_records` - `1.51s`
+4. `tests/test_rbac.py::test_operador_can_use_os_but_cannot_access_finance_or_license_management` - `1.08s`
+5. `tests/test_multitenancy.py::test_company_data_isolated_across_core_modules` - `1.03s`
+6. `tests/test_work_orders.py::test_reopen_work_order_reopens_linked_appointment` - `0.91s`
+7. `tests/test_work_orders.py::test_work_order_allows_photo_upload_and_removal` - `0.87s`
+8. `tests/test_work_orders.py::test_quick_actions_complete_and_settle_work_order_and_finance` - `0.84s`
+9. `tests/test_crud_operations.py::test_update_and_delete_work_order_reconcile_stock_and_finance` - `0.80s`
+10. `tests/test_appointments.py::test_completing_appointment_updates_linked_work_order` - `0.74s`
 
 ## Gargalos encontrados
 
@@ -124,7 +139,7 @@ Esses grupos ainda parecem defensaveis porque cobrem contratos ou ramos diferent
 Sem alterar comportamento:
 
 1. Criar indexes adicionais para campos de consulta frequente, com migracao dedicada.
-   Exemplos provaveis: `clientes.cpf_cnpj`, `produtos.registro_ms`, `financeiro.os_id`, `recibos.numero`.
+   Parcialmente implementado: `produtos.registro_ms`, `financeiro.cliente_id`, `financeiro.os_id`, `financeiro.origem`, `financeiro.referencia`, `financeiro(origem, referencia)`, `os_produtos.os_id`, `os_produtos.produto_id`, `os_pragas.os_id`, `os_pragas.praga_id`.
 
 2. Evitar bootstrap completo quando o banco ja estiver inicializado e consistente.
    Hoje `init_db()` ainda roda em todo startup do app e do `TestClient`, mesmo quando nada mudou.
@@ -133,7 +148,7 @@ Sem alterar comportamento:
    Isso reduz custo de CPU e I/O na suite sem perder cobertura de regra.
 
 4. Introduzir marcadores de teste.
-   Exemplo: `unit`, `integration`, `documents`, `external`, permitindo pipelines mais rapidos no dia a dia.
+   Ja implementado: `unit`, `integration`, `documents`, `external`, permitindo pipelines mais rapidos no dia a dia.
 
 5. Adicionar `pytest-xdist` futuramente.
    Com os arquivos por PID, a infraestrutura ja ficou muito mais preparada para execucoes paralelas entre processos.

@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, LargeBinary, Numeric, String, Text, Time
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, LargeBinary, Numeric, String, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.db import Base
@@ -141,7 +141,7 @@ class Product(Base):
     grupo_quimico: Mapped[str] = mapped_column(String(120), nullable=False)
     toxicidade: Mapped[str] = mapped_column(String(80), nullable=False)
     concentracao: Mapped[str] = mapped_column(String(60), nullable=False)
-    registro_ms: Mapped[str] = mapped_column(String(60), nullable=False)
+    registro_ms: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
     ncm: Mapped[Optional[str]] = mapped_column(ForeignKey("ncm.codigo"), nullable=True, index=True)
     ncm_descricao: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     aliquota_icms: Mapped[Decimal] = mapped_column(Numeric(7, 4), nullable=False, default=0)
@@ -365,8 +365,8 @@ class WorkOrderProduct(Base):
     __tablename__ = "os_produtos"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    os_id: Mapped[int] = mapped_column(ForeignKey("ordens_servico.id"), nullable=False)
-    produto_id: Mapped[int] = mapped_column(ForeignKey("produtos.id"), nullable=False)
+    os_id: Mapped[int] = mapped_column(ForeignKey("ordens_servico.id"), nullable=False, index=True)
+    produto_id: Mapped[int] = mapped_column(ForeignKey("produtos.id"), nullable=False, index=True)
     quantidade: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     diluicao: Mapped[str] = mapped_column(String(60), nullable=False)
 
@@ -378,8 +378,8 @@ class WorkOrderPest(Base):
     __tablename__ = "os_pragas"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    os_id: Mapped[int] = mapped_column(ForeignKey("ordens_servico.id"), nullable=False)
-    praga_id: Mapped[int] = mapped_column(ForeignKey("pragas.id"), nullable=False)
+    os_id: Mapped[int] = mapped_column(ForeignKey("ordens_servico.id"), nullable=False, index=True)
+    praga_id: Mapped[int] = mapped_column(ForeignKey("pragas.id"), nullable=False, index=True)
 
     ordem_servico: Mapped["WorkOrder"] = relationship(back_populates="pragas")
     praga: Mapped["Pest"] = relationship(back_populates="ordens_servico")
@@ -387,6 +387,9 @@ class WorkOrderPest(Base):
 
 class FinanceEntry(Base):
     __tablename__ = "financeiro"
+    __table_args__ = (
+        Index("ix_financeiro_origem_referencia", "origem", "referencia"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     tipo: Mapped[str] = mapped_column(String(30), nullable=False)
@@ -398,14 +401,14 @@ class FinanceEntry(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pendente")
     categoria: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
     fornecedor_nome: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
-    origem: Mapped[str] = mapped_column(String(50), nullable=False, default="manual")
-    referencia: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    origem: Mapped[str] = mapped_column(String(50), nullable=False, default="manual", index=True)
+    referencia: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
     parcela_atual: Mapped[int] = mapped_column(nullable=False, default=1)
     total_parcelas: Mapped[int] = mapped_column(nullable=False, default=1)
     observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
-    cliente_id: Mapped[Optional[int]] = mapped_column(ForeignKey("clientes.id"), nullable=True)
-    os_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ordens_servico.id"), nullable=True)
+    cliente_id: Mapped[Optional[int]] = mapped_column(ForeignKey("clientes.id"), nullable=True, index=True)
+    os_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ordens_servico.id"), nullable=True, index=True)
     nfe_id: Mapped[Optional[int]] = mapped_column(ForeignKey("notas_fiscais.id"), nullable=True, index=True)
     recibo_id: Mapped[Optional[int]] = mapped_column(ForeignKey("recibos.id"), nullable=True, index=True)
     empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(

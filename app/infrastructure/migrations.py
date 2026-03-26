@@ -55,6 +55,19 @@ def _add_column_if_missing(engine: Engine, table_name: str, column_name: str, dd
         connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {ddl}"))
 
 
+def _create_index_if_missing(engine: Engine, table_name: str, index_name: str, columns: list[str]) -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if table_name not in tables:
+        return
+    existing_indexes = {index["name"] for index in inspector.get_indexes(table_name)}
+    if index_name in existing_indexes:
+        return
+    column_list = ", ".join(columns)
+    with engine.begin() as connection:
+        connection.execute(text(f"CREATE INDEX {index_name} ON {table_name} ({column_list})"))
+
+
 def _migration_20260321_001_legacy_backfill(engine: Engine) -> None:
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
@@ -373,11 +386,25 @@ def _migration_20260325_003_whatsapp_template_refresh(engine: Engine) -> None:
         )
 
 
+def _migration_20260326_001_performance_indexes(engine: Engine) -> None:
+    _create_index_if_missing(engine, "produtos", "ix_produtos_registro_ms", ["registro_ms"])
+    _create_index_if_missing(engine, "financeiro", "ix_financeiro_cliente_id", ["cliente_id"])
+    _create_index_if_missing(engine, "financeiro", "ix_financeiro_os_id", ["os_id"])
+    _create_index_if_missing(engine, "financeiro", "ix_financeiro_origem", ["origem"])
+    _create_index_if_missing(engine, "financeiro", "ix_financeiro_referencia", ["referencia"])
+    _create_index_if_missing(engine, "financeiro", "ix_financeiro_origem_referencia", ["origem", "referencia"])
+    _create_index_if_missing(engine, "os_produtos", "ix_os_produtos_os_id", ["os_id"])
+    _create_index_if_missing(engine, "os_produtos", "ix_os_produtos_produto_id", ["produto_id"])
+    _create_index_if_missing(engine, "os_pragas", "ix_os_pragas_os_id", ["os_id"])
+    _create_index_if_missing(engine, "os_pragas", "ix_os_pragas_praga_id", ["praga_id"])
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
     ("20260325_002_system_settings", _migration_20260325_002_system_settings),
     ("20260325_003_whatsapp_template_refresh", _migration_20260325_003_whatsapp_template_refresh),
+    ("20260326_001_performance_indexes", _migration_20260326_001_performance_indexes),
 ]
 
 
