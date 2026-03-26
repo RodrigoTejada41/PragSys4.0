@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     company_trade_name: str = "SysPragas"
     company_address: str = "Endereco da empresa nao configurado"
     company_phone: str = "Telefone da empresa nao configurado"
+    company_phone_secondary: Optional[str] = None
+    company_email: Optional[str] = None
+    company_website: Optional[str] = None
     company_logo_path: Optional[str] = None
     technical_signatures_dir: str = "assinaturas_tecnicas"
     certificate_models_dir: str = "modelos"

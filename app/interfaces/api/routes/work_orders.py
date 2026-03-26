@@ -11,6 +11,8 @@ from app.application.services import (
     delete_work_order_photo,
     delete_work_order,
     generate_framed_sanitary_certificate_pdf,
+    generate_guarantee_certificate_pdf,
+    get_work_order,
     generate_work_order_pdf,
     generate_sanitary_certificate_pdf,
     generate_technical_report_pdf,
@@ -26,6 +28,14 @@ from app.infrastructure.models import User
 from app.interfaces.api.deps import require_roles
 
 router = APIRouter(prefix="/os", tags=["ordens-de-servico"])
+
+
+def _document_filename_part(value: str) -> str:
+    import re
+
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower())
+    normalized = normalized.strip("_")
+    return normalized or "cliente"
 
 
 @router.get(
@@ -196,6 +206,24 @@ def get_sanitary_certificate_pdf(
     pdf_bytes = generate_sanitary_certificate_pdf(db, work_order_id, current_user=current_user)
     headers = {
         "Content-Disposition": f'inline; filename="certificado-sanitario-{work_order_id}.pdf"',
+    }
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
+@router.get(
+    "/{work_order_id}/certificado-garantia.pdf",
+)
+def get_guarantee_certificate_pdf(
+    work_order_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+) -> Response:
+    work_order = get_work_order(db, work_order_id, current_user=current_user)
+    pdf_bytes = generate_guarantee_certificate_pdf(db, work_order_id, current_user=current_user)
+    headers = {
+        "Content-Disposition": (
+            f'inline; filename="certificado_{_document_filename_part(work_order.cliente.razao_social)}.pdf"'
+        ),
     }
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 

@@ -95,6 +95,7 @@ def test_all_work_order_documents_are_generated(client, auth_headers):
         f"/api/v1/os/{work_order['id']}/pdf": f'inline; filename="os-{work_order["id"]}.pdf"',
         f"/api/v1/os/{work_order['id']}/relatorio-tecnico.pdf": f'inline; filename="relatorio-tecnico-{work_order["id"]}.pdf"',
         f"/api/v1/os/{work_order['id']}/certificado-sanitario.pdf": f'inline; filename="certificado-sanitario-{work_order["id"]}.pdf"',
+        f"/api/v1/os/{work_order['id']}/certificado-garantia.pdf": 'inline; filename="certificado_industria_delta.pdf"',
         f"/api/v1/os/{work_order['id']}/certificado-moldura.pdf": f'inline; filename="certificado-moldura-{work_order["id"]}.pdf"',
     }
 
@@ -174,3 +175,13 @@ def test_certificate_generation_falls_back_when_template_is_missing(client, auth
     assert response.headers["content-type"] == "application/pdf"
     assert response.content.startswith(b"%PDF")
     get_settings.cache_clear()
+
+
+def test_guarantee_certificate_is_generated_from_visual_template(client, auth_headers):
+    work_order = _create_base_work_order(client, auth_headers)
+    response = client.get(f"/api/v1/os/{work_order['id']}/certificado-garantia.pdf", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-disposition"] == 'inline; filename="certificado_industria_delta.pdf"'
+    assert response.content.startswith(b"%PDF")

@@ -1,6 +1,7 @@
 import csv
 import json
 import logging
+import re
 from calendar import monthrange
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -2178,6 +2179,163 @@ def _draw_template_certificate_background(pdf: canvas.Canvas, template_path: Pat
     pdf.drawImage(ImageReader(str(template_path)), 0, 0, width=page_width, height=page_height, mask="auto")
 
 
+def _sanitize_document_filename_part(value: Optional[str]) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower())
+    normalized = normalized.strip("_")
+    return normalized or "cliente"
+
+
+def _compose_customer_full_address(customer: Customer) -> str:
+    street_parts = [customer.endereco]
+    if customer.numero:
+        street_parts.append(customer.numero)
+    if customer.complemento:
+        street_parts.append(customer.complemento)
+    street_line = ", ".join(part for part in street_parts if part)
+
+    locality_parts = [customer.bairro, customer.cidade]
+    locality = " - ".join(part for part in locality_parts if part)
+    state_zip = " / ".join(part for part in [customer.estado, customer.cep] if part)
+    tail = ", ".join(part for part in [locality, state_zip] if part)
+    return ", ".join(part for part in [street_line, tail] if part)
+
+
+def _resolve_work_order_provider_company(db: Session, work_order: WorkOrder) -> Optional[ProviderCompany]:
+    if work_order.empresa_prestadora_id is None:
+        return None
+    return db.query(ProviderCompany).filter(ProviderCompany.id == work_order.empresa_prestadora_id).first()
+
+
+def _resolve_guarantee_company_data(db: Session, work_order: WorkOrder) -> dict[str, str]:
+    settings = get_settings()
+    provider_company = _resolve_work_order_provider_company(db, work_order)
+    company_name = (
+        (provider_company.nome_fantasia if provider_company and provider_company.nome_fantasia else None)
+        or (provider_company.razao_social if provider_company else None)
+        or settings.company_trade_name
+        or settings.company_name
+    )
+    company_cnpj = (provider_company.cnpj if provider_company else None) or settings.company_cnpj or ""
+    company_email = (provider_company.email if provider_company else None) or getattr(settings, "company_email", "") or ""
+    phone_1 = (provider_company.telefone if provider_company else None) or settings.company_phone or ""
+    phone_2 = getattr(settings, "company_phone_secondary", "") or ""
+    company_site = getattr(settings, "company_website", "") or ""
+    return {
+        "empresa_nome": company_name,
+        "empresa_cnpj": company_cnpj,
+        "empresa_site": company_site,
+        "empresa_email": company_email,
+        "empresa_telefone_1": phone_1,
+        "empresa_telefone_2": phone_2,
+    }
+
+
+def _resolve_guarantee_template_path() -> Optional[Path]:
+    settings = get_settings()
+    preferred_candidates = [
+        settings.certificate_models_path / "modelo.png",
+        settings.certificate_models_path / "modelo.jpg",
+        settings.certificate_models_path / "modelo.jpeg",
+    ]
+    for candidate in preferred_candidates:
+        if candidate.exists():
+            return candidate
+
+    searchable_dirs = [settings.legacy_certificate_models_path, settings.certificate_models_path]
+    ranked_keywords = ("garantia", "certificado", "modelo")
+    found_candidates: list[tuple[int, Path]] = []
+    for directory in searchable_dirs:
+        if not directory or not directory.exists():
+            continue
+        for path in directory.iterdir():
+            if not path.is_file() or path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+                continue
+            path_name = path.stem.lower()
+            score = sum(1 for keyword in ranked_keywords if keyword in path_name)
+            found_candidates.append((score, path))
+    if not found_candidates:
+        return None
+    found_candidates.sort(key=lambda item: (-item[0], str(item[1]).lower()))
+    return found_candidates[0][1]
+
+
+def _resolve_guarantee_service_text(work_order: WorkOrder) -> str:
+    if work_order.pragas:
+        return ", ".join(item.praga.nome_comum for item in work_order.pragas)
+    if work_order.produtos:
+        return "Controle de pragas com aplicacao tecnica monitorada"
+    return "Controle integrado de pragas urbanas"
+
+
+def _resolve_guarantee_dilution_text(work_order: WorkOrder) -> str:
+    dilutions = [str(item.diluicao).strip() for item in work_order.produtos if str(item.diluicao or "").strip()]
+    unique_values: list[str] = []
+    for value in dilutions:
+        if value not in unique_values:
+            unique_values.append(value)
+    return ", ".join(unique_values) if unique_values else "Conforme receituario tecnico"
+
+
+def _resolve_guarantee_validity_text(work_order: WorkOrder) -> str:
+    return work_order.garantia_ate.strftime("%d/%m/%Y")
+
+
+def _resolve_guarantee_term_text(work_order: WorkOrder) -> str:
+    delta = max((work_order.garantia_ate - work_order.data_execucao).days, 0)
+    return f"{delta} DIAS" if delta else "CONFORME CONTRATO"
+
+
+def _draw_guarantee_certificate_field(
+    pdf: canvas.Canvas,
+    *,
+    x: float,
+    y: float,
+    width: float,
+    value: str,
+    font_name: str = "Helvetica-Bold",
+    font_size: float = 11,
+    min_font_size: float = 8,
+    color=colors.HexColor("#343434"),
+) -> None:
+    pdf.setFillColor(colors.white)
+    pdf.rect(x - 1.2 * mm, y - 3.3 * mm, width + 2.4 * mm, 5.4 * mm, stroke=0, fill=1)
+    pdf.setFillColor(color)
+    _draw_centered_text_to_fit(
+        pdf,
+        value,
+        center_x=x + (width / 2),
+        baseline_y=y,
+        max_width=width,
+        font_name=font_name,
+        initial_size=font_size,
+        min_size=min_font_size,
+    )
+
+
+def _draw_guarantee_footer_block(
+    pdf: canvas.Canvas,
+    *,
+    x: float,
+    y: float,
+    lines: list[str],
+    width: float,
+    align: str = "left",
+    text_color=colors.HexColor("#198f43"),
+) -> None:
+    box_height = max(16 * mm, (len(lines) * 5.2 * mm) + 4 * mm)
+    pdf.setFillColor(colors.white)
+    pdf.rect(x, y - 3 * mm, width, box_height, stroke=0, fill=1)
+    pdf.setFillColor(text_color)
+    pdf.setFont("Helvetica-Bold", 10.2)
+    current_y = y + box_height - 8 * mm
+    for line in lines:
+        if align == "center":
+            pdf.drawCentredString(x + (width / 2), current_y, line)
+        else:
+            pdf.drawString(x + 2 * mm, current_y, line)
+        current_y -= 5.2 * mm
+
+
 def _resolve_responsible_name(settings, work_order: WorkOrder) -> str:
     responsible_name = settings.technical_responsible_name
     if responsible_name == "Responsavel tecnico nao configurado":
@@ -3180,3 +3338,118 @@ def generate_framed_sanitary_certificate_pdf(db: Session, work_order_id: int, cu
             current_user=current_user,
         ),
     )
+
+
+def generate_guarantee_certificate_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
+    def _builder() -> bytes:
+        work_order = get_work_order(db, work_order_id, current_user=current_user)
+        settings = get_settings()
+        template_path = _resolve_guarantee_template_path()
+        if template_path is None:
+            LOGGER.warning("guarantee_certificate_template_missing work_order_id=%s", work_order_id)
+            return _generate_standard_sanitary_certificate_pdf(
+                db,
+                work_order_id,
+                current_user=current_user,
+            )
+
+        buffer = BytesIO()
+        page_width, page_height = landscape(A4)
+        pdf = canvas.Canvas(buffer, pagesize=(page_width, page_height))
+        pdf.setTitle("Certificado de Garantia")
+        _draw_template_certificate_background(pdf, template_path, page_width, page_height)
+
+        company_data = _resolve_guarantee_company_data(db, work_order)
+        customer_address = _compose_customer_full_address(work_order.cliente)
+        service_text = _resolve_guarantee_service_text(work_order)
+        location_text = work_order.local_execucao or "Conforme ordem de servico"
+        application_date = work_order.data_execucao.strftime("%d/%m/%Y")
+        guarantee_term = _resolve_guarantee_term_text(work_order)
+        dilution_text = _resolve_guarantee_dilution_text(work_order)
+        validity_text = _resolve_guarantee_validity_text(work_order)
+        responsible_name = _resolve_responsible_name(settings, work_order)
+        applicator_name = work_order.tecnico.nome
+        signature_path = resolve_technical_signature_path(work_order.tecnico)
+
+        pdf.setFillColor(colors.HexColor("#43a047"))
+        pdf.setFont("Helvetica-Bold", 26)
+        pdf.drawString(32 * mm, 160 * mm, "CERTIFICADO DE GARANTIA")
+
+        pdf.setFillColor(colors.HexColor("#4f7e41"))
+        pdf.setFont("Helvetica-Bold", 11)
+        pdf.drawString(2 * mm, 143 * mm, "Certificamos que o(a):")
+        _draw_guarantee_certificate_field(pdf, x=62 * mm, y=143 * mm, width=116 * mm, value=work_order.cliente.razao_social.upper(), font_size=12)
+
+        pdf.drawString(2 * mm, 133 * mm, "Situado(a) na:")
+        _draw_guarantee_certificate_field(pdf, x=42 * mm, y=133 * mm, width=136 * mm, value=customer_address.upper(), font_size=10.5, min_font_size=7.5)
+
+        pdf.drawString(2 * mm, 123 * mm, "Efetuou o controle de pragas em suas dependencias, atraves da Ordem de Servico:")
+        _draw_guarantee_certificate_field(pdf, x=180 * mm, y=123 * mm, width=28 * mm, value=work_order.numero, font_size=11.5, min_font_size=8.5)
+
+        pdf.drawString(2 * mm, 112 * mm, "Servicos realizados:")
+        _draw_guarantee_certificate_field(pdf, x=50 * mm, y=112 * mm, width=128 * mm, value=service_text.upper(), font_size=10.8, min_font_size=7.5)
+
+        pdf.drawString(2 * mm, 102 * mm, "Locais tratados:")
+        _draw_guarantee_certificate_field(pdf, x=40 * mm, y=102 * mm, width=138 * mm, value=location_text.upper(), font_size=10.8, min_font_size=7.5)
+
+        pdf.setFont("Helvetica-Bold", 11)
+        pdf.drawString(2 * mm, 89 * mm, "Data da aplicacao:")
+        _draw_guarantee_certificate_field(pdf, x=39 * mm, y=89 * mm, width=28 * mm, value=application_date, font_size=11.2)
+        pdf.drawString(82 * mm, 89 * mm, "Prazo(s) de Garantia:")
+        _draw_guarantee_certificate_field(pdf, x=124 * mm, y=89 * mm, width=42 * mm, value=guarantee_term, font_size=11.2)
+        pdf.drawString(180 * mm, 89 * mm, "Diluicao:")
+        _draw_guarantee_certificate_field(pdf, x=201 * mm, y=89 * mm, width=28 * mm, value=dilution_text.upper(), font_size=10.8, min_font_size=7.5)
+
+        pdf.setFillColor(colors.HexColor("#313131"))
+        pdf.setFont("Helvetica-Bold", 15)
+        pdf.drawCentredString(page_width / 2, 64 * mm, "Conforme regulamentacao da Vigilancia Sanitaria.")
+        pdf.drawCentredString(page_width / 2, 53 * mm, "CVS nº 006, de 12 de janeiro de 2011.")
+        pdf.setFont("Helvetica", 13)
+        pdf.drawCentredString(page_width / 2, 42 * mm, f"Este certificado tem validade conforme prazo informado: {validity_text}.")
+        pdf.drawCentredString(page_width / 2, 31 * mm, "Produto utilizado devidamente autorizado pelos orgaos competentes.")
+
+        pdf.setFillColor(colors.HexColor("#43a047"))
+        pdf.setFont("Helvetica-Bold", 10.5)
+        pdf.drawString(2 * mm, 22 * mm, f"Tecnico aplicador: {applicator_name}")
+
+        pdf.setFillColor(colors.white)
+        pdf.rect(16 * mm, 6 * mm, 64 * mm, 28 * mm, stroke=0, fill=1)
+        _draw_signature_stamp(
+            pdf,
+            signature_path=signature_path,
+            center_x=48 * mm,
+            line_y=12 * mm,
+            label="Tecnico responsavel",
+            name=responsible_name,
+            max_width=38 * mm,
+            max_height=12 * mm,
+        )
+
+        _draw_guarantee_footer_block(
+            pdf,
+            x=94 * mm,
+            y=8 * mm,
+            width=72 * mm,
+            lines=[
+                f"CNPJ: {company_data['empresa_cnpj'] or 'Nao informado'}",
+                company_data["empresa_site"] or "Site nao informado",
+                company_data["empresa_email"] or "E-mail nao informado",
+            ],
+        )
+        _draw_guarantee_footer_block(
+            pdf,
+            x=197 * mm,
+            y=8 * mm,
+            width=69 * mm,
+            lines=[
+                company_data["empresa_telefone_1"] or "Telefone nao informado",
+                company_data["empresa_telefone_2"] or "",
+            ],
+            align="center",
+        )
+
+        pdf.showPage()
+        pdf.save()
+        return buffer.getvalue()
+
+    return _run_document_generation("guarantee_certificate_pdf", work_order_id, _builder)

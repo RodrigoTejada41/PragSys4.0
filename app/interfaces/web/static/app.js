@@ -3493,11 +3493,11 @@ async function save_order(form) {
     state.workOrderWorkflow.lastSavedOrderId = result.id;
     state.workOrderWorkflow.certificateReady = false;
     try {
-        await generate_certificate(result.id, { mode: "background" });
+        await generate_certificate(result.id, { mode: "background", variant: "garantia" });
         state.workOrderWorkflow.certificateReady = true;
     } catch (error) {
         state.workOrderWorkflow.certificateReady = false;
-        toast(`Ordem salva, mas houve falha ao preparar o certificado: ${error.message}`);
+        toast(`Ordem salva, mas houve falha ao preparar o certificado de garantia: ${error.message}`);
     }
     renderWorkOrderSaveFeedback();
     return result;
@@ -3625,11 +3625,12 @@ function bindWorkOrderSelectors() {
         }
         const workOrderId = Number(button.dataset.id);
         const action = button.dataset.workOrderAction;
-        const previewActions = new Set(["preview-order", "print", "certificate-preview", "certificate-moldura-preview"]);
+        const previewActions = new Set(["preview-order", "print", "certificate-preview", "certificate-guarantee-preview", "certificate-moldura-preview"]);
         const previewTitleMap = {
             "preview-order": `Ordem de Servico ${workOrderId}`,
             print: `Ordem de Servico ${workOrderId}`,
             "certificate-preview": `Certificado ${workOrderId}`,
+            "certificate-guarantee-preview": `Certificado de Garantia ${workOrderId}`,
             "certificate-moldura-preview": `Certificado Moldura ${workOrderId}`,
         };
         const previewWindow = previewActions.has(action)
@@ -3647,6 +3648,14 @@ function bindWorkOrderSelectors() {
             }
             if (action === "certificate-preview") {
                 await generate_certificate(workOrderId, { mode: "preview", previewWindow });
+                return;
+            }
+            if (action === "certificate-guarantee-preview") {
+                await generate_certificate(workOrderId, { mode: "preview", variant: "garantia", previewWindow });
+                return;
+            }
+            if (action === "certificate-guarantee-download") {
+                await generate_certificate(workOrderId, { mode: "download", variant: "garantia" });
                 return;
             }
             if (action === "certificate-download") {
@@ -5678,6 +5687,10 @@ function renderWorkOrderActionPanel(item) {
                             <i class="fas fa-shield-alt"></i>
                             <span>Sanitario padrao</span>
                         </a>
+                        <a href="#" class="subtle-link toolbar-link pdf-link is-featured" data-doc="garantia" data-id="${item.id}">
+                            <i class="fas fa-award"></i>
+                            <span>Certificado garantia</span>
+                        </a>
                         <a href="#" class="subtle-link toolbar-link pdf-link is-featured" data-doc="moldura" data-id="${item.id}">
                             <i class="fas fa-certificate"></i>
                             <span>Moldura recomendada</span>
@@ -5783,12 +5796,14 @@ function bindWorkOrderDocumentLinks() {
                 os: `/api/v1/os/${id}/pdf`,
                 relatorio: `/api/v1/os/${id}/relatorio-tecnico.pdf`,
                 certificado: `/api/v1/os/${id}/certificado-sanitario.pdf`,
+                garantia: `/api/v1/os/${id}/certificado-garantia.pdf`,
                 moldura: `/api/v1/os/${id}/certificado-moldura.pdf`,
             };
             const docTitleMap = {
                 os: `Ordem de Servico ${id}`,
                 relatorio: `Relatorio tecnico ${id}`,
                 certificado: `Certificado sanitario ${id}`,
+                garantia: `Certificado de garantia ${id}`,
                 moldura: `Certificado moldura ${id}`,
             };
             const previewWindow = openDocumentPreviewShell(
@@ -5849,16 +5864,18 @@ function renderWorkOrderSaveFeedback() {
         <section class="work-order-save-card">
             <div class="section-heading compact">
                 <h4>Ordem salva com sucesso</h4>
-                <p>OS ${escapeHtml(workOrder.numero)} pronta para visualizacao, impressao e emissao dos documentos. A moldura segue em destaque para abertura e download.</p>
+                <p>OS ${escapeHtml(workOrder.numero)} pronta para visualizacao, impressao e emissao dos documentos. O certificado de garantia foi preparado automaticamente e pode ser aberto abaixo.</p>
             </div>
             <div class="work-order-save-meta">
                 <span class="orders-stat is-active">${escapeHtml(workOrder.cliente?.razao_social || "Cliente")}</span>
                 <span class="orders-stat">${formatDate(workOrder.data_execucao)}</span>
-                <span class="orders-stat">${state.workOrderWorkflow.certificateReady ? "Certificado pronto" : "Certificado sob demanda"}</span>
+                <span class="orders-stat">${state.workOrderWorkflow.certificateReady ? "Garantia pronta" : "Garantia sob demanda"}</span>
             </div>
             <div class="work-order-save-actions">
                 <button type="button" class="btn btn-success" data-work-order-action="preview-order" data-id="${workOrder.id}">Visualizar OS</button>
                 <button type="button" class="btn btn-default ghost-button" data-work-order-action="print" data-id="${workOrder.id}">Imprimir OS</button>
+                <button type="button" class="btn btn-primary" data-work-order-action="certificate-guarantee-preview" data-id="${workOrder.id}">Abrir garantia</button>
+                <button type="button" class="btn btn-default ghost-button" data-work-order-action="certificate-guarantee-download" data-id="${workOrder.id}">Baixar garantia</button>
                 <button type="button" class="btn btn-warning" data-work-order-action="certificate-moldura-preview" data-id="${workOrder.id}">Abrir moldura</button>
                 <button type="button" class="btn btn-default ghost-button" data-work-order-action="certificate-moldura-download" data-id="${workOrder.id}">Baixar moldura</button>
             </div>
@@ -5945,9 +5962,12 @@ function printAppointmentSummary(appointmentId) {
 async function generate_certificate(workOrderId, options = {}) {
     const mode = options.mode || "preview";
     const variant = options.variant || "standard";
-    const endpoint = variant === "moldura"
-        ? `/api/v1/os/${workOrderId}/certificado-moldura.pdf`
-        : `/api/v1/os/${workOrderId}/certificado-sanitario.pdf`;
+    const endpointMap = {
+        standard: `/api/v1/os/${workOrderId}/certificado-sanitario.pdf`,
+        garantia: `/api/v1/os/${workOrderId}/certificado-garantia.pdf`,
+        moldura: `/api/v1/os/${workOrderId}/certificado-moldura.pdf`,
+    };
+    const endpoint = endpointMap[variant] || endpointMap.standard;
     const blob = await apiFetch(endpoint);
     const workOrder = getEntityByKind("workOrder", workOrderId);
     if (mode === "background") {
@@ -5957,7 +5977,11 @@ async function generate_certificate(workOrderId, options = {}) {
         downloadBlob(blob, buildCertificateFilename(workOrder, variant));
         return blob;
     }
-    const titlePrefix = variant === "moldura" ? "Certificado Moldura" : "Certificado";
+    const titlePrefix = variant === "moldura"
+        ? "Certificado Moldura"
+        : variant === "garantia"
+            ? "Certificado de Garantia"
+            : "Certificado";
     openBlobPreview(blob, `${titlePrefix} ${workOrder?.numero || workOrderId}`, {
         previewWindow: options.previewWindow,
     });
@@ -5966,7 +5990,7 @@ async function generate_certificate(workOrderId, options = {}) {
 
 function buildCertificateFilename(workOrder, variant = "standard") {
     const customer = sanitizeFilenamePart(workOrder?.cliente?.razao_social || "cliente");
-    const suffix = variant === "moldura" ? "moldura" : "padrao";
+    const suffix = variant === "moldura" ? "moldura" : variant === "garantia" ? "garantia" : "padrao";
     return `cert_${suffix}_${workOrder?.id || "os"}_${customer}.pdf`;
 }
 
