@@ -498,6 +498,24 @@ def _migration_20260326_004_work_order_contract_type(engine: Engine) -> None:
         connection.execute(text("UPDATE ordens_servico SET tipo_os = 'avulsa' WHERE tipo_os IS NULL OR tipo_os = ''"))
 
 
+def _migration_20260327_001_backend_hardening(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS background_job_runs (
+                    id INTEGER PRIMARY KEY,
+                    task_name VARCHAR(80) NOT NULL,
+                    run_date DATE NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_background_job_runs_task_date UNIQUE (task_name, run_date)
+                )
+                """
+            )
+        )
+    _create_index_if_missing(engine, "background_job_runs", "ix_background_job_runs_task_name", ["task_name"])
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
@@ -507,6 +525,7 @@ MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260326_002_contracts_module", _migration_20260326_002_contracts_module),
     ("20260326_003_contract_billing_reporting", _migration_20260326_003_contract_billing_reporting),
     ("20260326_004_work_order_contract_type", _migration_20260326_004_work_order_contract_type),
+    ("20260327_001_backend_hardening", _migration_20260327_001_backend_hardening),
 ]
 
 

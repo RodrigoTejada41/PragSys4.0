@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    app_env: str = "development"
     app_name: str = "SysPragas API"
     app_version: str = "4.1.0"
     api_v1_prefix: str = "/api/v1"
@@ -73,6 +74,7 @@ class Settings(BaseSettings):
     smtp_sender_name: Optional[str] = None
     contract_scheduler_enabled: bool = True
     contract_scheduler_poll_seconds: int = 3600
+    settings_encryption_key: Optional[str] = None
     ncm_external_source_url: Optional[str] = None
     ncm_external_source_token: Optional[str] = None
     focus_nfe_api_base_url: Optional[str] = None
@@ -140,7 +142,23 @@ class Settings(BaseSettings):
             return "0.0.0.0"
         return self.app_host
 
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.strip().lower() in {"prod", "production"}
+
+    def validate_runtime_configuration(self) -> None:
+        if not self.is_production:
+            return
+        if self.jwt_secret == "<SECRET>":
+            raise ValueError("Configure JWT_SECRET com um valor seguro antes de subir o sistema em producao.")
+        if self.default_admin_password == "syspragas123":
+            raise ValueError(
+                "Configure DEFAULT_ADMIN_PASSWORD com um valor seguro antes de subir o sistema em producao."
+            )
+
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    settings.validate_runtime_configuration()
+    return settings

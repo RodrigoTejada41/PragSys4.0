@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.1.8] - 2026-03-27
+
+- Backend passou a validar `JWT_SECRET` e `DEFAULT_ADMIN_PASSWORD` inseguros quando `APP_ENV=production`.
+- `smtp_password` nas configuracoes do sistema passou a ser persistido criptografado, com compatibilidade de leitura para valores legados.
+- Scheduler de contratos passou a usar coordenacao por banco em `background_job_runs`, evitando execucao duplicada por dia entre processos.
+- Autenticacao HTTP deixou de converter excecoes internas inesperadas em `401`, melhorando diagnostico operacional.
+- Documentacao tecnica adicionada para o endurecimento do backend e orientacao de novas configuracoes.
+
 ## [4.1.7] - 2026-03-26
 
 - Pipeline `CI/CD` adicionado em `.github/workflows/ci-cd.yml` com validacao, analise de seguranca e deploy automatico por branch para `dev` e `main`.

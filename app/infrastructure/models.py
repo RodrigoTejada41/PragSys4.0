@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timezone
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, LargeBinary, Numeric, String, Text, Time
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, LargeBinary, Numeric, String, Text, Time, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.db import Base
@@ -616,3 +616,16 @@ class SystemSetting(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
     updated_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+
+
+class BackgroundJobRun(Base):
+    __tablename__ = "background_job_runs"
+    __table_args__ = (
+        UniqueConstraint("task_name", "run_date", name="uq_background_job_runs_task_date"),
+        Index("ix_background_job_runs_task_name", "task_name"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    run_date: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)

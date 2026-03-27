@@ -1,6 +1,10 @@
+import base64
+import hashlib
 import json
+import logging
 from typing import Any, Optional
 
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.orm import Session
 
 from app.application.schemas import (
@@ -16,6 +20,10 @@ from app.application.schemas import (
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
 from app.infrastructure.models import SystemSetting, User
+
+LOGGER = logging.getLogger(__name__)
+SENSITIVE_SETTINGS = {"smtp_password"}
+ENCRYPTED_SETTING_PREFIX = "enc:v1:"
 
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -63,6 +71,33 @@ def _deserialize_value(value: str) -> Any:
     return json.loads(value)
 
 
+def _get_settings_cipher() -> Fernet:
+    settings = get_settings()
+    secret_source = settings.settings_encryption_key or settings.jwt_secret
+    digest = hashlib.sha256(secret_source.encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def _encrypt_setting_value(value: Any) -> str:
+    payload = _serialize_value(value).encode("utf-8")
+    token = _get_settings_cipher().encrypt(payload).decode("utf-8")
+    return f"{ENCRYPTED_SETTING_PREFIX}{token}"
+
+
+def _decrypt_setting_value(value: str) -> Any:
+    if not value.startswith(ENCRYPTED_SETTING_PREFIX):
+        return _deserialize_value(value)
+    token = value[len(ENCRYPTED_SETTING_PREFIX):].encode("utf-8")
+    try:
+        decrypted = _get_settings_cipher().decrypt(token).decode("utf-8")
+    except InvalidToken as exc:
+        LOGGER.exception("system_setting_decryption_failed")
+        raise BusinessRuleViolation(
+            "Nao foi possivel descriptografar uma configuracao sensivel. Verifique SETTINGS_ENCRYPTION_KEY/JWT_SECRET."
+        ) from exc
+    return _deserialize_value(decrypted)
+
+
 def ensure_system_settings_seed(db: Session) -> None:
     changed = False
     for key, default_value in DEFAULT_SETTINGS.items():
@@ -85,6 +120,8 @@ def get_setting_value(db: Session, key: str, default: Any = None) -> Any:
             return default
         if key in DEFAULT_SETTINGS:
             return DEFAULT_SETTINGS[key]
+    if key in SENSITIVE_SETTINGS:
+        return _decrypt_setting_value(setting.value)
     return _deserialize_value(setting.value)
 
 
@@ -94,12 +131,13 @@ def get_boolean_setting(db: Session, key: str, fallback: bool = False) -> bool:
 
 
 def set_setting_value(db: Session, key: str, value: Any, updated_by_user_id: Optional[int] = None) -> SystemSetting:
+    serialized_value = _encrypt_setting_value(value) if key in SENSITIVE_SETTINGS and value is not None else _serialize_value(value)
     setting = db.query(SystemSetting).filter(SystemSetting.key == key).first()
     if setting is None:
-        setting = SystemSetting(key=key, value=_serialize_value(value))
+        setting = SystemSetting(key=key, value=serialized_value)
         db.add(setting)
     else:
-        setting.value = _serialize_value(value)
+        setting.value = serialized_value
     setting.updated_by_user_id = updated_by_user_id
     return setting
 

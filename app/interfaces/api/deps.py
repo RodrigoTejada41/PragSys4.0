@@ -1,6 +1,7 @@
 from typing import Callable, Iterable, Optional
 
 from fastapi import Depends, Header, HTTPException, status
+from jwt import InvalidTokenError
 from sqlalchemy.orm import Session
 
 from app.application.services import ensure_license_allows_access, get_user_by_id
@@ -32,7 +33,7 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token invalido ou expirado.",
         )
-    except Exception:
+    except InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token invalido ou expirado.",
