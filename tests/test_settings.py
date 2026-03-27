@@ -306,6 +306,29 @@ def test_pdf_upload_extracts_sanitary_license_expiry(client, auth_headers):
     assert company["sanitary_license_expiry"] == "15/08/2027"
 
 
+def test_pdf_upload_extracts_year_only_expiry(client, auth_headers):
+    pdf_content = _build_regulatory_pdf(
+        "LICENÇA AMBIENTAL (TESTE)",
+        "Número da Licença: LA-TESTE-2031",
+        "Validade: 2031",
+        "Razão Social: EMPRESA MODELO CONTROLE DE PRAGAS LTDA",
+        "Endereço: Rua Exemplo, 123 - Centro - Carapicuíba/SP",
+        "Responsável Técnico: João da Silva",
+        "Registro: CRBio 123456/01-D",
+    )
+
+    upload_response = client.post(
+        "/api/v1/settings/technical-documents/assets/environmental_license",
+        headers=auth_headers,
+        files={"file": ("licenca-ambiental-ano.pdf", pdf_content, "application/pdf")},
+    )
+
+    assert upload_response.status_code == 200
+    company = upload_response.json()
+    assert company["environmental_license_number"] == "LA-TESTE-2031"
+    assert company["environmental_license_expiry"] == "2031"
+
+
 def test_operador_cannot_access_system_settings(client, auth_headers):
     create_user_response = client.post(
         "/api/v1/usuarios",

@@ -1630,6 +1630,8 @@ async function uploadTechnicalAsset(kind, file) {
         body: formData,
     });
     await loadAllData();
+    renderSettings();
+    switchView("configuracoes");
     toast("Arquivo tecnico atualizado com sucesso.");
 }
 
@@ -1642,6 +1644,8 @@ async function saveDrawnSignature(canvas) {
         body: formData,
     });
     await loadAllData();
+    renderSettings();
+    switchView("configuracoes");
     toast("Assinatura desenhada salva com sucesso.");
 }
 

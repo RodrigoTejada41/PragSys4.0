@@ -92,11 +92,13 @@ Quando a licenca sanitaria ou ambiental e enviada em PDF com camada de texto, o 
 - numero da licenca correspondente
 - com tolerancia a acentos e variacoes comuns de rotulo no PDF
 - com suporte ao formato comum `Numero da Licenca` e `Registro: CRBio ...`
+- com suporte a validade em `dd/mm/aaaa`, `mm/aaaa` ou somente ano quando isso for tudo o que o PDF informa
 
 Observacao:
 
 - PDFs apenas escaneados, sem texto selecionavel, ainda podem exigir preenchimento manual
 - se o PDF nao trouxer CIT/telefone CIT no proprio conteudo, esse campo continua exigindo preenchimento manual
+- depois do upload, a tela de configuracoes e renderizada novamente para refletir os campos preenchidos
 
 ## Estrategia de migracao
 

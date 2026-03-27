@@ -717,16 +717,12 @@ def _extract_regulatory_fields_from_pdf(content: bytes) -> dict[str, str]:
     if sanitary_number:
         extracted["sanitary_license_number"] = sanitary_number.upper()
 
-    sanitary_expiry = _extract_pdf_line_value(
+    sanitary_expiry = _extract_license_expiry(
         searchable_lines,
-        [
-            r"validade licenca sanitaria\s*[:\-]\s*(.+)",
-            r"validade alvara sanitario\s*[:\-]\s*(.+)",
-            r"validade\s*[:\-]\s*(\d{2}/\d{2}/\d{4})",
-        ],
+        asset_kind="sanitary_license",
     )
     if sanitary_expiry:
-        extracted["sanitary_license_expiry"] = _normalize_license_date(sanitary_expiry)
+        extracted["sanitary_license_expiry"] = sanitary_expiry
 
     environmental_number = _extract_pdf_line_value(
         searchable_lines,
@@ -740,16 +736,12 @@ def _extract_regulatory_fields_from_pdf(content: bytes) -> dict[str, str]:
     if environmental_number:
         extracted["environmental_license_number"] = environmental_number.upper()
 
-    environmental_expiry = _extract_pdf_line_value(
+    environmental_expiry = _extract_license_expiry(
         searchable_lines,
-        [
-            r"validade licenca ambiental\s*[:\-]\s*(.+)",
-            r"validade licenca de operacao\s*[:\-]\s*(.+)",
-            r"validade\s*[:\-]\s*(\d{2}/\d{2}/\d{4})",
-        ],
+        asset_kind="environmental_license",
     )
     if environmental_expiry:
-        extracted["environmental_license_expiry"] = _normalize_license_date(environmental_expiry)
+        extracted["environmental_license_expiry"] = environmental_expiry
 
     cit_name = _extract_pdf_line_value(
         searchable_lines,
@@ -820,11 +812,42 @@ def _extract_pdf_inline_value(text: str, patterns: list[str]) -> Optional[str]:
     return None
 
 
+def _extract_license_expiry(lines: list[tuple[str, str]], *, asset_kind: str) -> Optional[str]:
+    if asset_kind == "sanitary_license":
+        keyword_patterns = [
+            r"validade licenca sanitaria\s*[:\-]\s*(.+)",
+            r"validade alvara sanitario\s*[:\-]\s*(.+)",
+        ]
+    else:
+        keyword_patterns = [
+            r"validade licenca ambiental\s*[:\-]\s*(.+)",
+            r"validade licenca de operacao\s*[:\-]\s*(.+)",
+        ]
+    direct_value = _extract_pdf_line_value(lines, keyword_patterns)
+    if direct_value:
+        return _normalize_license_date(direct_value)
+
+    for normalized_line, original_line in lines:
+        if "validade" not in normalized_line and "vencimento" not in normalized_line:
+            continue
+        normalized = _normalize_license_date(original_line)
+        if normalized:
+            return normalized
+    return None
+
+
 def _normalize_license_date(value: str) -> str:
-    match = re.search(r"\b(\d{2}/\d{2}/\d{4})\b", str(value or ""))
-    if match:
-        return match.group(1)
-    return str(value or "").strip()
+    raw_value = str(value or "").strip()
+    for pattern in [
+        r"\b(\d{2}/\d{2}/\d{4})\b",
+        r"\b(\d{2}-\d{2}-\d{4})\b",
+        r"\b(\d{2}/\d{4})\b",
+        r"\b(20\d{2})\b",
+    ]:
+        match = re.search(pattern, raw_value)
+        if match:
+            return match.group(1).replace("-", "/")
+    return raw_value
 
 
 def _apply_extracted_regulatory_fields(record: CompanyTechnicalData, extracted_fields: dict[str, str], *, asset_kind: str) -> None:
