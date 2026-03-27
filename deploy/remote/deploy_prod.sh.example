@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+APP_DIR="/opt/syspragas/prod"
+BRANCH="main"
+HEALTH_URL="http://127.0.0.1:8000/health"
+COMPOSE_FILE="docker-compose.yml"
+SERVICES="${SERVICES:-syspragas}"
+
+cd "$APP_DIR"
+
+if [[ -f ".env.prod" ]]; then
+  cp ".env.prod" ".env"
+else
+  echo ".env.prod nao encontrado em $APP_DIR" >&2
+  exit 1
+fi
+
+bash ./deploy/deploy.sh \
+  --env prod \
+  --branch "$BRANCH" \
+  --app-dir "$APP_DIR" \
+  --compose-file "$COMPOSE_FILE" \
+  --services "$SERVICES" \
+  --health-url "$HEALTH_URL"

@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+DEPLOY_USER="${DEPLOY_USER:-syspragas}"
+APP_DIR="${APP_DIR:-/opt/syspragas/prod}"
+REPO_URL="${REPO_URL:-git@github.com:SEU_USUARIO/SEU_REPOSITORIO.git}"
+REMOTE_SCRIPT_TARGET="${REMOTE_SCRIPT_TARGET:-/var/www/deploy_prod.sh}"
+
+log() {
+  printf '[bootstrap-prod] %s\n' "$*"
+}
+
+require_root() {
+  if [[ "${EUID}" -ne 0 ]]; then
+    echo "Execute este script como root." >&2
+    exit 1
+  fi
+}
+
+install_packages() {
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y git curl ca-certificates docker.io docker-compose-plugin
+  systemctl enable --now docker
+}
+
+ensure_user() {
+  if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
+    useradd --create-home --shell /bin/bash "$DEPLOY_USER"
+  fi
+  usermod -aG docker "$DEPLOY_USER"
+}
+
+prepare_directories() {
+  mkdir -p "$(dirname "$APP_DIR")"
+  mkdir -p /var/www
+  chown -R "$DEPLOY_USER":"$DEPLOY_USER" "$(dirname "$APP_DIR")"
+}
+
+clone_repository() {
+  if [[ -d "$APP_DIR/.git" ]]; then
+    log "Checkout existente encontrado em $APP_DIR"
+    return 0
+  fi
+
+  runuser -u "$DEPLOY_USER" -- git clone "$REPO_URL" "$APP_DIR"
+  runuser -u "$DEPLOY_USER" -- git -C "$APP_DIR" checkout main
+}
+
+install_remote_script() {
+  install -m 0755 "$APP_DIR/deploy/remote/deploy_prod.sh.example" "$REMOTE_SCRIPT_TARGET"
+}
+
+main() {
+  require_root
+  install_packages
+  ensure_user
+  prepare_directories
+  clone_repository
+  install_remote_script
+
+  log "Bootstrap concluido."
+  log "Proximos passos:"
+  log "1. Criar $APP_DIR/.env.prod com base em deploy/env/.env.prod.example"
+  log "2. Ajustar o repositorio remoto, se necessario"
+  log "3. Executar bash $REMOTE_SCRIPT_TARGET"
+}
+
+main "$@"

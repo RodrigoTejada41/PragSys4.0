@@ -16,7 +16,7 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - `contracts-module.md`: modulo de contratos com arquivos, vencimento, notificacoes e rotina automatica.
 - `database-admin.md`: backup, restauracao e limpeza operacional do banco SQLite com foco em uso local e offline.
 - `design-system.md`: tokens visuais, padronizacao de formularios e arquitetura de componentes de interface.
-- `cicd-linode.md`: pipeline GitHub Actions com deploy automatizado para ambientes `dev` e `production` na Linode.
+- `cicd-linode.md`: pipeline GitHub Actions com deploy automatizado para `dev` e `production`, incluindo bootstrap da VPS, script remoto e operacao de rollback na Linode.
 - `backend-hardening-2026-03-27.md`: melhorias de seguranca e robustez aplicadas no backend em runtime, settings e scheduler.
 - `github-actions-secrets.md`: checklist de segredos e variaveis necessarios para o CI/CD remoto.
 - `whatsapp-qr-bridge.md`: execucao e configuracao do bridge local de WhatsApp com QR Code baseado em Baileys.

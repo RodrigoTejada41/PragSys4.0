@@ -2,6 +2,7 @@ services:
   syspragas:
     build: .
     container_name: syspragas
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
@@ -69,6 +70,7 @@ services:
     build:
       context: ./services/whatsapp-bridge
     container_name: syspragas-whatsapp-bridge
+    restart: unless-stopped
     ports:
       - "${WHATSAPP_BRIDGE_PORT:-3100}:3100"
     environment:

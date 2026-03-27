@@ -7,7 +7,7 @@ TARGET_BRANCH=""
 APP_DIR=""
 HEALTHCHECK_URL=""
 COMPOSE_FILE="docker-compose.yml"
-SERVICES=("syspragas" "whatsapp-bridge")
+SERVICES=("syspragas")
 BACKUP_DIR=""
 RELEASES_DIR=""
 ROLLBACK_BACKUP_PATH=""
@@ -35,12 +35,23 @@ Opcoes:
   --app-dir <value>      Diretorio do checkout da aplicacao na VPS.
   --health-url <value>   URL de health check. Padrao: http://127.0.0.1:8000/health
   --compose-file <value> Arquivo Compose a ser usado. Padrao: docker-compose.yml
+  --services <value>     Lista separada por virgula dos servicos Compose. Padrao: syspragas
   --no-rollback          Desabilita rollback automatico do codigo em caso de falha.
 EOF
 }
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Comando obrigatorio nao encontrado: $1"
+}
+
+parse_services() {
+  local raw_services="$1"
+  local normalized
+
+  normalized="${raw_services//,/ }"
+  read -r -a SERVICES <<<"$normalized"
+
+  [[ "${#SERVICES[@]}" -gt 0 ]] || fail "Informe ao menos um servico Compose em --services"
 }
 
 parse_args() {
@@ -64,6 +75,10 @@ parse_args() {
         ;;
       --compose-file)
         COMPOSE_FILE="$2"
+        shift 2
+        ;;
+      --services)
+        parse_services "$2"
         shift 2
         ;;
       --no-rollback)
