@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.7] - 2026-03-26
+
+- Pipeline `CI/CD` adicionado em `.github/workflows/ci-cd.yml` com validacao, analise de seguranca e deploy automatico por branch para `dev` e `main`.
+- Novo conjunto de scripts Linux em `deploy/` passou a padronizar deploy remoto, backup preventivo de producao, health check e rollback manual.
+- Configuracoes de qualidade para CI adicionadas com `.flake8` e `eslint.config.js`, cobrindo Python, frontend web e bridge Node.
+- Base documental expandida com guias de operacao do pipeline na Linode e checklist de segredos do GitHub Actions.
+
 ## [4.1.6] - 2026-03-26
 
 - Design system centralizado adicionado ao frontend com tokens de cor, tipografia, espacemento, borda e estados reutilizaveis de campo.

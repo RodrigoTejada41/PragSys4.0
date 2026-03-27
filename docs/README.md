@@ -16,6 +16,8 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - `contracts-module.md`: modulo de contratos com arquivos, vencimento, notificacoes e rotina automatica.
 - `database-admin.md`: backup, restauracao e limpeza operacional do banco SQLite com foco em uso local e offline.
 - `design-system.md`: tokens visuais, padronizacao de formularios e arquitetura de componentes de interface.
+- `cicd-linode.md`: pipeline GitHub Actions com deploy automatizado para ambientes `dev` e `production` na Linode.
+- `github-actions-secrets.md`: checklist de segredos e variaveis necessarios para o CI/CD remoto.
 - `whatsapp-qr-bridge.md`: execucao e configuracao do bridge local de WhatsApp com QR Code baseado em Baileys.
 - `github-publishing.md`: padrao de organizacao e publicacao do repositorio.
 - `technical-report-4.0.0.md`: relatorio tecnico consolidado da fase 4.0.0.
@@ -35,6 +37,8 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - consulte `contracts-module.md` antes de alterar vencimento, arquivos ou notificacoes contratuais;
 - consulte `database-admin.md` antes de alterar backup, restauracao ou limpeza operacional do banco;
 - consulte `design-system.md` antes de alterar formularios, campos e padroes visuais compartilhados;
+- consulte `cicd-linode.md` antes de alterar pipeline, deploy remoto ou estrutura de release operacional;
+- consulte `github-actions-secrets.md` ao configurar GitHub Actions, SSH e variaveis por ambiente;
 - consulte `whatsapp-qr-bridge.md` antes de ativar ou manter a integracao de WhatsApp por QR Code;
 - consulte `github-publishing.md` antes de preparar entrega para GitHub;
 - consulte `technical-report-4.0.0.md` para entender o escopo tecnico da release maior;
