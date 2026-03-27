@@ -89,10 +89,12 @@ Quando a licenca sanitaria ou ambiental e enviada em PDF com camada de texto, o 
 - telefone CIT
 - numero da licenca correspondente
 - com tolerancia a acentos e variacoes comuns de rotulo no PDF
+- com suporte ao formato comum `Numero da Licenca` e `Registro: CRBio ...`
 
 Observacao:
 
 - PDFs apenas escaneados, sem texto selecionavel, ainda podem exigir preenchimento manual
+- se o PDF nao trouxer CIT/telefone CIT no proprio conteudo, esse campo continua exigindo preenchimento manual
 
 ## Estrategia de migracao
 

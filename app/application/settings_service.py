@@ -675,6 +675,7 @@ def _extract_regulatory_fields_from_pdf(content: bytes) -> dict[str, str]:
         [
             r"registro profissional\s*[:\-]\s*(.+)",
             r"conselho profissional\s*[:\-]\s*(.+)",
+            r"registro\s*[:\-]\s*(.+)",
             r"(crbio|crea|crq|crm|crmv|cro)\s*(?:n[o0.\-]*\s*)?[:\-]?\s*([a-z0-9./-]+(?:\s*/\s*[a-z]{2})?)",
         ],
     )
@@ -710,6 +711,7 @@ def _extract_regulatory_fields_from_pdf(content: bytes) -> dict[str, str]:
         [
             r"licenca sanitaria\s*(?:n[o0.\-]*\s*)?[:\-]\s*([a-z0-9./-]+)",
             r"alvara sanitario\s*[:\-]\s*([a-z0-9./-]+)",
+            r"numero da licenca\s*[:\-]\s*([a-z0-9./-]+)",
         ],
     )
     if sanitary_number:
@@ -721,6 +723,7 @@ def _extract_regulatory_fields_from_pdf(content: bytes) -> dict[str, str]:
             r"licenca ambiental\s*(?:n[o0.\-]*\s*)?[:\-]\s*([a-z0-9./-]+)",
             r"licenca de operacao\s*[:\-]\s*([a-z0-9./-]+)",
             r"numero da licenca ambiental\s*[:\-]\s*([a-z0-9./-]+)",
+            r"numero da licenca\s*[:\-]\s*([a-z0-9./-]+)",
         ],
     )
     if environmental_number:

@@ -248,6 +248,38 @@ def test_pdf_upload_extracts_regulatory_fields_with_accents(client, auth_headers
     assert company["toxicology_center_phone"] == "0800 722 6001"
 
 
+def test_pdf_upload_extracts_fields_from_realistic_license_layout(client, auth_headers):
+    pdf_content = _build_regulatory_pdf(
+        "LICENÇA AMBIENTAL (TESTE)",
+        "Órgão Emissor: Secretaria Municipal do Meio Ambiente",
+        "Município: Carapicuíba - SP",
+        "Número da Licença: LA-TESTE-0001/2026",
+        "Data de Emissão: 01/01/2026",
+        "Validade: 01/01/2027",
+        "Razão Social: EMPRESA MODELO CONTROLE DE PRAGAS LTDA",
+        "CNPJ: 00.000.000/0001-00",
+        "Endereço: Rua Exemplo, 123 - Centro - Carapicuíba/SP",
+        "Atividade Licenciada: Controle de pragas urbanas",
+        "Responsável Técnico: João da Silva",
+        "Registro: CRBio 123456/01-D",
+    )
+
+    upload_response = client.post(
+        "/api/v1/settings/technical-documents/assets/environmental_license",
+        headers=auth_headers,
+        files={"file": ("licenca-ambiental-real.pdf", pdf_content, "application/pdf")},
+    )
+
+    assert upload_response.status_code == 200
+    company = upload_response.json()
+    assert company["legal_name"] == "EMPRESA MODELO CONTROLE DE PRAGAS LTDA"
+    assert company["address"] == "Rua Exemplo, 123 - Centro - Carapicuíba/SP"
+    assert company["technical_responsible_name"] == "João da Silva"
+    assert company["technical_registry_type"] == "CRBio"
+    assert company["technical_registry_number"] == "123456"
+    assert company["environmental_license_number"] == "LA-TESTE-0001/2026"
+
+
 def test_operador_cannot_access_system_settings(client, auth_headers):
     create_user_response = client.post(
         "/api/v1/usuarios",
