@@ -1,1 +1,1 @@
-
+"""Rotas e assets web."""

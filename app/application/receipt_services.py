@@ -26,7 +26,7 @@ from app.application.services import (
 )
 from app.core.exceptions import BusinessRuleViolation
 from app.domain.enums import ReceiptPaymentMethod, WorkOrderType
-from app.infrastructure.models import FinanceEntry, Receipt, ReceiptHistory, User, WorkOrder
+from app.infrastructure.models import FinanceEntry, Receipt, ReceiptHistory, WorkOrder
 
 
 RECEIPT_PAYMENT_LABELS = {

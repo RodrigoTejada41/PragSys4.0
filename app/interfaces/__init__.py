@@ -1,1 +1,1 @@
-
+"""Interfaces HTTP e web."""

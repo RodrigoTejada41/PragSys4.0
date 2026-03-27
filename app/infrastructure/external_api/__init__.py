@@ -1,1 +1,1 @@
-
+"""Clientes de APIs externas."""

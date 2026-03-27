@@ -176,7 +176,7 @@ class EvolutionWhatsAppClient:
 
 
 def _appointment_query(db: Session):
-    from app.infrastructure.models import AppointmentWhatsAppLog, Customer, Technician, User, WorkOrder
+    from app.infrastructure.models import AppointmentWhatsAppLog
 
     return db.query(Appointment).options(
         joinedload(Appointment.cliente),
@@ -730,5 +730,3 @@ def send_appointment_whatsapp_message(
     from app.application.scheduling_services import get_appointment
 
     return get_appointment(db, appointment.id)
-
-

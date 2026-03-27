@@ -21,7 +21,11 @@ from reportlab.lib.utils import ImageReader
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.config import get_settings
-from app.application.certificate_assets import resolve_certificate_model_path, resolve_technical_signature_path
+from app.application.certificate_assets import (
+    require_certificate_model_path,
+    resolve_certificate_model_path,
+    resolve_technical_signature_path,
+)
 from app.application.schemas import (
     AddressLookupRead,
     CustomerCnpjLookupRead,
@@ -3164,7 +3168,7 @@ def _generate_ornamental_sanitary_certificate_pdf(
     text.setLeading(9 * mm)
     body_lines = [
         "Certificamos que o estabelecimento abaixo identificado",
-        f"recebeu servico tecnico especializado de controle de pragas urbanas,",
+        "recebeu servico tecnico especializado de controle de pragas urbanas,",
         f"executado em {work_order.data_execucao.strftime('%d/%m/%Y')}, com validade tecnica ate",
         f"{work_order.garantia_ate.strftime('%d/%m/%Y')}, conforme registro da Ordem de Servico {work_order.numero}.",
         "",

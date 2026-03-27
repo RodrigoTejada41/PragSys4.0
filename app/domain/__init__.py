@@ -1,1 +1,1 @@
-
+"""Conceitos centrais de dominio."""

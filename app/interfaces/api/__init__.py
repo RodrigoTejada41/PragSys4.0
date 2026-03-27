@@ -1,1 +1,1 @@
-
+"""API HTTP do sistema."""

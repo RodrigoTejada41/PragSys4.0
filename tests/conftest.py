@@ -21,11 +21,11 @@ TEST_PNG_BYTES = b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5W9JcAAAAASUVORK5CYII="
 )
 
-from app.core.config import get_settings
-from app.core.security import create_access_token
-from app.infrastructure.db import get_session_local, init_db, reset_engine
-from app.infrastructure.models import User
-from app.main import app
+from app.core.config import get_settings  # noqa: E402
+from app.core.security import create_access_token  # noqa: E402
+from app.infrastructure.db import get_session_local, init_db, reset_engine  # noqa: E402
+from app.infrastructure.models import User  # noqa: E402
+from app.main import app  # noqa: E402
 
 TEST_RUN_ID = str(os.getpid())
 TEST_DB_PATH = Path(f"test_syspragas_{TEST_RUN_ID}.db")

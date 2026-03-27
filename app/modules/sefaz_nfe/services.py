@@ -16,7 +16,7 @@ from app.domain.enums import NfeProcessingStatus, NfeStatus
 from app.infrastructure.models import NfeInvoice, Product
 from app.modules.sefaz_nfe.sefaz_client import SefazResponse, SefazSoapClient
 from app.modules.sefaz_nfe.signer import sign_xml_document
-from app.modules.sefaz_nfe.xml_generator import GeneratedNfeXml, build_nfe_xml, validate_xml_against_xsd
+from app.modules.sefaz_nfe.xml_generator import build_nfe_xml, validate_xml_against_xsd
 
 NFE_NS = "http://www.portalfiscal.inf.br/nfe"
 

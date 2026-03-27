@@ -12,7 +12,6 @@ from app.application.services import (
     delete_work_order,
     generate_framed_sanitary_certificate_pdf,
     generate_guarantee_certificate_pdf_bundle,
-    generate_guarantee_certificate_pdf,
     generate_work_order_pdf,
     generate_sanitary_certificate_pdf,
     generate_technical_report_pdf,

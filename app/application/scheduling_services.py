@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Iterable, Optional, Union
+from typing import Optional, Union
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.orm import Session, joinedload
@@ -591,7 +591,7 @@ def update_appointment_status(
     current_user_id: Optional[int] = None,
     *,
     sync_google_after_commit: bool = True,
-    ) -> Appointment:
+) -> Appointment:
     appointment = get_appointment(db, appointment_id)
     previous_status = appointment.status
     appointment.status = payload.status.value

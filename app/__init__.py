@@ -1,1 +1,1 @@
-
+"""Aplicacao SysPragas."""

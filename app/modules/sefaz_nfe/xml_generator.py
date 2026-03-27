@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import random
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Optional, Union

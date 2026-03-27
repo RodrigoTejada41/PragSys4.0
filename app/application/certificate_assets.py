@@ -38,6 +38,7 @@ def _iter_candidate_names(technician: Technician) -> Iterable[str]:
             seen.add(token)
             yield token
 
+
 def _resolve_certificate_model_path_from_dirs(
     official_dir: Path,
     legacy_dir: Optional[Path],

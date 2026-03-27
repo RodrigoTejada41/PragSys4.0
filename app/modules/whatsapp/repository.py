@@ -36,4 +36,3 @@ def create_appointment_whatsapp_log(
     db.add(log_entry)
     db.flush()
     return log_entry
-

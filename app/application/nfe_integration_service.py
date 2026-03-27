@@ -3,19 +3,34 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date
-from decimal import Decimal
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.application.fiscal_services import _create_finance_entry_from_invoice, _get_customer_or_fail, _get_nfe_or_fail, _money, list_nfe_invoices
-from app.application.schemas import NfeCancelRequest, NfeInvoiceCreate, NfeInvoiceRead, NfeInvoiceUpdate, NfeWebhookEvent
+from app.application.fiscal_services import (
+    _create_finance_entry_from_invoice,
+    _get_customer_or_fail,
+    _get_nfe_or_fail,
+    _money,
+    list_nfe_invoices,
+)
+from app.application.schemas import (
+    NfeCancelRequest,
+    NfeInvoiceCreate,
+    NfeInvoiceUpdate,
+    NfeWebhookEvent,
+)
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
-from app.domain.enums import NfeEnvironment, NfeProcessingStatus, NfeStatus
+from app.domain.enums import NfeProcessingStatus, NfeStatus
 from app.infrastructure.external_api.focus_nfe import FocusNfeApiError, FocusNfeClient
 from app.infrastructure.models import NfeInvoice, Product
-from app.modules.sefaz_nfe.services import cancel_direct_nfe, get_direct_nfe_status, issue_direct_nfe, update_direct_nfe_local
+from app.modules.sefaz_nfe.services import (
+    cancel_direct_nfe,
+    get_direct_nfe_status,
+    issue_direct_nfe,
+    update_direct_nfe_local,
+)
 
 logger = logging.getLogger(__name__)
 
