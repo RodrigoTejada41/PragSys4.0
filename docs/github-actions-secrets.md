@@ -6,9 +6,9 @@ Para o pipeline `CI/CD` funcionar com separacao entre `dev` e `production`, conf
 
 - `DEV_SSH_PRIVATE_KEY`: chave privada do usuario de deploy.
 - `DEV_SSH_KNOWN_HOSTS`: saida do `ssh-keyscan` da VPS de desenvolvimento.
-- `DEV_HOST`: hostname ou IP da VPS de desenvolvimento.
-- `DEV_USER`: usuario SSH de deploy.
-- `DEV_DEPLOY_PATH`: caminho do checkout da aplicacao na VPS, por exemplo `/opt/syspragas/dev`.
+- `DEV_HOST`: 172.233.183.241
+- `DEV_USER`: root
+- `DEV_DEPLOY_PATH`:/opt/syspragas/dev
 
 ## Producao
 
