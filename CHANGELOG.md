@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.6] - 2026-03-26
+
+- Design system centralizado adicionado ao frontend com tokens de cor, tipografia, espacemento, borda e estados reutilizaveis de campo.
+- Novo `ui.js` passou a padronizar automaticamente formularios, inputs, selects e textareas da SPA sem alterar a regra de negocio.
+- Formularios administrativos e operacionais passaram a usar validacao visual consistente com destaque de erro por campo e acoes alinhadas.
+- Base documental expandida com `docs/design-system.md` para orientar futuras evolucoes de UI.
+
 ## [4.1.5] - 2026-03-26
 
 - Painel de `Configuracoes` ganhou a secao `Banco de dados` com acoes de backup, restauracao e limpeza operacional.

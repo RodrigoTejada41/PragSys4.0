@@ -1,18 +1,53 @@
 :root {
-    --sys-bg: #eef2ea;
-    --sys-surface: #ffffff;
-    --sys-surface-soft: #f6f8f2;
-    --sys-line: #d7ded1;
-    --sys-ink: #1e2a22;
-    --sys-muted: #6a776d;
-    --sys-primary: #2d6a4f;
-    --sys-primary-strong: #1f4a38;
-    --sys-accent: #d9f0d8;
-    --sys-warn: #b7791f;
-    --sys-danger: #b14534;
+    --sys-color-primary: #2d6a4f;
+    --sys-color-primary-strong: #1f4a38;
+    --sys-color-secondary: #5e6f64;
+    --sys-color-success: #237a57;
+    --sys-color-danger: #b14534;
+    --sys-color-warning: #b7791f;
+    --sys-color-background: #eef2ea;
+    --sys-color-surface: #ffffff;
+    --sys-color-surface-soft: #f6f8f2;
+    --sys-color-text: #1e2a22;
+    --sys-color-text-secondary: #6a776d;
+    --sys-color-line: #d7ded1;
+    --sys-color-accent: #d9f0d8;
+    --sys-bg: var(--sys-color-background);
+    --sys-surface: var(--sys-color-surface);
+    --sys-surface-soft: var(--sys-color-surface-soft);
+    --sys-line: var(--sys-color-line);
+    --sys-ink: var(--sys-color-text);
+    --sys-muted: var(--sys-color-text-secondary);
+    --sys-primary: var(--sys-color-primary);
+    --sys-primary-strong: var(--sys-color-primary-strong);
+    --sys-accent: var(--sys-color-accent);
+    --sys-warn: var(--sys-color-warning);
+    --sys-danger: var(--sys-color-danger);
     --sys-shadow: 0 18px 50px rgba(20, 36, 24, 0.08);
+    --sys-shadow-soft: 0 10px 28px rgba(20, 36, 24, 0.07);
     --sys-radius: 18px;
     --sys-radius-sm: 12px;
+    --sys-radius-xs: 10px;
+    --sys-border-width: 1px;
+    --sys-space-1: 4px;
+    --sys-space-2: 8px;
+    --sys-space-3: 12px;
+    --sys-space-4: 16px;
+    --sys-space-5: 24px;
+    --sys-space-6: 32px;
+    --sys-font-family-base: "Segoe UI", "Trebuchet MS", sans-serif;
+    --sys-font-family-heading: Georgia, "Times New Roman", serif;
+    --sys-font-size-sm: 0.875rem;
+    --sys-font-size-md: 1rem;
+    --sys-font-size-lg: 1.125rem;
+    --sys-font-weight-regular: 400;
+    --sys-font-weight-bold: 700;
+    --sys-control-height: 48px;
+    --sys-control-padding-x: 14px;
+    --sys-control-padding-y: 11px;
+    --sys-focus-ring: 0 0 0 0.22rem rgba(45, 106, 79, 0.14);
+    --sys-danger-ring: 0 0 0 0.22rem rgba(177, 69, 52, 0.12);
+    --sys-success-ring: 0 0 0 0.22rem rgba(35, 122, 87, 0.12);
 }
 
 * {
@@ -25,7 +60,7 @@ body {
 }
 
 body {
-    font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+    font-family: var(--sys-font-family-base);
     background:
         radial-gradient(circle at top left, rgba(45, 106, 79, 0.14), transparent 32%),
         linear-gradient(180deg, #f5f7f1 0%, #ebf0e7 100%);
@@ -37,7 +72,7 @@ h2,
 h3,
 .brand-text,
 .login-logo {
-    font-family: Georgia, "Times New Roman", serif;
+    font-family: var(--sys-font-family-heading);
 }
 
 button,
@@ -45,6 +80,147 @@ input,
 select,
 textarea {
     font: inherit;
+}
+
+.ui-form {
+    display: grid;
+    gap: var(--sys-space-4);
+}
+
+.ui-field-grid {
+    gap: var(--sys-space-4);
+}
+
+.ui-field,
+.login-form label,
+.data-form label,
+.inline-field {
+    position: relative;
+    display: grid;
+    gap: var(--sys-space-2);
+    margin: 0;
+    font-size: var(--sys-font-size-sm);
+    color: var(--sys-ink);
+    align-content: start;
+    min-width: 0;
+}
+
+.ui-field-label,
+.data-form label > span,
+.inline-field > span,
+.login-form label > span {
+    color: var(--sys-muted);
+    font-size: 0.74rem;
+    font-weight: var(--sys-font-weight-bold);
+    letter-spacing: 0.08em;
+    line-height: 1.35;
+    text-transform: uppercase;
+}
+
+.ui-control,
+.login-form input,
+.data-form input,
+.data-form select,
+.data-form textarea,
+.dashboard-filter-grid input,
+.dashboard-filter-grid select,
+.appointments-filter-grid input,
+.appointments-filter-grid select,
+.finance-filter-grid input,
+.finance-filter-grid select,
+.orders-filter-grid input,
+.orders-filter-grid select {
+    width: 100%;
+    min-height: var(--sys-control-height);
+    border: var(--sys-border-width) solid var(--sys-line);
+    border-radius: var(--sys-radius-sm);
+    background: linear-gradient(180deg, rgba(246, 248, 242, 0.96), rgba(255, 255, 255, 0.98));
+    color: var(--sys-ink);
+    padding: var(--sys-control-padding-y) var(--sys-control-padding-x);
+    transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease, transform 180ms ease;
+}
+
+.ui-control::placeholder,
+.data-form input::placeholder,
+.data-form textarea::placeholder {
+    color: rgba(106, 119, 109, 0.78);
+}
+
+.ui-control:hover:not(:disabled):not([readonly]) {
+    border-color: rgba(45, 106, 79, 0.24);
+}
+
+.ui-control:focus,
+.login-form input:focus,
+.data-form input:focus,
+.data-form select:focus,
+.data-form textarea:focus,
+.dashboard-filter-grid input:focus,
+.dashboard-filter-grid select:focus {
+    outline: none;
+    border-color: rgba(45, 106, 79, 0.56);
+    background: #fff;
+    box-shadow: var(--sys-focus-ring);
+}
+
+.ui-control:disabled,
+.ui-control[readonly],
+.data-form input:disabled,
+.data-form select:disabled,
+.data-form textarea:disabled,
+.readonly-field {
+    background: rgba(239, 243, 238, 0.96);
+    color: rgba(106, 119, 109, 0.9);
+    cursor: not-allowed;
+    border-style: dashed;
+}
+
+.ui-field.is-invalid .ui-control,
+.field-invalid {
+    border-color: rgba(177, 69, 52, 0.48) !important;
+    background: rgba(177, 69, 52, 0.06) !important;
+    box-shadow: var(--sys-danger-ring) !important;
+}
+
+.ui-field.is-success .ui-control,
+.field-success {
+    border-color: rgba(35, 122, 87, 0.42) !important;
+    background: rgba(35, 122, 87, 0.05) !important;
+    box-shadow: var(--sys-success-ring) !important;
+}
+
+.ui-field-message {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.79rem;
+    line-height: 1.45;
+}
+
+.ui-field-message[data-tone="error"] {
+    color: var(--sys-danger);
+}
+
+.ui-field-message[data-tone="success"] {
+    color: var(--sys-color-success);
+}
+
+.ui-form-actions,
+.inline-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sys-space-3);
+    align-items: center;
+}
+
+.ui-form .btn,
+.ui-form-actions .btn,
+.inline-actions .btn,
+.inline-actions button {
+    min-height: 44px;
+    padding: 0 16px;
+    border-radius: var(--sys-radius-xs);
+    font-weight: 600;
+    box-shadow: none;
 }
 
 .hidden {

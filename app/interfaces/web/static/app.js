@@ -180,6 +180,7 @@ const dataTableLanguage = {
 document.addEventListener("DOMContentLoaded", () => {
     renderSettingsLoadingState();
     buildForms();
+    window.SysPragasUI?.enhanceAllForms();
     bindNavigation();
     bindWorkOrderModuleNavigation();
     bindFinanceModuleNavigation();
@@ -245,6 +246,9 @@ function bindSettingsActions() {
             saveButton.textContent = "Salvando...";
         }
         try {
+            if (!window.SysPragasUI?.validateForm(form)) {
+                throw new Error("Revise os campos destacados antes de salvar as configuracoes.");
+            }
             const payload = getSystemSettingsPayload(form);
             state.settings = await apiFetch("/api/v1/settings", {
                 method: "PUT",
@@ -1271,6 +1275,7 @@ function renderSettings() {
             <p class="origin-note">Para alterar host, porta ou conexao de banco use os arquivos de ambiente e os scripts de execucao da release.</p>
         </section>
     `;
+    window.SysPragasUI?.enhanceAllForms(document.getElementById("settings-root"));
 }
 
 function settingsSummaryCard(label, value, description) {
@@ -2070,6 +2075,7 @@ function buildForms() {
     clearWorkOrderForm();
     clearAppointmentForm();
     clearReceiptForm();
+    window.SysPragasUI?.enhanceAllForms();
 }
 
 function bindProductFiscalControls() {
@@ -2963,6 +2969,9 @@ function bindCrudForms() {
             const errorBox = form.querySelector(".form-error");
             const saveButton = form.querySelector('[data-save-button="simplesConfig"]');
             errorBox.classList.add("hidden");
+            if (!window.SysPragasUI?.validateForm(form)) {
+                throw new Error("Revise os campos destacados antes de salvar a configuracao.");
+            }
             saveButton.disabled = true;
             saveButton.dataset.originalLabel = saveButton.dataset.originalLabel || saveButton.textContent;
             saveButton.textContent = "Salvando...";
@@ -3003,6 +3012,11 @@ function bindForm(formId, kind, handler) {
         const errorBox = form.querySelector(".form-error");
         const saveButton = form.querySelector(`[data-save-button="${kind}"]`);
         errorBox.classList.add("hidden");
+        if (!window.SysPragasUI?.validateForm(form)) {
+            errorBox.textContent = "Revise os campos destacados antes de continuar.";
+            errorBox.classList.remove("hidden");
+            return;
+        }
         if (saveButton) {
             saveButton.disabled = true;
             saveButton.dataset.originalLabel = saveButton.dataset.originalLabel || saveButton.textContent;
@@ -3823,12 +3837,14 @@ function validate_work_order_form(form) {
     const markFieldInvalid = (selector, message) => {
         const field = form.querySelector(selector);
         if (field) {
-            field.classList.add("field-invalid");
+            window.SysPragasUI?.markInvalid(field, message);
         }
         errors.push(message);
     };
     const markNodeInvalid = (node, message) => {
-        node?.classList.add("field-invalid");
+        if (node) {
+            window.SysPragasUI?.markInvalid(node, message);
+        }
         errors.push(message);
     };
 
@@ -3876,20 +3892,20 @@ function validate_work_order_form(form) {
         const quantity = Number(quantityInput?.value || 0);
         const dilution = dilutionInput?.value?.trim() || "";
         if (!productId) {
-            productSelect?.classList.add("field-invalid");
+            window.SysPragasUI?.markInvalid(productSelect, `Selecione o produto da linha ${index + 1}.`);
             errors.push(`Selecione o produto da linha ${index + 1}.`);
         } else if (selectedProductIds.has(productId)) {
-            productSelect?.classList.add("field-invalid");
+            window.SysPragasUI?.markInvalid(productSelect, `O produto da linha ${index + 1} esta duplicado na OS.`);
             errors.push(`O produto da linha ${index + 1} esta duplicado na OS.`);
         } else {
             selectedProductIds.add(productId);
         }
         if (!(quantity > 0)) {
-            quantityInput?.classList.add("field-invalid");
+            window.SysPragasUI?.markInvalid(quantityInput, `Informe uma quantidade valida na linha ${index + 1}.`);
             errors.push(`Informe uma quantidade valida na linha ${index + 1}.`);
         }
         if (!dilution) {
-            dilutionInput?.classList.add("field-invalid");
+            window.SysPragasUI?.markInvalid(dilutionInput, `Informe a diluicao do produto na linha ${index + 1}.`);
             errors.push(`Informe a diluicao do produto na linha ${index + 1}.`);
         }
     });
@@ -3932,7 +3948,7 @@ async function save_order(form) {
 }
 
 function clearWorkOrderValidation(form = document.getElementById("work-order-form")) {
-    form?.querySelectorAll(".field-invalid").forEach((node) => node.classList.remove("field-invalid"));
+    window.SysPragasUI?.clearValidation(form);
 }
 
 function clearWorkOrderSaveFeedback() {
@@ -4622,12 +4638,12 @@ function validateAppointmentForm(form) {
     const markFieldInvalid = (selector, message) => {
         const field = form.querySelector(selector);
         if (field) {
-            field.classList.add("field-invalid");
+            window.SysPragasUI?.markInvalid(field, message);
         }
         errors.push(message);
     };
 
-    form.querySelectorAll(".field-invalid").forEach((node) => node.classList.remove("field-invalid"));
+    window.SysPragasUI?.clearValidation(form);
     if (!payload.cliente_id) {
         markFieldInvalid('[name="cliente_id"]', "Selecione o cliente do agendamento.");
     }
@@ -4645,10 +4661,10 @@ function validateAppointmentForm(form) {
     }
     const scheduleInsight = getAppointmentScheduleInsight(form);
     if (scheduleInsight.conflict) {
-        form.querySelector('[name="tecnico_id"]')?.classList.add("field-invalid");
-        form.querySelector('[name="data_agendamento"]')?.classList.add("field-invalid");
-        form.querySelector('[name="hora_agendamento"]')?.classList.add("field-invalid");
-        form.querySelector('[name="duracao_prevista_minutos"]')?.classList.add("field-invalid");
+        window.SysPragasUI?.markInvalid(form.querySelector('[name="tecnico_id"]'), "Existe conflito de agenda para o tecnico selecionado.");
+        window.SysPragasUI?.markInvalid(form.querySelector('[name="data_agendamento"]'), "Existe conflito de agenda para a data informada.");
+        window.SysPragasUI?.markInvalid(form.querySelector('[name="hora_agendamento"]'), "Existe conflito de agenda para o horario informado.");
+        window.SysPragasUI?.markInvalid(form.querySelector('[name="duracao_prevista_minutos"]'), "A duracao informada conflita com outro agendamento.");
         errors.push(
             buildAppointmentConflictMessage(
                 scheduleInsight,
@@ -4704,7 +4720,7 @@ function bindAppointmentWorkspace() {
 
     form.addEventListener("input", () => {
         form.querySelector(".form-error").classList.add("hidden");
-        form.querySelectorAll(".field-invalid").forEach((node) => node.classList.remove("field-invalid"));
+        window.SysPragasUI?.clearValidation(form);
         renderAppointmentCustomerSummary();
     });
 

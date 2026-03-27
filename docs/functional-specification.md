@@ -131,6 +131,7 @@ O SysPragas e um sistema operacional para empresas de controle de pragas com foc
 - manutencao simples para novos modulos operacionais;
 - consistencia entre UI web, API e regras de negocio;
 - comportamento coberto por testes para fluxos criticos.
+- formulários, filtros e inputs devem seguir o design system centralizado, com tokens, estados de campo e espacemento padronizados.
 
 ## Fora do escopo atual
 

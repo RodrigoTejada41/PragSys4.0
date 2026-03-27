@@ -14,6 +14,7 @@ def test_web_app_returns_html(client):
     assert "Config. do sistema" in response.text
     assert "/static/vendor/adminlte/css/adminlte.min.css" in response.text
     assert "/static/vendor/datatables/js/jquery.dataTables.min.js" in response.text
+    assert "/static/ui.js?v=" in response.text
     assert "/static/app.js?v=" in response.text
 
 
@@ -60,3 +61,13 @@ def test_static_app_js_includes_appointment_availability_feedback(client):
     assert "Certificado garantia" in response.text
     assert "Moldura recomendada" in response.text
     assert "Sanitario padrao" in response.text
+
+
+def test_static_ui_js_exposes_design_system_helpers(client):
+    response = client.get("/static/ui.js")
+
+    assert response.status_code == 200
+    assert "SysPragasUI" in response.text
+    assert "enhanceAllForms" in response.text
+    assert "validateForm" in response.text
+    assert "ui-field-message" in response.text
