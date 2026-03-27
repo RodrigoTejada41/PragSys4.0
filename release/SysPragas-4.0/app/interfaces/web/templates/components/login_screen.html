@@ -1,0 +1,32 @@
+<div class="login-screen" id="login-screen">
+    <div class="login-box syspragas-login-box">
+        <div class="card card-outline card-success shadow-lg">
+            <div class="card-header text-center border-0 pb-0">
+                <span class="login-logo">SysPragas</span>
+                <p class="login-subtitle">Operacao tecnica, estoque e financeiro em um unico painel.</p>
+            </div>
+            <div class="card-body">
+                <p class="login-box-msg">
+                    Entre com um usuario MASTER, ADMIN ou OPERADOR para acessar clientes,
+                    tecnicos, ordens de servico, produtos e documentos.
+                </p>
+                <form id="login-form" class="login-form">
+                    <label>
+                        <span>Usuario</span>
+                        <input type="text" name="username" value="admin" required>
+                    </label>
+                    <label>
+                        <span>Senha</span>
+                        <input type="password" name="password" value="syspragas123" required>
+                    </label>
+                    <button type="submit" class="btn btn-success btn-block">Entrar no sistema</button>
+                </form>
+                <div class="login-help">
+                    <span>API:</span>
+                    <a href="/docs" target="_blank" rel="noreferrer">documentacao Swagger</a>
+                </div>
+                <p id="login-error" class="form-error hidden"></p>
+            </div>
+        </div>
+    </div>
+</div>

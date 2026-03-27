@@ -1,0 +1,152 @@
+<section class="view active" id="view-dashboard">
+    <div class="row">
+        <div class="col-12">
+            <section class="card panel panel-accent">
+                <div class="card-body">
+                    <div class="section-heading compact">
+                        <h3>Busca e filtros</h3>
+                        <p>Combine pesquisa por texto, status da OS, estoque e financeiro.</p>
+                    </div>
+                    <div class="dashboard-filter-grid">
+                        <label class="dashboard-search-field">
+                            <span>Busca geral</span>
+                            <input id="dashboard-search" type="text" placeholder="Buscar OS, cliente, tecnico ou descricao financeira">
+                        </label>
+                        <label>
+                            <span>Status da OS</span>
+                            <select id="dashboard-status-filter">
+                                <option value="todos">Todos</option>
+                                <option value="aberta">Aberta</option>
+                                <option value="em_execucao">Em execucao</option>
+                                <option value="concluida">Concluida</option>
+                                <option value="cancelada">Cancelada</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span>Estoque</span>
+                            <select id="dashboard-stock-filter">
+                                <option value="alerta">Somente alertas</option>
+                                <option value="todos">Todos os produtos</option>
+                                <option value="zerado">Apenas zerados</option>
+                            </select>
+                        </label>
+                        <label class="finance-only">
+                            <span>Financeiro</span>
+                            <select id="dashboard-finance-filter">
+                                <option value="pendente">Pendentes</option>
+                                <option value="todos">Todos</option>
+                                <option value="pago">Pagos</option>
+                                <option value="atrasado">Atrasados</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <div class="metrics-grid row" id="metrics-grid"></div>
+
+    <div class="row widget-grid">
+        <div class="col-lg-3 col-sm-6">
+            <div class="info-box">
+                <span class="info-box-icon bg-success"><i class="fas fa-clipboard-check"></i></span>
+                <div class="info-box-content">
+                    <span class="info-box-text">OS abertas ou em execucao</span>
+                    <span class="info-box-number" id="widget-open-orders">0</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-sm-6">
+            <div class="info-box">
+                <span class="info-box-icon bg-info"><i class="fas fa-check-double"></i></span>
+                <div class="info-box-content">
+                    <span class="info-box-text">OS concluidas</span>
+                    <span class="info-box-number" id="widget-completed-orders">0</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-sm-6 finance-only">
+            <div class="info-box">
+                <span class="info-box-icon bg-warning"><i class="fas fa-exclamation-circle"></i></span>
+                <div class="info-box-content">
+                    <span class="info-box-text">Financeiro pendente</span>
+                    <span class="info-box-number" id="widget-pending-finance">R$ 0,00</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-sm-6">
+            <div class="info-box">
+                <span class="info-box-icon bg-danger"><i class="fas fa-box-open"></i></span>
+                <div class="info-box-content">
+                    <span class="info-box-text">Produtos criticos</span>
+                    <span class="info-box-number" id="widget-critical-stock">0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-6">
+            <section class="card panel">
+                <div class="card-body">
+                    <div class="section-heading">
+                        <h3>Status das ordens</h3>
+                        <p>Distribuicao das ordens dentro do filtro atual.</p>
+                    </div>
+                    <div class="chart-stage">
+                        <canvas id="dashboard-status-chart"></canvas>
+                    </div>
+                </div>
+            </section>
+        </div>
+        <div class="col-lg-6 finance-only">
+            <section class="card panel">
+                <div class="card-body">
+                    <div class="section-heading">
+                        <h3>Financeiro por status</h3>
+                        <p>Totais somados por situacao dos lancamentos.</p>
+                    </div>
+                    <div class="chart-stage">
+                        <canvas id="dashboard-finance-chart"></canvas>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-8">
+            <section class="card panel">
+                <div class="card-body">
+                    <div class="section-heading">
+                        <h3>Ordens recentes</h3>
+                        <p>Ultimos atendimentos filtrados para consulta da operacao.</p>
+                    </div>
+                    <div id="dashboard-os-table"></div>
+                </div>
+            </section>
+        </div>
+        <div class="col-lg-4">
+            <section class="card panel">
+                <div class="card-body">
+                    <div class="section-heading">
+                        <h3>Produtos em alerta</h3>
+                        <p>Estoque no minimo ou zerado para reposicao imediata.</p>
+                    </div>
+                    <div id="stock-alerts"></div>
+                </div>
+            </section>
+
+            <section class="card panel finance-only">
+                <div class="card-body">
+                    <div class="section-heading">
+                        <h3>Financeiro no radar</h3>
+                        <p>Lancamentos recentes conforme os filtros aplicados.</p>
+                    </div>
+                    <div id="dashboard-finance-table"></div>
+                </div>
+            </section>
+        </div>
+    </div>
+</section>
