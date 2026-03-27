@@ -928,6 +928,14 @@ class SettingsEnvironmentRead(BaseModel):
     allow_remote_access: bool
 
 
+class SettingsAssetRead(BaseModel):
+    has_file: bool
+    filename: Optional[str] = None
+    content_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    uploaded_at: Optional[str] = None
+
+
 class SettingsCompanyRead(BaseModel):
     legal_name: str
     trade_name: str
@@ -935,12 +943,18 @@ class SettingsCompanyRead(BaseModel):
     address: str
     phone: Optional[str] = None
     technical_responsible_name: str
+    technical_registry_type: str
+    technical_registry_number: str
+    technical_registry_state: str
     technical_responsible_registry: str
     sanitary_license_number: str
     sanitary_license_expiry: Optional[str] = None
     environmental_license_number: str
     environmental_license_expiry: Optional[str] = None
     toxicology_center_phone: str
+    sanitary_license_file: SettingsAssetRead
+    environmental_license_file: SettingsAssetRead
+    technical_signature: SettingsAssetRead
 
 
 class SystemSettingsRead(BaseModel):
@@ -995,6 +1009,9 @@ class SettingsCompanyUpdate(BaseModel):
     address: Optional[str] = None
     phone: Optional[str] = None
     technical_responsible_name: Optional[str] = None
+    technical_registry_type: Optional[str] = None
+    technical_registry_number: Optional[str] = None
+    technical_registry_state: Optional[str] = None
     technical_responsible_registry: Optional[str] = None
     sanitary_license_number: Optional[str] = None
     sanitary_license_expiry: Optional[str] = None

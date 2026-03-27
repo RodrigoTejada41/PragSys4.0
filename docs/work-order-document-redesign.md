@@ -92,7 +92,7 @@ Os produtos deixaram de ser uma lista corrida e passaram para tabela com:
 ### Testes automatizados
 
 - `pytest tests\test_documents.py tests\test_multitenancy.py tests\test_work_orders.py tests\test_auth.py tests\test_settings.py -q`
-- resultado: `30 passed`
+- resultado: `33 passed`
 
 ### Cobertura funcional adicionada
 
@@ -117,11 +117,12 @@ O modulo de configuracoes agora possui uma secao dedicada para:
 - licenca ambiental
 - validade da licenca ambiental
 - CIT
+- upload da licenca sanitaria digitalizada
+- upload da licenca ambiental digitalizada
+- upload de assinatura
+- assinatura desenhada em canvas
 
-Observacao:
-
-- nesta entrega o sistema passou a ter um ponto claro para cadastrar os dados regulatorios
-- upload de arquivos digitalizados das licencas ainda nao foi implementado
+Esses dados agora ficam vinculados por empresa em `dados_tecnicos_empresa`.
 
 ## Riscos mitigados
 

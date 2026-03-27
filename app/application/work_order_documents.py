@@ -95,7 +95,7 @@ def _validate_work_order_document_requirements(settings) -> None:
     missing = [label for label, value in required_fields if _is_missing_config(value)]
     if missing:
         raise BusinessRuleViolation(
-            "Nao foi possivel gerar a ordem de servico. Configure antes: "
+            "Nao foi possivel gerar o documento tecnico. Configure antes: "
             + ", ".join(missing)
             + "."
         )
@@ -399,18 +399,18 @@ def _build_legal_section(styles, settings) -> List:
 
 
 def _build_signatures_section(styles, work_order, settings) -> List:
-    signature_path = resolve_technical_signature_path(work_order.tecnico)
+    signature_source = _resolve_document_signature_source(settings, work_order)
     technical_signature = _signature_cell(
         styles,
         label="Responsavel tecnico",
         signer=f"{settings.technical_responsible_name} | {settings.technical_responsible_registry}",
-        signature_path=signature_path,
+        signature_source=signature_source,
     )
     customer_signature = _signature_cell(
         styles,
         label="Cliente / responsavel no local",
         signer=work_order.cliente.razao_social,
-        signature_path=None,
+        signature_source=None,
         hint="Assinatura manual no ato da execucao",
     )
     signatures = Table([[technical_signature, customer_signature]], colWidths=[86 * mm, 86 * mm])
@@ -498,11 +498,11 @@ def _text_box(text: str, styles):
     return table
 
 
-def _signature_cell(styles, *, label: str, signer: str, signature_path=None, hint: Optional[str] = None):
+def _signature_cell(styles, *, label: str, signer: str, signature_source=None, hint: Optional[str] = None):
     elements: List = []
-    if signature_path:
-        image = ImageReader(str(signature_path))
-        image_width, image_height = image.getSize()
+    if signature_source:
+        image_reader = ImageReader(signature_source if not isinstance(signature_source, bytes) else BytesIO(signature_source))
+        image_width, image_height = image_reader.getSize()
         max_width = 50 * mm
         max_height = 16 * mm
         scale = min(max_width / image_width, max_height / image_height)
@@ -510,7 +510,8 @@ def _signature_cell(styles, *, label: str, signer: str, signature_path=None, hin
         draw_height = image_height * scale
         from reportlab.platypus import Image
 
-        elements.append(Image(str(signature_path), width=draw_width, height=draw_height))
+        image_payload = BytesIO(signature_source) if isinstance(signature_source, bytes) else signature_source
+        elements.append(Image(image_payload, width=draw_width, height=draw_height))
     else:
         elements.append(Paragraph(hint or "Assinatura tecnica pendente no cadastro", styles["signature_hint"]))
 
@@ -526,6 +527,16 @@ def _license_line(number: Optional[str], expiry: Optional[str]) -> str:
     if expiry and "nao configurad" not in str(expiry).lower():
         return f"{number} | validade: {expiry}"
     return _safe_text(number, "Nao informado")
+
+
+def _resolve_document_signature_source(settings, work_order):
+    signature_data = getattr(settings, "technical_signature_data", None)
+    if signature_data:
+        return signature_data
+    signature_path = resolve_technical_signature_path(work_order.tecnico)
+    if signature_path:
+        return str(signature_path)
+    return None
 
 
 def _safe_text(value: Optional[str], fallback: str = "") -> str:

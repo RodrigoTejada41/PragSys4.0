@@ -363,6 +363,20 @@ function bindSettingsActions() {
 
   root.addEventListener("change", async (event) => {
     const target = event.target;
+    if (target instanceof HTMLInputElement && target.dataset.technicalUploadInput) {
+      const file = target.files && target.files[0];
+      if (!file) {
+        return;
+      }
+      try {
+        await uploadTechnicalAsset(target.dataset.technicalUploadInput, file);
+      } catch (error) {
+        toast(error.message || "Nao foi possivel enviar o arquivo tecnico.");
+      } finally {
+        target.value = "";
+      }
+      return;
+    }
     if (!(target instanceof HTMLInputElement) || target.id !== "database-restore-input") {
       return;
     }
@@ -377,6 +391,18 @@ function bindSettingsActions() {
     } finally {
       target.value = "";
     }
+  });
+
+  root.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) {
+      return;
+    }
+    const trigger = event.target.closest("[data-technical-upload-trigger]");
+    if (!trigger) {
+      return;
+    }
+    const kind = trigger.dataset.technicalUploadTrigger;
+    root.querySelector(`[data-technical-upload-input="${kind}"]`)?.click();
   });
 
   root.addEventListener("click", async (event) => {
@@ -1214,7 +1240,7 @@ function renderSettings() {
             <div class="section-heading compact">
                 <p class="eyebrow">Documentos tecnicos</p>
                 <h4>Dados regulatorios da empresa</h4>
-                <p>Esses campos alimentam a Ordem de Servico, o Relatorio Tecnico e outros documentos regulamentados. Sem eles a emissao fica bloqueada.</p>
+                <p>Esses campos alimentam automaticamente a Ordem de Servico, o Relatorio Tecnico e os certificados com moldura. Sem eles a emissao fica bloqueada.</p>
             </div>
             <div class="settings-field-grid two-columns">
                 <label>
@@ -1242,8 +1268,16 @@ function renderSettings() {
                     <input name="technical_responsible_name" value="${escapeHtml(settingsState.company.technical_responsible_name || "")}" required>
                 </label>
                 <label>
-                    <span>Registro profissional</span>
-                    <input name="technical_responsible_registry" value="${escapeHtml(settingsState.company.technical_responsible_registry || "")}" required>
+                    <span>Conselho profissional</span>
+                    <input name="technical_registry_type" value="${escapeHtml(settingsState.company.technical_registry_type || "")}" placeholder="CRBio, CREA, CRQ..." required>
+                </label>
+                <label>
+                    <span>Numero do registro</span>
+                    <input name="technical_registry_number" value="${escapeHtml(settingsState.company.technical_registry_number || "")}" placeholder="123456" required>
+                </label>
+                <label>
+                    <span>UF do registro</span>
+                    <input name="technical_registry_state" value="${escapeHtml(settingsState.company.technical_registry_state || "")}" maxlength="2" placeholder="SP" required>
                 </label>
                 <label>
                     <span>Licenca sanitaria</span>
@@ -1266,7 +1300,22 @@ function renderSettings() {
                     <input name="toxicology_center_phone" value="${escapeHtml(settingsState.company.toxicology_center_phone || "")}" required placeholder="0800 722 6001">
                 </label>
             </div>
-            <p class="origin-note">Se voce precisa anexar arquivos digitalizados das licencas, essa etapa ainda nao existe. Por enquanto o sistema usa os dados cadastrais regulamentares no documento.</p>
+            <div class="settings-field-grid two-columns technical-assets-grid">
+                ${renderTechnicalAssetPanel("sanitary_license", "Licenca sanitaria digitalizada", settingsState.company.sanitary_license_file, ".pdf,.png,.jpg,.jpeg", "Enviar licenca sanitaria")}
+                ${renderTechnicalAssetPanel("environmental_license", "Licenca ambiental digitalizada", settingsState.company.environmental_license_file, ".pdf,.png,.jpg,.jpeg", "Enviar licenca ambiental")}
+                ${renderTechnicalAssetPanel("signature", "Assinatura do responsavel tecnico", settingsState.company.technical_signature, ".png,.jpg,.jpeg", "Enviar assinatura")}
+                <section class="technical-signature-drawing full-width">
+                    <div class="section-heading compact">
+                        <h4>Assinatura digital desenhada</h4>
+                        <p>Desenhe a assinatura no quadro abaixo e salve para aplicar nos documentos tecnicos desta empresa.</p>
+                    </div>
+                    <canvas id="technical-signature-canvas" width="760" height="220" aria-label="Area para desenhar assinatura"></canvas>
+                    <div class="inline-actions ui-form-actions">
+                        <button type="button" class="btn btn-default ghost-button" data-signature-clear>Limpar</button>
+                        <button type="button" class="btn btn-primary" data-signature-save>Salvar assinatura desenhada</button>
+                    </div>
+                </section>
+            </div>
         </section>
         <section class="settings-form-section">
             <div class="section-heading compact">
@@ -1461,6 +1510,8 @@ function renderSettings() {
         </section>
     `;
     window.SysPragasUI?.enhanceAllForms(document.getElementById("settings-root"));
+    setupTechnicalSignatureCanvas(form);
+    refreshTechnicalAssetPreviews(form);
 }
 
 function settingsSummaryCard(label, value, description) {
@@ -1497,6 +1548,187 @@ function toggleField(name, label, description, checked) {
     `;
 }
 
+function renderTechnicalAssetPanel(kind, title, asset, accept, actionLabel) {
+    const hasFile = Boolean(asset?.has_file);
+    const uploadedLabel = asset?.uploaded_at ? formatIsoDateTime(asset.uploaded_at) : "Nao enviado";
+    const meta = hasFile
+        ? `${escapeHtml(asset.filename || "arquivo")} • ${formatBytes(asset.size_bytes || 0)}`
+        : "Nenhum arquivo vinculado";
+    return `
+        <section class="technical-asset-card">
+            <div class="section-heading compact">
+                <h4>${escapeHtml(title)}</h4>
+                <p>${hasFile ? "Arquivo institucional pronto para os documentos." : "Upload pendente para este ativo tecnico."}</p>
+            </div>
+            <div class="settings-side-list">
+                ${settingsInfoRow("Arquivo", meta)}
+                ${settingsInfoRow("Ultimo envio", uploadedLabel)}
+                ${settingsInfoRow("Formato", asset?.content_type || "-")}
+            </div>
+            <div class="technical-asset-preview" data-technical-preview-container="${escapeHtml(kind)}">
+                <div class="empty-state" data-technical-preview-empty="${escapeHtml(kind)}">${hasFile ? "Carregando preview..." : "Nenhum preview disponivel."}</div>
+                <img class="technical-asset-image hidden" data-technical-preview-image="${escapeHtml(kind)}" alt="${escapeHtml(title)}">
+                <a class="toolbar-link hidden" data-technical-preview-link="${escapeHtml(kind)}" target="_blank" rel="noopener">Abrir arquivo</a>
+            </div>
+            <div class="inline-actions ui-form-actions">
+                <button type="button" class="btn btn-secondary" data-technical-upload-trigger="${escapeHtml(kind)}">${escapeHtml(actionLabel)}</button>
+            </div>
+            <input class="hidden" type="file" data-technical-upload-input="${escapeHtml(kind)}" accept="${escapeHtml(accept)}">
+        </section>
+    `;
+}
+
+function formatBytes(value) {
+    const size = Number(value || 0);
+    if (!size) {
+        return "0 B";
+    }
+    if (size < 1024) {
+        return `${size} B`;
+    }
+    if (size < 1024 * 1024) {
+        return `${(size / 1024).toFixed(1)} KB`;
+    }
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatIsoDateTime(value) {
+    if (!value) {
+        return "-";
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+    return date.toLocaleString("pt-BR");
+}
+
+async function uploadTechnicalAsset(kind, file) {
+    if (!file) {
+        return;
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+    state.settings = await apiFetch(`/api/v1/settings/technical-documents/assets/${kind}`, {
+        method: "POST",
+        body: formData,
+    });
+    await loadAllData();
+    toast("Arquivo tecnico atualizado com sucesso.");
+}
+
+async function saveDrawnSignature(canvas) {
+    const dataUrl = canvas.toDataURL("image/png");
+    const formData = new FormData();
+    formData.append("data_url", dataUrl);
+    state.settings = await apiFetch("/api/v1/settings/technical-documents/signature/draw", {
+        method: "POST",
+        body: formData,
+    });
+    await loadAllData();
+    toast("Assinatura desenhada salva com sucesso.");
+}
+
+function setupTechnicalSignatureCanvas(root) {
+    const canvas = root.querySelector("#technical-signature-canvas");
+    if (!(canvas instanceof HTMLCanvasElement)) {
+        return;
+    }
+    const context = canvas.getContext("2d");
+    if (!context) {
+        return;
+    }
+    context.lineWidth = 2.2;
+    context.lineCap = "round";
+    context.strokeStyle = "#17392b";
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    let drawing = false;
+
+    const pointFromEvent = (event) => {
+        const rect = canvas.getBoundingClientRect();
+        const source = event.touches ? event.touches[0] : event;
+        return {
+            x: ((source.clientX - rect.left) / rect.width) * canvas.width,
+            y: ((source.clientY - rect.top) / rect.height) * canvas.height,
+        };
+    };
+
+    const start = (event) => {
+        drawing = true;
+        const point = pointFromEvent(event);
+        context.beginPath();
+        context.moveTo(point.x, point.y);
+        event.preventDefault();
+    };
+    const move = (event) => {
+        if (!drawing) {
+            return;
+        }
+        const point = pointFromEvent(event);
+        context.lineTo(point.x, point.y);
+        context.stroke();
+        event.preventDefault();
+    };
+    const stop = () => {
+        drawing = false;
+    };
+
+    canvas.addEventListener("pointerdown", start);
+    canvas.addEventListener("pointermove", move);
+    canvas.addEventListener("pointerup", stop);
+    canvas.addEventListener("pointerleave", stop);
+
+    root.querySelector("[data-signature-clear]")?.addEventListener("click", () => {
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+    });
+    root.querySelector("[data-signature-save]")?.addEventListener("click", async () => {
+        try {
+            await saveDrawnSignature(canvas);
+        } catch (error) {
+            toast(error.message || "Nao foi possivel salvar a assinatura desenhada.");
+        }
+    });
+}
+
+async function refreshTechnicalAssetPreviews(root) {
+    const kinds = ["sanitary_license", "environmental_license", "signature"];
+    for (const kind of kinds) {
+        const asset = kind === "signature"
+            ? state.settings?.company?.technical_signature
+            : state.settings?.company?.[`${kind}_file`];
+        if (!asset?.has_file) {
+            continue;
+        }
+        const emptyState = root.querySelector(`[data-technical-preview-empty="${kind}"]`);
+        const image = root.querySelector(`[data-technical-preview-image="${kind}"]`);
+        const link = root.querySelector(`[data-technical-preview-link="${kind}"]`);
+        try {
+            const response = await apiFetchResponse(`/api/v1/settings/technical-documents/assets/${kind}`, { method: "GET" });
+            const blob = await response.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            if (blob.type.startsWith("image/") && image instanceof HTMLImageElement) {
+                image.src = objectUrl;
+                image.classList.remove("hidden");
+            }
+            if (link instanceof HTMLAnchorElement) {
+                link.href = objectUrl;
+                link.classList.remove("hidden");
+                link.textContent = blob.type === "application/pdf" ? "Abrir PDF" : "Abrir arquivo";
+            }
+            emptyState?.classList.add("hidden");
+        } catch (error) {
+            if (emptyState) {
+                emptyState.textContent = error.message || "Nao foi possivel carregar o preview.";
+                emptyState.classList.remove("hidden");
+            }
+        }
+    }
+}
+
 function getSystemSettingsPayload(form) {
     return {
         integrations: {
@@ -1530,7 +1762,9 @@ function getSystemSettingsPayload(form) {
             address: form.querySelector('[name="company_address"]').value.trim(),
             phone: form.querySelector('[name="company_phone"]').value.trim() || null,
             technical_responsible_name: form.querySelector('[name="technical_responsible_name"]').value.trim(),
-            technical_responsible_registry: form.querySelector('[name="technical_responsible_registry"]').value.trim(),
+            technical_registry_type: form.querySelector('[name="technical_registry_type"]').value.trim(),
+            technical_registry_number: form.querySelector('[name="technical_registry_number"]').value.trim(),
+            technical_registry_state: form.querySelector('[name="technical_registry_state"]').value.trim().toUpperCase(),
             sanitary_license_number: form.querySelector('[name="sanitary_license_number"]').value.trim(),
             sanitary_license_expiry: form.querySelector('[name="sanitary_license_expiry"]').value.trim() || null,
             environmental_license_number: form.querySelector('[name="environmental_license_number"]').value.trim(),

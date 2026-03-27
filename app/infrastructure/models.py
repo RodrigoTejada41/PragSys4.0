@@ -59,6 +59,11 @@ class ProviderCompany(Base):
         back_populates="empresa_prestadora",
         foreign_keys="StockMovement.empresa_prestadora_id",
     )
+    dados_tecnicos: Mapped[Optional["CompanyTechnicalData"]] = relationship(
+        back_populates="empresa_prestadora",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 class User(Base):
@@ -685,6 +690,51 @@ class SystemSetting(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
     updated_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+
+
+class CompanyTechnicalData(Base):
+    __tablename__ = "dados_tecnicos_empresa"
+    __table_args__ = (
+        UniqueConstraint("empresa_prestadora_id", name="uq_dados_tecnicos_empresa_empresa"),
+        Index("ix_dados_tecnicos_empresa_empresa_prestadora_id", "empresa_prestadora_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_prestadora_id: Mapped[int] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=False,
+    )
+    legal_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    trade_name: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    cnpj: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    address: Mapped[str] = mapped_column(String(255), nullable=False)
+    phone: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    technical_responsible_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    technical_registry_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    technical_registry_number: Mapped[str] = mapped_column(String(60), nullable=False)
+    technical_registry_state: Mapped[str] = mapped_column(String(2), nullable=False)
+    sanitary_license_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    sanitary_license_expiry: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    environmental_license_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    environmental_license_expiry: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    toxicology_center_phone: Mapped[str] = mapped_column(String(40), nullable=False)
+    sanitary_license_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    sanitary_license_content_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    sanitary_license_data: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    sanitary_license_uploaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    environmental_license_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    environmental_license_content_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    environmental_license_data: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    environmental_license_uploaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    signature_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    signature_content_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    signature_data: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    signature_uploaded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    signature_source: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
+
+    empresa_prestadora: Mapped["ProviderCompany"] = relationship(back_populates="dados_tecnicos")
 
 
 class BackgroundJobRun(Base):

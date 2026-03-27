@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import logging
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -22,6 +23,7 @@ from app.application.schemas import (
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
 from app.infrastructure.models import SystemSetting, User
+from app.infrastructure.models import CompanyTechnicalData, ProviderCompany
 
 LOGGER = logging.getLogger(__name__)
 SENSITIVE_SETTINGS = {"smtp_password"}
@@ -49,21 +51,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "operation_mode": "local",
     "notifications_enabled": True,
     "appointment_default_google_sync": False,
-}
-
-COMPANY_SETTING_KEYS = {
-    "legal_name": "company_legal_name",
-    "trade_name": "company_trade_name",
-    "cnpj": "company_cnpj",
-    "address": "company_address",
-    "phone": "company_phone",
-    "technical_responsible_name": "technical_responsible_name",
-    "technical_responsible_registry": "technical_responsible_registry",
-    "sanitary_license_number": "sanitary_license_number",
-    "sanitary_license_expiry": "sanitary_license_expiry",
-    "environmental_license_number": "environmental_license_number",
-    "environmental_license_expiry": "environmental_license_expiry",
-    "toxicology_center_phone": "toxicology_center_phone",
 }
 
 RUNTIME_FALLBACK_KEYS = {
@@ -187,12 +174,6 @@ def update_system_settings(db: Session, payload: SystemSettingsUpdate, current_u
             if value is None:
                 continue
             updates[f"database_{key}"] = value
-    if payload.company:
-        company_payload = payload.company.model_dump()
-        for key, value in company_payload.items():
-            if value is None:
-                continue
-            updates[COMPANY_SETTING_KEYS[key]] = str(value).strip()
 
     if "operation_mode" in updates and updates["operation_mode"] not in {"local", "rede"}:
         raise BusinessRuleViolation("O modo de operacao deve ser 'local' ou 'rede'.")
@@ -200,29 +181,20 @@ def update_system_settings(db: Session, payload: SystemSettingsUpdate, current_u
         raise BusinessRuleViolation("O diretorio de contratos nao pode ficar vazio.")
     if "database_backup_dir" in updates and not str(updates["database_backup_dir"]).strip():
         raise BusinessRuleViolation("O diretorio de backup do banco nao pode ficar vazio.")
-    for key in (
-        "company_legal_name",
-        "company_trade_name",
-        "company_address",
-        "technical_responsible_name",
-        "technical_responsible_registry",
-        "sanitary_license_number",
-        "environmental_license_number",
-        "toxicology_center_phone",
-    ):
-        if key in updates and not str(updates[key]).strip():
-            raise BusinessRuleViolation("Os campos regulatorios obrigatorios da empresa nao podem ficar vazios.")
-
     for key, value in updates.items():
         set_setting_value(db, key, value, updated_by_user_id=current_user.id)
 
+    if payload.company:
+        _update_company_technical_data(db, payload.company, current_user)
+
     db.commit()
-    return get_system_settings(db)
+    return get_system_settings(db, current_user)
 
 
-def get_system_settings(db: Session) -> SystemSettingsRead:
+def get_system_settings(db: Session, current_user: Optional[User] = None) -> SystemSettingsRead:
     settings = get_settings()
     ensure_system_settings_seed(db)
+    company_settings = _read_company_technical_data(db, current_user)
     return SystemSettingsRead(
         integrations=SettingsIntegrationsRead(
             google_calendar_enabled=get_boolean_setting(db, "google_calendar_enabled", fallback=settings.google_calendar_enabled),
@@ -262,39 +234,13 @@ def get_system_settings(db: Session) -> SystemSettingsRead:
             app_port=settings.app_port,
             allow_remote_access=settings.allow_remote_access,
         ),
-        company=SettingsCompanyRead(
-            legal_name=str(get_setting_value(db, "company_legal_name", settings.company_legal_name)),
-            trade_name=str(get_setting_value(db, "company_trade_name", settings.company_trade_name)),
-            cnpj=_clean_optional_setting_text(get_setting_value(db, "company_cnpj", settings.company_cnpj)),
-            address=str(get_setting_value(db, "company_address", settings.company_address)),
-            phone=_clean_optional_setting_text(get_setting_value(db, "company_phone", settings.company_phone)),
-            technical_responsible_name=str(
-                get_setting_value(db, "technical_responsible_name", settings.technical_responsible_name)
-            ),
-            technical_responsible_registry=str(
-                get_setting_value(db, "technical_responsible_registry", settings.technical_responsible_registry)
-            ),
-            sanitary_license_number=str(
-                get_setting_value(db, "sanitary_license_number", settings.sanitary_license_number)
-            ),
-            sanitary_license_expiry=_clean_optional_setting_text(
-                get_setting_value(db, "sanitary_license_expiry", settings.sanitary_license_expiry)
-            ),
-            environmental_license_number=str(
-                get_setting_value(db, "environmental_license_number", settings.environmental_license_number)
-            ),
-            environmental_license_expiry=_clean_optional_setting_text(
-                get_setting_value(db, "environmental_license_expiry", settings.environmental_license_expiry)
-            ),
-            toxicology_center_phone=str(
-                get_setting_value(db, "toxicology_center_phone", settings.toxicology_center_phone)
-            ),
-        ),
+        company=company_settings,
     )
 
 
-def get_document_company_settings(db: Session):
-    settings = get_system_settings(db).company
+def get_document_company_settings(db: Session, provider_company_id: Optional[int] = None):
+    settings = _read_company_technical_data(db, company_id=provider_company_id)
+    record = _get_or_create_company_technical_data(db, company_id=provider_company_id, create_if_missing=True)
     return SimpleNamespace(
         company_legal_name=settings.legal_name,
         company_trade_name=settings.trade_name,
@@ -303,11 +249,121 @@ def get_document_company_settings(db: Session):
         company_phone=settings.phone,
         technical_responsible_name=settings.technical_responsible_name,
         technical_responsible_registry=settings.technical_responsible_registry,
+        technical_registry_type=settings.technical_registry_type,
+        technical_registry_number=settings.technical_registry_number,
+        technical_registry_state=settings.technical_registry_state,
         sanitary_license_number=settings.sanitary_license_number,
         sanitary_license_expiry=settings.sanitary_license_expiry,
         environmental_license_number=settings.environmental_license_number,
         environmental_license_expiry=settings.environmental_license_expiry,
         toxicology_center_phone=settings.toxicology_center_phone,
+        sanitary_license_filename=settings.sanitary_license_file.filename,
+        environmental_license_filename=settings.environmental_license_file.filename,
+        signature_filename=settings.technical_signature.filename,
+        sanitary_license_content_type=settings.sanitary_license_file.content_type,
+        environmental_license_content_type=settings.environmental_license_file.content_type,
+        signature_content_type=settings.technical_signature.content_type,
+        sanitary_license_data=getattr(record, "sanitary_license_data", None),
+        environmental_license_data=getattr(record, "environmental_license_data", None),
+        technical_signature_data=getattr(record, "signature_data", None),
+    )
+
+
+def get_company_technical_asset_content(
+    db: Session,
+    *,
+    current_user: User,
+    asset_kind: str,
+) -> tuple[str, str, bytes]:
+    record = _get_or_create_company_technical_data(db, current_user=current_user, create_if_missing=False)
+    if record is None:
+        raise BusinessRuleViolation("Nenhum dado tecnico institucional foi cadastrado para esta empresa.")
+
+    asset_map = {
+        "sanitary_license": (
+            record.sanitary_license_filename,
+            record.sanitary_license_content_type,
+            record.sanitary_license_data,
+        ),
+        "environmental_license": (
+            record.environmental_license_filename,
+            record.environmental_license_content_type,
+            record.environmental_license_data,
+        ),
+        "signature": (
+            record.signature_filename,
+            record.signature_content_type,
+            record.signature_data,
+        ),
+    }
+    if asset_kind not in asset_map:
+        raise BusinessRuleViolation("Ativo tecnico solicitado e invalido.")
+    filename, content_type, content = asset_map[asset_kind]
+    if not filename or not content:
+        raise BusinessRuleViolation("Nenhum arquivo foi cadastrado para este ativo tecnico.")
+    return filename, content_type or "application/octet-stream", content
+
+
+def save_company_technical_asset(
+    db: Session,
+    *,
+    current_user: User,
+    asset_kind: str,
+    filename: str,
+    content_type: str,
+    content: bytes,
+    signature_source: Optional[str] = None,
+) -> SettingsCompanyRead:
+    record = _get_or_create_company_technical_data(db, current_user=current_user, create_if_missing=True)
+    _validate_company_asset(asset_kind=asset_kind, filename=filename, content_type=content_type, content=content)
+    normalized_filename = _normalize_uploaded_filename(filename, fallback=_asset_fallback_filename(asset_kind, content_type))
+    normalized_type = _normalize_content_type(content_type)
+    uploaded_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    if asset_kind == "sanitary_license":
+        record.sanitary_license_filename = normalized_filename
+        record.sanitary_license_content_type = normalized_type
+        record.sanitary_license_data = content
+        record.sanitary_license_uploaded_at = uploaded_at
+    elif asset_kind == "environmental_license":
+        record.environmental_license_filename = normalized_filename
+        record.environmental_license_content_type = normalized_type
+        record.environmental_license_data = content
+        record.environmental_license_uploaded_at = uploaded_at
+    elif asset_kind == "signature":
+        record.signature_filename = normalized_filename
+        record.signature_content_type = normalized_type
+        record.signature_data = content
+        record.signature_uploaded_at = uploaded_at
+        record.signature_source = signature_source or "upload"
+    else:
+        raise BusinessRuleViolation("Tipo de ativo tecnico invalido.")
+
+    db.add(record)
+    db.commit()
+    return _read_company_technical_data(db, current_user)
+
+
+def save_company_signature_from_data_url(
+    db: Session,
+    *,
+    current_user: User,
+    data_url: str,
+) -> SettingsCompanyRead:
+    if not str(data_url or "").startswith("data:image/png;base64,"):
+        raise BusinessRuleViolation("A assinatura desenhada deve ser enviada como imagem PNG valida.")
+    try:
+        content = base64.b64decode(data_url.split(",", 1)[1], validate=True)
+    except (ValueError, IndexError) as exc:
+        raise BusinessRuleViolation("Nao foi possivel processar a assinatura desenhada.") from exc
+    return save_company_technical_asset(
+        db,
+        current_user=current_user,
+        asset_kind="signature",
+        filename="assinatura-desenhada.png",
+        content_type="image/png",
+        content=content,
+        signature_source="drawn",
     )
 
 
@@ -337,3 +393,221 @@ def _extract_database_file_name(database_url: str) -> Optional[str]:
         return None
     normalized = database_path.replace("\\", "/")
     return normalized.rsplit("/", 1)[-1]
+
+
+def _read_company_technical_data(
+    db: Session,
+    current_user: Optional[User] = None,
+    company_id: Optional[int] = None,
+) -> SettingsCompanyRead:
+    settings = get_settings()
+    record = _get_or_create_company_technical_data(
+        db,
+        current_user=current_user,
+        company_id=company_id,
+        create_if_missing=True,
+    )
+    registry = _compose_registry_label(
+        record.technical_registry_type,
+        record.technical_registry_number,
+        record.technical_registry_state,
+    )
+    return SettingsCompanyRead(
+        legal_name=record.legal_name or settings.company_legal_name,
+        trade_name=record.trade_name or record.legal_name or settings.company_trade_name,
+        cnpj=_clean_optional_setting_text(record.cnpj or settings.company_cnpj),
+        address=record.address or settings.company_address,
+        phone=_clean_optional_setting_text(record.phone or settings.company_phone),
+        technical_responsible_name=record.technical_responsible_name or settings.technical_responsible_name,
+        technical_registry_type=record.technical_registry_type or "CRBio",
+        technical_registry_number=record.technical_registry_number or "",
+        technical_registry_state=record.technical_registry_state or "SP",
+        technical_responsible_registry=registry,
+        sanitary_license_number=record.sanitary_license_number or settings.sanitary_license_number,
+        sanitary_license_expiry=_clean_optional_setting_text(record.sanitary_license_expiry or settings.sanitary_license_expiry),
+        environmental_license_number=record.environmental_license_number or settings.environmental_license_number,
+        environmental_license_expiry=_clean_optional_setting_text(
+            record.environmental_license_expiry or settings.environmental_license_expiry
+        ),
+        toxicology_center_phone=record.toxicology_center_phone or settings.toxicology_center_phone,
+        sanitary_license_file=_build_asset_read(
+            record.sanitary_license_filename,
+            record.sanitary_license_content_type,
+            record.sanitary_license_data,
+            record.sanitary_license_uploaded_at,
+        ),
+        environmental_license_file=_build_asset_read(
+            record.environmental_license_filename,
+            record.environmental_license_content_type,
+            record.environmental_license_data,
+            record.environmental_license_uploaded_at,
+        ),
+        technical_signature=_build_asset_read(
+            record.signature_filename,
+            record.signature_content_type,
+            record.signature_data,
+            record.signature_uploaded_at,
+        ),
+    )
+
+
+def _update_company_technical_data(db: Session, payload, current_user: User) -> None:
+    record = _get_or_create_company_technical_data(db, current_user=current_user, create_if_missing=True)
+    registry_type, registry_number, registry_state = _normalize_registry_payload(payload)
+    updates = {
+        "legal_name": payload.legal_name,
+        "trade_name": payload.trade_name,
+        "cnpj": payload.cnpj,
+        "address": payload.address,
+        "phone": payload.phone,
+        "technical_responsible_name": payload.technical_responsible_name,
+        "technical_registry_type": registry_type,
+        "technical_registry_number": registry_number,
+        "technical_registry_state": registry_state,
+        "sanitary_license_number": payload.sanitary_license_number,
+        "sanitary_license_expiry": payload.sanitary_license_expiry,
+        "environmental_license_number": payload.environmental_license_number,
+        "environmental_license_expiry": payload.environmental_license_expiry,
+        "toxicology_center_phone": payload.toxicology_center_phone,
+    }
+    for field_name, raw_value in updates.items():
+        if raw_value is None:
+            continue
+        setattr(record, field_name, str(raw_value).strip())
+
+    for field_name in (
+        "legal_name",
+        "trade_name",
+        "address",
+        "technical_responsible_name",
+        "technical_registry_type",
+        "technical_registry_number",
+        "technical_registry_state",
+        "sanitary_license_number",
+        "environmental_license_number",
+        "toxicology_center_phone",
+    ):
+        if not str(getattr(record, field_name, "") or "").strip():
+            raise BusinessRuleViolation("Os dados tecnicos obrigatorios da empresa nao podem ficar vazios.")
+
+    record.technical_registry_state = record.technical_registry_state.upper()
+    db.add(record)
+
+
+def _get_or_create_company_technical_data(
+    db: Session,
+    *,
+    current_user: Optional[User] = None,
+    company_id: Optional[int] = None,
+    create_if_missing: bool,
+) -> Optional[CompanyTechnicalData]:
+    target_company_id = company_id or getattr(current_user, "empresa_prestadora_id", None)
+    if target_company_id is None:
+        company = db.query(ProviderCompany).order_by(ProviderCompany.id.asc()).first()
+        target_company_id = getattr(company, "id", None)
+    if target_company_id is None:
+        raise BusinessRuleViolation("Cadastre uma empresa prestadora antes de configurar os dados tecnicos institucionais.")
+
+    record = db.query(CompanyTechnicalData).filter(CompanyTechnicalData.empresa_prestadora_id == target_company_id).first()
+    if record or not create_if_missing:
+        return record
+
+    settings = get_settings()
+    record = CompanyTechnicalData(
+        empresa_prestadora_id=target_company_id,
+        legal_name=settings.company_legal_name,
+        trade_name=settings.company_trade_name or settings.company_legal_name,
+        cnpj=settings.company_cnpj,
+        address=settings.company_address,
+        phone=settings.company_phone,
+        technical_responsible_name=settings.technical_responsible_name,
+        technical_registry_type=_infer_registry_type(settings.technical_responsible_registry),
+        technical_registry_number=_infer_registry_number(settings.technical_responsible_registry),
+        technical_registry_state="SP",
+        sanitary_license_number=settings.sanitary_license_number,
+        sanitary_license_expiry=settings.sanitary_license_expiry,
+        environmental_license_number=settings.environmental_license_number,
+        environmental_license_expiry=settings.environmental_license_expiry,
+        toxicology_center_phone=settings.toxicology_center_phone,
+    )
+    db.add(record)
+    db.flush()
+    return record
+
+
+def _normalize_registry_payload(payload) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    registry_type = payload.technical_registry_type
+    registry_number = payload.technical_registry_number
+    registry_state = payload.technical_registry_state
+    combined = str(payload.technical_responsible_registry or "").strip()
+    if combined and (not registry_type or not registry_number):
+        registry_type = registry_type or _infer_registry_type(combined)
+        registry_number = registry_number or _infer_registry_number(combined)
+    if registry_state:
+        registry_state = str(registry_state).strip().upper()
+    return registry_type, registry_number, registry_state
+
+
+def _infer_registry_type(registry_label: Optional[str]) -> str:
+    parts = str(registry_label or "").strip().split()
+    return parts[0] if parts else "CRBio"
+
+
+def _infer_registry_number(registry_label: Optional[str]) -> str:
+    parts = str(registry_label or "").strip().split(maxsplit=1)
+    return parts[1] if len(parts) > 1 else ""
+
+
+def _compose_registry_label(registry_type: Optional[str], registry_number: Optional[str], registry_state: Optional[str]) -> str:
+    parts = [str(registry_type or "").strip(), str(registry_number or "").strip()]
+    if registry_state:
+        parts.append(str(registry_state or "").strip().upper())
+    return " / ".join(part for part in [f"{parts[0]} {parts[1]}".strip(), parts[2] if len(parts) > 2 else ""] if part).strip()
+
+
+def _build_asset_read(filename: Optional[str], content_type: Optional[str], content: Optional[bytes], uploaded_at: Optional[datetime]):
+    return {
+        "has_file": bool(filename and content),
+        "filename": filename,
+        "content_type": content_type,
+        "size_bytes": len(content) if content else None,
+        "uploaded_at": uploaded_at.isoformat() if uploaded_at else None,
+    }
+
+
+def _validate_company_asset(*, asset_kind: str, filename: str, content_type: str, content: bytes) -> None:
+    if not content:
+        raise BusinessRuleViolation("Selecione um arquivo valido antes de salvar.")
+    normalized_type = _normalize_content_type(content_type)
+    extension = (filename or "").lower().rsplit(".", 1)[-1] if "." in (filename or "") else ""
+    allowed_types = {
+        "sanitary_license": {"application/pdf", "image/png", "image/jpeg", "image/jpg"},
+        "environmental_license": {"application/pdf", "image/png", "image/jpeg", "image/jpg"},
+        "signature": {"image/png", "image/jpeg", "image/jpg"},
+    }
+    max_size = 4 * 1024 * 1024 if asset_kind != "signature" else 2 * 1024 * 1024
+    if normalized_type not in allowed_types.get(asset_kind, set()):
+        raise BusinessRuleViolation("Formato de arquivo nao permitido para este ativo tecnico.")
+    if len(content) > max_size:
+        raise BusinessRuleViolation("O arquivo excede o limite permitido para upload.")
+    if asset_kind == "signature" and extension not in {"png", "jpg", "jpeg"}:
+        raise BusinessRuleViolation("A assinatura deve ser enviada em PNG ou JPG.")
+
+
+def _normalize_uploaded_filename(filename: str, fallback: str) -> str:
+    cleaned = "".join(ch for ch in str(filename or "").strip() if ch.isalnum() or ch in {".", "-", "_"})
+    return cleaned or fallback
+
+
+def _asset_fallback_filename(asset_kind: str, content_type: str) -> str:
+    extension_map = {
+        "application/pdf": ".pdf",
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+    }
+    return f"{asset_kind}{extension_map.get(_normalize_content_type(content_type), '.bin')}"
+
+
+def _normalize_content_type(content_type: Optional[str]) -> str:
+    return str(content_type or "application/octet-stream").strip().lower()

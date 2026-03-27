@@ -2503,6 +2503,15 @@ def _company_identification_summary_lines() -> List[str]:
     ]
 
 
+def _company_identification_summary_lines_for_document(settings) -> List[str]:
+    return [
+        f"Empresa especializada: {settings.company_trade_name} | {settings.company_legal_name}",
+        f"Endereco e contato: {settings.company_address} | Telefone: {settings.company_phone}",
+        f"Licenca sanitaria: {settings.sanitary_license_number} | validade: {settings.sanitary_license_expiry or '-'}",
+        f"Licenca ambiental: {settings.environmental_license_number} | validade: {settings.environmental_license_expiry or '-'}",
+    ]
+
+
 def _resolve_sanitary_certificate_template_path() -> Optional[Path]:
     try:
         return require_certificate_model_path()
@@ -2755,15 +2764,25 @@ def _draw_guarantee_footer_block(
 
 def _resolve_responsible_name(settings, work_order: WorkOrder) -> str:
     responsible_name = settings.technical_responsible_name
-    if responsible_name == "Responsavel tecnico nao configurado":
+    if not str(responsible_name or "").strip() or "nao configurado" in str(responsible_name).lower():
         responsible_name = work_order.tecnico.nome
     return responsible_name
+
+
+def _resolve_signature_image(settings, work_order: WorkOrder) -> Optional[ImageReader]:
+    signature_data = getattr(settings, "technical_signature_data", None)
+    if signature_data:
+        return ImageReader(BytesIO(signature_data))
+    signature_path = resolve_technical_signature_path(work_order.tecnico)
+    if signature_path:
+        return ImageReader(str(signature_path))
+    return None
 
 
 def _draw_signature_stamp(
     pdf: canvas.Canvas,
     *,
-    signature_path: Optional[Path],
+    signature_image: Optional[ImageReader],
     center_x: float,
     line_y: float,
     label: str,
@@ -2771,14 +2790,13 @@ def _draw_signature_stamp(
     max_width: float = 40 * mm,
     max_height: float = 14 * mm,
 ) -> None:
-    if signature_path:
-        image = ImageReader(str(signature_path))
-        image_width, image_height = image.getSize()
+    if signature_image:
+        image_width, image_height = signature_image.getSize()
         scale = min(max_width / image_width, max_height / image_height)
         draw_width = image_width * scale
         draw_height = image_height * scale
         pdf.drawImage(
-            image,
+            signature_image,
             center_x - (draw_width / 2),
             line_y + 2 * mm,
             width=draw_width,
@@ -2979,7 +2997,7 @@ def _draw_certificate_badge(pdf: canvas.Canvas, center_x: float, center_y: float
 def generate_work_order_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
     def _builder() -> bytes:
         work_order = get_work_order(db, work_order_id, current_user=current_user)
-        settings = get_document_company_settings(db)
+        settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
         return generate_work_order_document_pdf(work_order, settings)
 
     return _run_document_generation("work_order_pdf", work_order_id, _builder)
@@ -2988,7 +3006,7 @@ def generate_work_order_pdf(db: Session, work_order_id: int, current_user: Optio
 def generate_technical_report_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
     def _builder() -> bytes:
         work_order = get_work_order(db, work_order_id, current_user=current_user)
-        settings = get_document_company_settings(db)
+        settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
         from app.application.work_order_documents import generate_technical_report_document_pdf
 
         return generate_technical_report_document_pdf(work_order, settings)
@@ -3002,7 +3020,7 @@ def _generate_standard_sanitary_certificate_pdf(
     current_user: Optional[User] = None,
 ) -> bytes:
     work_order = get_work_order(db, work_order_id, current_user=current_user)
-    settings = get_settings()
+    settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     y = _draw_document_frame(
@@ -3053,7 +3071,14 @@ def _generate_standard_sanitary_certificate_pdf(
     y = _draw_paragraph(pdf, y, declaration, width_chars=108, font_size=8.9, line_height=4.0 * mm)
 
     y = _draw_section_title(pdf, y - 1 * mm, "Empresa especializada")
-    y = _draw_bullets(pdf, y, _company_identification_summary_lines(), width_chars=106, font_size=8.8, line_height=4.0 * mm)
+    y = _draw_bullets(
+        pdf,
+        y,
+        _company_identification_summary_lines_for_document(settings),
+        width_chars=106,
+        font_size=8.8,
+        line_height=4.0 * mm,
+    )
 
     emission_date = date.today().strftime("%d/%m/%Y")
     responsible_name = settings.technical_responsible_name
@@ -3089,7 +3114,7 @@ def _generate_standard_sanitary_certificate_pdf(
 
 def _generate_template_sanitary_certificate_pdf(db: Session, work_order_id: int, template_path: Path) -> bytes:
     work_order = get_work_order(db, work_order_id)
-    settings = get_settings()
+    settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
     buffer = BytesIO()
     page_width, page_height = landscape(A4)
     pdf = canvas.Canvas(buffer, pagesize=(page_width, page_height))
@@ -3198,9 +3223,9 @@ def _generate_official_sanitary_certificate_pdf(
     current_user: Optional[User] = None,
 ) -> bytes:
     work_order = get_work_order(db, work_order_id, current_user=current_user)
-    settings = get_settings()
-    signature_path = resolve_technical_signature_path(work_order.tecnico)
-    if signature_path is None:
+    settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
+    signature_image = _resolve_signature_image(settings, work_order)
+    if signature_image is None:
         LOGGER.warning(
             "technical_signature_missing work_order_id=%s technician_id=%s technician_name=%s",
             work_order_id,
@@ -3243,7 +3268,7 @@ def _generate_official_sanitary_certificate_pdf(
     pdf.roundRect(33 * mm, 34 * mm, width - 66 * mm, 92 * mm, 4 * mm, stroke=1, fill=1)
     pdf.roundRect(33 * mm, 18 * mm, width - 66 * mm, 12 * mm, 3 * mm, stroke=1, fill=1)
 
-    company_name = (settings.company_trade_name or settings.company_name or settings.company_legal_name).upper()
+    company_name = (settings.company_trade_name or settings.company_legal_name).upper()
     pdf.setFillColor(accent)
     pdf.setFont("Times-Bold", 15)
     pdf.drawCentredString(width / 2, height - 31.5 * mm, company_name[:64])
@@ -3300,7 +3325,7 @@ def _generate_official_sanitary_certificate_pdf(
         f"OS: {work_order.numero}",
         f"Tecnico executor: {work_order.tecnico.nome}",
     ]
-    company_lines = _company_identification_summary_lines()
+    company_lines = _company_identification_summary_lines_for_document(settings)
 
     _draw_certificate_info_box(
         pdf,
@@ -3342,7 +3367,7 @@ def _generate_official_sanitary_certificate_pdf(
     emission_date = date.today().strftime("%d/%m/%Y")
     _draw_signature_stamp(
         pdf,
-        signature_path=signature_path,
+        signature_image=signature_image,
         center_x=97 * mm,
         line_y=16 * mm,
         label="Responsavel tecnico",
@@ -3378,7 +3403,7 @@ def _generate_ornamental_sanitary_certificate_pdf(
     current_user: Optional[User] = None,
 ) -> bytes:
     work_order = get_work_order(db, work_order_id, current_user=current_user)
-    settings = get_settings()
+    settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
@@ -3394,7 +3419,7 @@ def _generate_ornamental_sanitary_certificate_pdf(
 
     pdf.setFillColor(colors.HexColor("#0d7a68"))
     pdf.setFont("Helvetica-Bold", 13)
-    pdf.drawCentredString(width / 2, height - 24 * mm, settings.company_name.upper())
+    pdf.drawCentredString(width / 2, height - 24 * mm, (settings.company_trade_name or settings.company_legal_name).upper())
     pdf.setFillColor(colors.HexColor("#1d2a2b"))
     pdf.setFont("Helvetica-Bold", 24)
     pdf.drawCentredString(width / 2, height - 48 * mm, "CERTIFICADO SANITARIO")
@@ -3459,7 +3484,7 @@ def _generate_premium_framed_sanitary_certificate_pdf(
     current_user: Optional[User] = None,
 ) -> bytes:
     work_order = get_work_order(db, work_order_id, current_user=current_user)
-    settings = get_settings()
+    settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
     buffer = BytesIO()
     width, height = landscape(A4)
     pdf = canvas.Canvas(buffer, pagesize=(width, height))
@@ -3492,7 +3517,7 @@ def _generate_premium_framed_sanitary_certificate_pdf(
     _draw_certificate_flourish(pdf, width / 2, height - 27 * mm, 78 * mm)
     _draw_certificate_flourish(pdf, width / 2, 27 * mm, 78 * mm)
 
-    company_name = (settings.company_name or settings.company_trade_name or settings.company_legal_name).upper()
+    company_name = (settings.company_trade_name or settings.company_legal_name).upper()
     pdf.setFillColor(accent)
     pdf.setFont("Times-Bold", 16)
     pdf.drawCentredString(width / 2, height - 38 * mm, company_name[:48])
@@ -3639,7 +3664,7 @@ def generate_framed_sanitary_certificate_pdf(db: Session, work_order_id: int, cu
 def generate_guarantee_certificate_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
     def _builder() -> bytes:
         work_order = get_work_order(db, work_order_id, current_user=current_user)
-        settings = get_settings()
+        settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
         template_path = _resolve_guarantee_template_path()
         if template_path is None:
             LOGGER.warning("guarantee_certificate_template_missing work_order_id=%s", work_order_id)
@@ -3665,7 +3690,7 @@ def generate_guarantee_certificate_pdf(db: Session, work_order_id: int, current_
         validity_text = _resolve_guarantee_validity_text(work_order)
         responsible_name = _resolve_responsible_name(settings, work_order)
         applicator_name = work_order.tecnico.nome
-        signature_path = resolve_technical_signature_path(work_order.tecnico)
+        signature_image = _resolve_signature_image(settings, work_order)
 
         pdf.setFillColor(colors.HexColor("#43a047"))
         pdf.setFont("Helvetica-Bold", 26)
@@ -3712,7 +3737,7 @@ def generate_guarantee_certificate_pdf(db: Session, work_order_id: int, current_
         pdf.rect(16 * mm, 6 * mm, 64 * mm, 28 * mm, stroke=0, fill=1)
         _draw_signature_stamp(
             pdf,
-            signature_path=signature_path,
+            signature_image=signature_image,
             center_x=48 * mm,
             line_y=12 * mm,
             label="Tecnico responsavel",

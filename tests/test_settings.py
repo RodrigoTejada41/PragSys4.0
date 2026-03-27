@@ -86,7 +86,9 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
                 "address": "Av. Regulada, 900 - Sao Paulo/SP",
                 "phone": "1130304040",
                 "technical_responsible_name": "Dra. Helena Prado",
-                "technical_responsible_registry": "CRQ 445566",
+                "technical_registry_type": "CRQ",
+                "technical_registry_number": "445566",
+                "technical_registry_state": "SP",
                 "sanitary_license_number": "LS-0099",
                 "sanitary_license_expiry": "31/12/2026",
                 "environmental_license_number": "LA-7788",
@@ -125,14 +127,49 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert updated["company"]["legal_name"] == "SysPragas Compliance Ltda"
     assert updated["company"]["trade_name"] == "SysPragas Pro"
     assert updated["company"]["technical_responsible_name"] == "Dra. Helena Prado"
-    assert updated["company"]["technical_responsible_registry"] == "CRQ 445566"
+    assert updated["company"]["technical_registry_type"] == "CRQ"
+    assert updated["company"]["technical_registry_number"] == "445566"
+    assert updated["company"]["technical_registry_state"] == "SP"
+    assert updated["company"]["technical_responsible_registry"] == "CRQ 445566 / SP"
     assert updated["company"]["sanitary_license_number"] == "LS-0099"
     assert updated["company"]["environmental_license_number"] == "LA-7788"
     assert updated["company"]["toxicology_center_phone"] == "0800 722 6001"
+    assert updated["company"]["sanitary_license_file"]["has_file"] is False
+    assert updated["company"]["technical_signature"]["has_file"] is False
     assert updated["system"]["multiempresa_enabled"] is False
     assert updated["system"]["operation_mode"] == "rede"
     assert updated["system"]["notifications_enabled"] is False
     assert updated["system"]["appointment_default_google_sync"] is True
+
+
+def test_admin_can_upload_company_technical_assets(client, auth_headers):
+    signature_response = client.post(
+        "/api/v1/settings/technical-documents/assets/signature",
+        headers=auth_headers,
+        files={"file": ("assinatura.png", b"\x89PNG\r\n\x1a\n\x00\x00\x00", "image/png")},
+    )
+    assert signature_response.status_code == 200
+    signature_payload = signature_response.json()
+    assert signature_payload["technical_signature"]["has_file"] is True
+    assert signature_payload["technical_signature"]["filename"] == "assinatura.png"
+
+    license_response = client.post(
+        "/api/v1/settings/technical-documents/assets/sanitary_license",
+        headers=auth_headers,
+        files={"file": ("licenca.pdf", b"%PDF-1.4\n%teste", "application/pdf")},
+    )
+    assert license_response.status_code == 200
+    license_payload = license_response.json()
+    assert license_payload["sanitary_license_file"]["has_file"] is True
+    assert license_payload["sanitary_license_file"]["filename"] == "licenca.pdf"
+
+    download_response = client.get(
+        "/api/v1/settings/technical-documents/assets/sanitary_license",
+        headers=auth_headers,
+    )
+    assert download_response.status_code == 200
+    assert download_response.headers["content-type"] == "application/pdf"
+    assert download_response.content.startswith(b"%PDF")
 
 
 def test_operador_cannot_access_system_settings(client, auth_headers):
@@ -213,3 +250,26 @@ def test_disabling_multiempresa_removes_company_scope_from_core_queries(client, 
     assert shared_response.status_code == 200
     assert len(shared_response.json()) == 1
     assert shared_response.json()[0]["razao_social"] == "Cliente Empresa A"
+
+
+def test_company_technical_assets_remain_isolated_per_company(client, auth_headers):
+    company_a_headers = _create_company_user(client, auth_headers, "admtecha", "51")
+    company_b_headers = _create_company_user(client, auth_headers, "admtechb", "62")
+
+    upload_response = client.post(
+        "/api/v1/settings/technical-documents/assets/environmental_license",
+        headers=company_a_headers,
+        files={"file": ("ambiental-a.pdf", b"%PDF-1.4\nempresa-a", "application/pdf")},
+    )
+    assert upload_response.status_code == 200
+    assert upload_response.json()["environmental_license_file"]["filename"] == "ambiental-a.pdf"
+
+    company_b_settings = client.get("/api/v1/settings", headers=company_b_headers)
+    assert company_b_settings.status_code == 200
+    assert company_b_settings.json()["company"]["environmental_license_file"]["has_file"] is False
+
+    company_b_download = client.get(
+        "/api/v1/settings/technical-documents/assets/environmental_license",
+        headers=company_b_headers,
+    )
+    assert company_b_download.status_code == 400

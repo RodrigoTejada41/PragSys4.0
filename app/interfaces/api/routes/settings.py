@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from app.application.database_admin_service import (
@@ -12,10 +12,17 @@ from app.application.database_admin_service import (
 from app.application.schemas import (
     DatabaseCleanupRequest,
     DatabaseMaintenanceRead,
+    SettingsCompanyRead,
     SystemSettingsRead,
     SystemSettingsUpdate,
 )
-from app.application.settings_service import get_system_settings, update_system_settings
+from app.application.settings_service import (
+    get_company_technical_asset_content,
+    get_system_settings,
+    save_company_signature_from_data_url,
+    save_company_technical_asset,
+    update_system_settings,
+)
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
 from app.interfaces.api.deps import require_access
@@ -28,7 +35,7 @@ def get_settings_view(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_access(["master", "admin"], ["settings.view"])),
 ) -> SystemSettingsRead:
-    return get_system_settings(db)
+    return get_system_settings(db, current_user)
 
 
 @router.put("", response_model=SystemSettingsRead)
@@ -38,6 +45,55 @@ def put_settings_view(
     current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
 ) -> SystemSettingsRead:
     return update_system_settings(db, payload, current_user)
+
+
+@router.post("/technical-documents/assets/{asset_kind}", response_model=SettingsCompanyRead)
+async def upload_company_technical_asset_view(
+    asset_kind: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
+) -> SettingsCompanyRead:
+    content = await file.read()
+    return save_company_technical_asset(
+        db,
+        current_user=current_user,
+        asset_kind=asset_kind,
+        filename=file.filename or asset_kind,
+        content_type=file.content_type or "application/octet-stream",
+        content=content,
+    )
+
+
+@router.post("/technical-documents/signature/draw", response_model=SettingsCompanyRead)
+def save_drawn_signature_view(
+    data_url: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
+) -> SettingsCompanyRead:
+    return save_company_signature_from_data_url(
+        db,
+        current_user=current_user,
+        data_url=data_url,
+    )
+
+
+@router.get("/technical-documents/assets/{asset_kind}")
+def get_company_technical_asset_view(
+    asset_kind: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.view"])),
+):
+    filename, content_type, content = get_company_technical_asset_content(
+        db,
+        current_user=current_user,
+        asset_kind=asset_kind,
+    )
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.get("/database/backup")

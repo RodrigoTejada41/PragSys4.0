@@ -613,6 +613,169 @@ def _migration_20260327_003_user_permissions(engine: Engine) -> None:
     _add_column_if_missing(engine, "users", "permissions_json", "permissions_json TEXT")
 
 
+def _migration_20260327_004_company_technical_data(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS dados_tecnicos_empresa (
+                    id INTEGER PRIMARY KEY,
+                    empresa_prestadora_id INTEGER NOT NULL,
+                    legal_name VARCHAR(160) NOT NULL,
+                    trade_name VARCHAR(160),
+                    cnpj VARCHAR(20),
+                    address VARCHAR(255) NOT NULL,
+                    phone VARCHAR(30),
+                    technical_responsible_name VARCHAR(160) NOT NULL,
+                    technical_registry_type VARCHAR(40) NOT NULL DEFAULT 'CRBio',
+                    technical_registry_number VARCHAR(60) NOT NULL DEFAULT '',
+                    technical_registry_state VARCHAR(2) NOT NULL DEFAULT 'SP',
+                    sanitary_license_number VARCHAR(80) NOT NULL,
+                    sanitary_license_expiry VARCHAR(20),
+                    environmental_license_number VARCHAR(80) NOT NULL,
+                    environmental_license_expiry VARCHAR(20),
+                    toxicology_center_phone VARCHAR(40) NOT NULL,
+                    sanitary_license_filename VARCHAR(255),
+                    sanitary_license_content_type VARCHAR(120),
+                    sanitary_license_data BLOB,
+                    sanitary_license_uploaded_at DATETIME,
+                    environmental_license_filename VARCHAR(255),
+                    environmental_license_content_type VARCHAR(120),
+                    environmental_license_data BLOB,
+                    environmental_license_uploaded_at DATETIME,
+                    signature_filename VARCHAR(255),
+                    signature_content_type VARCHAR(120),
+                    signature_data BLOB,
+                    signature_uploaded_at DATETIME,
+                    signature_source VARCHAR(20),
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_dados_tecnicos_empresa_empresa UNIQUE (empresa_prestadora_id)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO dados_tecnicos_empresa (
+                    empresa_prestadora_id,
+                    legal_name,
+                    trade_name,
+                    cnpj,
+                    address,
+                    phone,
+                    technical_responsible_name,
+                    technical_registry_type,
+                    technical_registry_number,
+                    technical_registry_state,
+                    sanitary_license_number,
+                    sanitary_license_expiry,
+                    environmental_license_number,
+                    environmental_license_expiry,
+                    toxicology_center_phone,
+                    created_at,
+                    updated_at
+                )
+                SELECT
+                    company.id,
+                    COALESCE(
+                        (SELECT value FROM system_settings WHERE key = 'company_legal_name'),
+                        json_quote(COALESCE(company.razao_social, 'Empresa nao configurada'))
+                    ),
+                    COALESCE(
+                        (SELECT value FROM system_settings WHERE key = 'company_trade_name'),
+                        json_quote(COALESCE(company.nome_fantasia, company.razao_social, 'Empresa nao configurada'))
+                    ),
+                    COALESCE(
+                        (SELECT value FROM system_settings WHERE key = 'company_cnpj'),
+                        json_quote(company.cnpj)
+                    ),
+                    COALESCE(
+                        (SELECT value FROM system_settings WHERE key = 'company_address'),
+                        json_quote(COALESCE(company.endereco, 'Endereco nao configurado'))
+                    ),
+                    COALESCE(
+                        (SELECT value FROM system_settings WHERE key = 'company_phone'),
+                        json_quote(company.telefone)
+                    ),
+                    COALESCE(
+                        (SELECT value FROM system_settings WHERE key = 'technical_responsible_name'),
+                        json_quote('Responsavel tecnico nao configurado')
+                    ),
+                    CASE
+                        WHEN COALESCE((SELECT value FROM system_settings WHERE key = 'technical_responsible_registry'), '""') LIKE '\"% %\"'
+                            THEN substr(
+                                trim(json_extract((SELECT value FROM system_settings WHERE key = 'technical_responsible_registry'), '$')),
+                                1,
+                                instr(trim(json_extract((SELECT value FROM system_settings WHERE key = 'technical_responsible_registry'), '$')), ' ') - 1
+                            )
+                        ELSE 'CRBio'
+                    END,
+                    CASE
+                        WHEN COALESCE((SELECT value FROM system_settings WHERE key = 'technical_responsible_registry'), '""') LIKE '\"% %\"'
+                            THEN substr(
+                                trim(json_extract((SELECT value FROM system_settings WHERE key = 'technical_responsible_registry'), '$')),
+                                instr(trim(json_extract((SELECT value FROM system_settings WHERE key = 'technical_responsible_registry'), '$')), ' ') + 1
+                            )
+                        ELSE COALESCE(
+                            json_extract((SELECT value FROM system_settings WHERE key = 'technical_responsible_registry'), '$'),
+                            ''
+                        )
+                    END,
+                    'SP',
+                    COALESCE(
+                        (SELECT value FROM system_settings WHERE key = 'sanitary_license_number'),
+                        json_quote('Licenca sanitaria nao configurada')
+                    ),
+                    COALESCE((SELECT value FROM system_settings WHERE key = 'sanitary_license_expiry'), json_quote(NULL)),
+                    COALESCE(
+                        (SELECT value FROM system_settings WHERE key = 'environmental_license_number'),
+                        json_quote('Licenca ambiental nao configurada')
+                    ),
+                    COALESCE((SELECT value FROM system_settings WHERE key = 'environmental_license_expiry'), json_quote(NULL)),
+                    COALESCE(
+                        (SELECT value FROM system_settings WHERE key = 'toxicology_center_phone'),
+                        json_quote('0800 nao configurado')
+                    ),
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP
+                FROM empresas_prestadoras company
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM dados_tecnicos_empresa existing
+                    WHERE existing.empresa_prestadora_id = company.id
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE dados_tecnicos_empresa
+                SET
+                    legal_name = json_extract(legal_name, '$'),
+                    trade_name = json_extract(trade_name, '$'),
+                    cnpj = json_extract(cnpj, '$'),
+                    address = json_extract(address, '$'),
+                    phone = json_extract(phone, '$'),
+                    technical_responsible_name = json_extract(technical_responsible_name, '$'),
+                    sanitary_license_number = json_extract(sanitary_license_number, '$'),
+                    sanitary_license_expiry = json_extract(sanitary_license_expiry, '$'),
+                    environmental_license_number = json_extract(environmental_license_number, '$'),
+                    environmental_license_expiry = json_extract(environmental_license_expiry, '$'),
+                    toxicology_center_phone = json_extract(toxicology_center_phone, '$')
+                """
+            )
+        )
+    _create_index_if_missing(
+        engine,
+        "dados_tecnicos_empresa",
+        "ix_dados_tecnicos_empresa_empresa_prestadora_id",
+        ["empresa_prestadora_id"],
+    )
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
@@ -625,6 +788,7 @@ MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260327_001_backend_hardening", _migration_20260327_001_backend_hardening),
     ("20260327_002_multiempresa_estoque", _migration_20260327_002_multiempresa_estoque),
     ("20260327_003_user_permissions", _migration_20260327_003_user_permissions),
+    ("20260327_004_company_technical_data", _migration_20260327_004_company_technical_data),
 ]
 
 
