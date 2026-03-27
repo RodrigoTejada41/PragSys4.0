@@ -55,6 +55,7 @@ from app.application.schemas import (
     WorkOrderUpdate,
 )
 from app.application.settings_service import get_boolean_setting
+from app.application.settings_service import get_document_company_settings
 from app.core.exceptions import BusinessRuleViolation
 from app.core.permissions import dump_permissions_json, load_permissions_json
 from app.core.security import create_access_token, get_password_hash, verify_password
@@ -2978,7 +2979,7 @@ def _draw_certificate_badge(pdf: canvas.Canvas, center_x: float, center_y: float
 def generate_work_order_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
     def _builder() -> bytes:
         work_order = get_work_order(db, work_order_id, current_user=current_user)
-        settings = get_settings()
+        settings = get_document_company_settings(db)
         return generate_work_order_document_pdf(work_order, settings)
 
     return _run_document_generation("work_order_pdf", work_order_id, _builder)
@@ -2987,73 +2988,10 @@ def generate_work_order_pdf(db: Session, work_order_id: int, current_user: Optio
 def generate_technical_report_pdf(db: Session, work_order_id: int, current_user: Optional[User] = None) -> bytes:
     def _builder() -> bytes:
         work_order = get_work_order(db, work_order_id, current_user=current_user)
-        settings = get_settings()
-        buffer = BytesIO()
-        pdf = canvas.Canvas(buffer, pagesize=A4)
-        y = _draw_document_frame(
-            pdf,
-            "Relatorio Tecnico",
-            "Estruturado com base nos requisitos aplicaveis da RDC 622/2022",
-        )
+        settings = get_document_company_settings(db)
+        from app.application.work_order_documents import generate_technical_report_document_pdf
 
-        y = _draw_section_title(pdf, y, "Resumo tecnico")
-        y = _draw_key_values(
-            pdf,
-            y,
-            [
-                ("OS", work_order.numero),
-                ("Cliente", work_order.cliente.razao_social),
-                ("Tecnico executor", work_order.tecnico.nome),
-                ("Responsavel tecnico", f"{settings.technical_responsible_name} - {settings.technical_responsible_registry}"),
-                ("Data da vistoria", work_order.data_execucao.isoformat()),
-                ("Status da OS", work_order.status.replace("_", " ")),
-                ("Garantia", work_order.garantia_ate.isoformat()),
-            ],
-        )
-
-        y = _draw_section_title(pdf, y - 2 * mm, "Diagnostico")
-        diagnostic = (
-            f"Foram avaliadas as condicoes do local '{work_order.local_execucao}' para controle de vetores e pragas urbanas. "
-            f"O atendimento foi executado conforme os dados operacionais registrados na OS {work_order.numero}."
-        )
-        y = _draw_paragraph(pdf, y, diagnostic)
-
-        y = _draw_section_title(pdf, y - 2 * mm, "Pragas e riscos observados")
-        pest_items = [f"{item.praga.nome_comum} ({item.praga.nome_cientifico})" for item in work_order.pragas]
-        if not pest_items:
-            pest_items = ["Nao houve praga especifica registrada; manter monitoramento preventivo."]
-        y = _draw_bullets(pdf, y, pest_items)
-
-        y = _draw_section_title(pdf, y - 2 * mm, "Produtos e metodologia")
-        y = _draw_bullets(
-            pdf,
-            y,
-            [
-                f"{item.produto.nome} com principio ativo {item.produto.principio_ativo}, quantidade {item.quantidade} e diluicao {item.diluicao}"
-                for item in work_order.produtos
-            ],
-        )
-
-        y = _draw_section_title(pdf, y - 2 * mm, "Recomendacoes")
-        recommendations = [
-            "Manter o ambiente higienizado, sem aculo de residuos e umidade excessiva.",
-            "Reforcar vedacao de acessos, ralos, frestas e pontos de abrigo identificados.",
-            f"Agendar reavaliacao antes do termino da garantia em {work_order.garantia_ate.isoformat()}.",
-        ]
-        y = _draw_bullets(pdf, y, recommendations)
-
-        y = _draw_section_title(pdf, y - 2 * mm, "Observacoes complementares")
-        y = _draw_paragraph(pdf, y, work_order.observacoes or "Sem observacoes complementares.")
-
-        y = _draw_section_title(pdf, y - 2 * mm, "Dados regulatorios da empresa")
-        y = _draw_bullets(pdf, y, _company_identification_lines(), width_chars=84)
-
-        pdf.setFont("Helvetica", 10)
-        pdf.drawString(20 * mm, 24 * mm, "Responsavel tecnico: ______________________________")
-        pdf.drawRightString(190 * mm, 24 * mm, "Cliente/ciente: ______________________________")
-        pdf.showPage()
-        pdf.save()
-        return buffer.getvalue()
+        return generate_technical_report_document_pdf(work_order, settings)
 
     return _run_document_generation("technical_report_pdf", work_order_id, _builder)
 

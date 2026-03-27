@@ -2,12 +2,14 @@ import base64
 import hashlib
 import json
 import logging
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.orm import Session
 
 from app.application.schemas import (
+    SettingsCompanyRead,
     SettingsContractsRead,
     SettingsDatabaseRead,
     SettingsEmailRead,
@@ -47,6 +49,21 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "operation_mode": "local",
     "notifications_enabled": True,
     "appointment_default_google_sync": False,
+}
+
+COMPANY_SETTING_KEYS = {
+    "legal_name": "company_legal_name",
+    "trade_name": "company_trade_name",
+    "cnpj": "company_cnpj",
+    "address": "company_address",
+    "phone": "company_phone",
+    "technical_responsible_name": "technical_responsible_name",
+    "technical_responsible_registry": "technical_responsible_registry",
+    "sanitary_license_number": "sanitary_license_number",
+    "sanitary_license_expiry": "sanitary_license_expiry",
+    "environmental_license_number": "environmental_license_number",
+    "environmental_license_expiry": "environmental_license_expiry",
+    "toxicology_center_phone": "toxicology_center_phone",
 }
 
 RUNTIME_FALLBACK_KEYS = {
@@ -170,6 +187,12 @@ def update_system_settings(db: Session, payload: SystemSettingsUpdate, current_u
             if value is None:
                 continue
             updates[f"database_{key}"] = value
+    if payload.company:
+        company_payload = payload.company.model_dump()
+        for key, value in company_payload.items():
+            if value is None:
+                continue
+            updates[COMPANY_SETTING_KEYS[key]] = str(value).strip()
 
     if "operation_mode" in updates and updates["operation_mode"] not in {"local", "rede"}:
         raise BusinessRuleViolation("O modo de operacao deve ser 'local' ou 'rede'.")
@@ -177,6 +200,18 @@ def update_system_settings(db: Session, payload: SystemSettingsUpdate, current_u
         raise BusinessRuleViolation("O diretorio de contratos nao pode ficar vazio.")
     if "database_backup_dir" in updates and not str(updates["database_backup_dir"]).strip():
         raise BusinessRuleViolation("O diretorio de backup do banco nao pode ficar vazio.")
+    for key in (
+        "company_legal_name",
+        "company_trade_name",
+        "company_address",
+        "technical_responsible_name",
+        "technical_responsible_registry",
+        "sanitary_license_number",
+        "environmental_license_number",
+        "toxicology_center_phone",
+    ):
+        if key in updates and not str(updates[key]).strip():
+            raise BusinessRuleViolation("Os campos regulatorios obrigatorios da empresa nao podem ficar vazios.")
 
     for key, value in updates.items():
         set_setting_value(db, key, value, updated_by_user_id=current_user.id)
@@ -227,6 +262,52 @@ def get_system_settings(db: Session) -> SystemSettingsRead:
             app_port=settings.app_port,
             allow_remote_access=settings.allow_remote_access,
         ),
+        company=SettingsCompanyRead(
+            legal_name=str(get_setting_value(db, "company_legal_name", settings.company_legal_name)),
+            trade_name=str(get_setting_value(db, "company_trade_name", settings.company_trade_name)),
+            cnpj=_clean_optional_setting_text(get_setting_value(db, "company_cnpj", settings.company_cnpj)),
+            address=str(get_setting_value(db, "company_address", settings.company_address)),
+            phone=_clean_optional_setting_text(get_setting_value(db, "company_phone", settings.company_phone)),
+            technical_responsible_name=str(
+                get_setting_value(db, "technical_responsible_name", settings.technical_responsible_name)
+            ),
+            technical_responsible_registry=str(
+                get_setting_value(db, "technical_responsible_registry", settings.technical_responsible_registry)
+            ),
+            sanitary_license_number=str(
+                get_setting_value(db, "sanitary_license_number", settings.sanitary_license_number)
+            ),
+            sanitary_license_expiry=_clean_optional_setting_text(
+                get_setting_value(db, "sanitary_license_expiry", settings.sanitary_license_expiry)
+            ),
+            environmental_license_number=str(
+                get_setting_value(db, "environmental_license_number", settings.environmental_license_number)
+            ),
+            environmental_license_expiry=_clean_optional_setting_text(
+                get_setting_value(db, "environmental_license_expiry", settings.environmental_license_expiry)
+            ),
+            toxicology_center_phone=str(
+                get_setting_value(db, "toxicology_center_phone", settings.toxicology_center_phone)
+            ),
+        ),
+    )
+
+
+def get_document_company_settings(db: Session):
+    settings = get_system_settings(db).company
+    return SimpleNamespace(
+        company_legal_name=settings.legal_name,
+        company_trade_name=settings.trade_name,
+        company_cnpj=settings.cnpj,
+        company_address=settings.address,
+        company_phone=settings.phone,
+        technical_responsible_name=settings.technical_responsible_name,
+        technical_responsible_registry=settings.technical_responsible_registry,
+        sanitary_license_number=settings.sanitary_license_number,
+        sanitary_license_expiry=settings.sanitary_license_expiry,
+        environmental_license_number=settings.environmental_license_number,
+        environmental_license_expiry=settings.environmental_license_expiry,
+        toxicology_center_phone=settings.toxicology_center_phone,
     )
 
 

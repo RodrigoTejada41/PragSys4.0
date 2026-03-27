@@ -48,6 +48,7 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert "system" in payload
     assert "email" in payload
     assert "database" in payload
+    assert "company" in payload
     assert payload["system"]["operation_mode"] in {"local", "rede"}
 
     update_response = client.put(
@@ -78,6 +79,20 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
             "database": {
                 "backup_dir": "test_assets/backups",
             },
+            "company": {
+                "legal_name": "SysPragas Compliance Ltda",
+                "trade_name": "SysPragas Pro",
+                "cnpj": "99888777000166",
+                "address": "Av. Regulada, 900 - Sao Paulo/SP",
+                "phone": "1130304040",
+                "technical_responsible_name": "Dra. Helena Prado",
+                "technical_responsible_registry": "CRQ 445566",
+                "sanitary_license_number": "LS-0099",
+                "sanitary_license_expiry": "31/12/2026",
+                "environmental_license_number": "LA-7788",
+                "environmental_license_expiry": "31/12/2026",
+                "toxicology_center_phone": "0800 722 6001",
+            },
             "system": {
                 "multiempresa_enabled": False,
                 "operation_mode": "rede",
@@ -107,6 +122,13 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert updated["database"]["backup_dir"] == "test_assets/backups"
     assert updated["database"]["engine"] == "sqlite"
     assert updated["database"]["database_file_name"].endswith(".db")
+    assert updated["company"]["legal_name"] == "SysPragas Compliance Ltda"
+    assert updated["company"]["trade_name"] == "SysPragas Pro"
+    assert updated["company"]["technical_responsible_name"] == "Dra. Helena Prado"
+    assert updated["company"]["technical_responsible_registry"] == "CRQ 445566"
+    assert updated["company"]["sanitary_license_number"] == "LS-0099"
+    assert updated["company"]["environmental_license_number"] == "LA-7788"
+    assert updated["company"]["toxicology_center_phone"] == "0800 722 6001"
     assert updated["system"]["multiempresa_enabled"] is False
     assert updated["system"]["operation_mode"] == "rede"
     assert updated["system"]["notifications_enabled"] is False

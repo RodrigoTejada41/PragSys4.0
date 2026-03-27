@@ -1147,6 +1147,9 @@ function renderSettings() {
     const smtpSummaryLabel = settingsState.email.smtp_host
         ? `${escapeHtml(settingsState.email.smtp_host)}:${escapeHtml(String(settingsState.email.smtp_port))}`
         : "SMTP nao configurado";
+    const companyComplianceLabel = settingsState.company.technical_responsible_name && settingsState.company.sanitary_license_number
+        ? "Documentacao informada"
+        : "Documentacao pendente";
     const databaseSummaryLabel = settingsState.database.database_file_name
         ? `${escapeHtml(settingsState.database.engine)} | ${escapeHtml(settingsState.database.database_file_name)}`
         : escapeHtml(settingsState.database.engine);
@@ -1165,6 +1168,7 @@ function renderSettings() {
             ${settingsSummaryCard("Notificacoes", notificationsLabel, settingsState.system.notifications_enabled ? "Avisos operacionais seguem habilitados." : "Avisos operacionais desabilitados." )}
             ${settingsSummaryCard("Contratos", contractNotificationsLabel, `${settingsState.contracts.alert_days} dias de antecedencia e armazenamento em ${settingsState.contracts.storage_dir}.`)}
             ${settingsSummaryCard("SMTP", smtpSummaryLabel, settingsState.email.smtp_password_configured ? "Credenciais salvas para envio automatico de e-mail." : "Defina host, porta e remetente para habilitar notificacoes por e-mail.")}
+            ${settingsSummaryCard("Documentacao regulatoria", companyComplianceLabel, `${escapeHtml(settingsState.company.technical_responsible_name)} | CIT ${escapeHtml(settingsState.company.toxicology_center_phone || "-")}`)}
             ${settingsSummaryCard("Banco de dados", databaseSummaryLabel, `Backups operacionais em ${escapeHtml(settingsState.database.backup_dir)}.`)}
             ${settingsSummaryCard("Usuarios ativos", String(state.users.length || 0), isMaster ? "Leitura da administracao global disponivel neste perfil." : "Use a area de usuarios com perfil master para governanca completa.")}
         </div>
@@ -1205,6 +1209,64 @@ function renderSettings() {
                     <input name="contract_storage_dir" value="${escapeHtml(settingsState.contracts.storage_dir || "uploads/contratos")}">
                 </label>
             </div>
+        </section>
+        <section class="settings-form-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Documentos tecnicos</p>
+                <h4>Dados regulatorios da empresa</h4>
+                <p>Esses campos alimentam a Ordem de Servico, o Relatorio Tecnico e outros documentos regulamentados. Sem eles a emissao fica bloqueada.</p>
+            </div>
+            <div class="settings-field-grid two-columns">
+                <label>
+                    <span>Razao social</span>
+                    <input name="company_legal_name" value="${escapeHtml(settingsState.company.legal_name || "")}" required>
+                </label>
+                <label>
+                    <span>Nome fantasia</span>
+                    <input name="company_trade_name" value="${escapeHtml(settingsState.company.trade_name || "")}" required>
+                </label>
+                <label>
+                    <span>CNPJ</span>
+                    <input name="company_cnpj" value="${escapeHtml(settingsState.company.cnpj || "")}" placeholder="00.000.000/0000-00">
+                </label>
+                <label>
+                    <span>Telefone da empresa</span>
+                    <input name="company_phone" value="${escapeHtml(settingsState.company.phone || "")}" placeholder="(11) 3333-4444">
+                </label>
+                <label class="full-width">
+                    <span>Endereco completo da empresa</span>
+                    <input name="company_address" value="${escapeHtml(settingsState.company.address || "")}" required>
+                </label>
+                <label>
+                    <span>Responsavel tecnico</span>
+                    <input name="technical_responsible_name" value="${escapeHtml(settingsState.company.technical_responsible_name || "")}" required>
+                </label>
+                <label>
+                    <span>Registro profissional</span>
+                    <input name="technical_responsible_registry" value="${escapeHtml(settingsState.company.technical_responsible_registry || "")}" required>
+                </label>
+                <label>
+                    <span>Licenca sanitaria</span>
+                    <input name="sanitary_license_number" value="${escapeHtml(settingsState.company.sanitary_license_number || "")}" required>
+                </label>
+                <label>
+                    <span>Validade licenca sanitaria</span>
+                    <input name="sanitary_license_expiry" value="${escapeHtml(settingsState.company.sanitary_license_expiry || "")}" placeholder="31/12/2026">
+                </label>
+                <label>
+                    <span>Licenca ambiental</span>
+                    <input name="environmental_license_number" value="${escapeHtml(settingsState.company.environmental_license_number || "")}" required>
+                </label>
+                <label>
+                    <span>Validade licenca ambiental</span>
+                    <input name="environmental_license_expiry" value="${escapeHtml(settingsState.company.environmental_license_expiry || "")}" placeholder="31/12/2026">
+                </label>
+                <label>
+                    <span>CIT</span>
+                    <input name="toxicology_center_phone" value="${escapeHtml(settingsState.company.toxicology_center_phone || "")}" required placeholder="0800 722 6001">
+                </label>
+            </div>
+            <p class="origin-note">Se voce precisa anexar arquivos digitalizados das licencas, essa etapa ainda nao existe. Por enquanto o sistema usa os dados cadastrais regulamentares no documento.</p>
         </section>
         <section class="settings-form-section">
             <div class="section-heading compact">
@@ -1460,6 +1522,20 @@ function getSystemSettingsPayload(form) {
         },
         database: {
             backup_dir: form.querySelector('[name="database_backup_dir"]').value.trim() || "backups/database",
+        },
+        company: {
+            legal_name: form.querySelector('[name="company_legal_name"]').value.trim(),
+            trade_name: form.querySelector('[name="company_trade_name"]').value.trim(),
+            cnpj: form.querySelector('[name="company_cnpj"]').value.trim() || null,
+            address: form.querySelector('[name="company_address"]').value.trim(),
+            phone: form.querySelector('[name="company_phone"]').value.trim() || null,
+            technical_responsible_name: form.querySelector('[name="technical_responsible_name"]').value.trim(),
+            technical_responsible_registry: form.querySelector('[name="technical_responsible_registry"]').value.trim(),
+            sanitary_license_number: form.querySelector('[name="sanitary_license_number"]').value.trim(),
+            sanitary_license_expiry: form.querySelector('[name="sanitary_license_expiry"]').value.trim() || null,
+            environmental_license_number: form.querySelector('[name="environmental_license_number"]').value.trim(),
+            environmental_license_expiry: form.querySelector('[name="environmental_license_expiry"]').value.trim() || null,
+            toxicology_center_phone: form.querySelector('[name="toxicology_center_phone"]').value.trim(),
         },
         system: {
             multiempresa_enabled: form.querySelector('[name="multiempresa_enabled"]').checked,

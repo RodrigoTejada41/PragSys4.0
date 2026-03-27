@@ -39,12 +39,42 @@ def generate_work_order_document_pdf(work_order, settings) -> bytes:
     styles = _build_styles()
     story: List = []
 
-    story.extend(_build_header(styles, work_order, settings))
+    story.extend(_build_header(styles, work_order, settings, document_title="ORDEM DE SERVICO"))
     story.extend(_build_identification_section(styles, work_order))
     story.extend(_build_client_section(styles, work_order))
     story.extend(_build_service_section(styles, work_order))
     story.extend(_build_products_section(styles, work_order))
     story.extend(_build_orientations_section(styles))
+    story.extend(_build_observations_section(styles, work_order))
+    story.extend(_build_legal_section(styles, settings))
+    story.extend(_build_signatures_section(styles, work_order, settings))
+
+    document.build(story)
+    return buffer.getvalue()
+
+
+def generate_technical_report_document_pdf(work_order, settings) -> bytes:
+    _validate_work_order_document_requirements(settings)
+
+    buffer = BytesIO()
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=16 * mm,
+        rightMargin=16 * mm,
+        topMargin=16 * mm,
+        bottomMargin=18 * mm,
+        title=f"Relatorio Tecnico {work_order.numero}",
+    )
+    styles = _build_styles()
+    story: List = []
+
+    story.extend(_build_header(styles, work_order, settings, document_title="RELATORIO TECNICO"))
+    story.extend(_build_identification_section(styles, work_order))
+    story.extend(_build_client_section(styles, work_order))
+    story.extend(_build_technical_diagnostic_section(styles, work_order))
+    story.extend(_build_products_section(styles, work_order))
+    story.extend(_build_technical_guidelines_section(styles, work_order))
     story.extend(_build_observations_section(styles, work_order))
     story.extend(_build_legal_section(styles, settings))
     story.extend(_build_signatures_section(styles, work_order, settings))
@@ -162,7 +192,7 @@ def _build_styles():
     return styles
 
 
-def _build_header(styles, work_order, settings) -> List:
+def _build_header(styles, work_order, settings, *, document_title: str) -> List:
     company_name = _safe_text(settings.company_trade_name, settings.company_legal_name)
     company_meta = [
         Paragraph(company_name, styles["title"]),
@@ -178,7 +208,7 @@ def _build_header(styles, work_order, settings) -> List:
     left_content = [*company_meta]
 
     right_data = [
-        [Paragraph("ORDEM DE SERVICO", styles["center_meta"])],
+        [Paragraph(document_title, styles["center_meta"])],
         [Paragraph(f"Numero: {work_order.numero}", styles["center_meta"])],
         [Paragraph(f"Data da execucao: {_format_date(work_order.data_execucao)}", styles["small"])],
         [Paragraph(f"Emissao do documento: {_format_date(date.today())}", styles["small"])],
@@ -254,6 +284,35 @@ def _build_service_section(styles, work_order) -> List:
         ("Valor do servico", f"R$ {Decimal(work_order.valor_servico):.2f}"),
     ]
     return _build_info_section("Servico executado", rows, styles)
+
+
+def _build_technical_diagnostic_section(styles, work_order) -> List:
+    pest_items = ", ".join(item.praga.nome_comum for item in work_order.pragas) if work_order.pragas else "Monitoramento preventivo sem praga especifica registrada"
+    text = (
+        f"Foram avaliadas as condicoes do local '{_safe_text(work_order.local_execucao)}' no atendimento vinculado a OS {work_order.numero}. "
+        f"O servico foi executado para controle de vetores e pragas urbanas, com foco em {pest_items.lower()}."
+    )
+    rows = [
+        ("Tecnico executor", work_order.tecnico.nome),
+        ("Data da vistoria", _format_date(work_order.data_execucao)),
+        ("Horario executado", f"{_format_time(work_order.hora_inicio)} ate {_format_time(work_order.hora_fim, fallback='Nao registrado')}"),
+        ("Diagnostico tecnico", text),
+    ]
+    content = _build_info_section("Servico executado e diagnostico tecnico", rows, styles)
+    pest_lines = [f"{item.praga.nome_comum} ({item.praga.nome_cientifico})" for item in work_order.pragas] or [
+        "Nao houve praga especifica registrada; manter monitoramento preventivo."
+    ]
+    content.extend(_build_bullet_section("Pragas e riscos observados", pest_lines, styles))
+    return content
+
+
+def _build_technical_guidelines_section(styles, work_order) -> List:
+    recommendations = [
+        "Manter o ambiente higienizado, sem acumulo de residuos, umidade excessiva e pontos de abrigo.",
+        "Reforcar vedacao de frestas, ralos, passagens tecnicas e areas sensiveis identificadas na vistoria.",
+        f"Programar reavaliacao tecnica antes do termino da assistencia em {_format_date(work_order.garantia_ate)}.",
+    ]
+    return _build_bullet_section("Orientacoes e recomendacoes tecnicas", recommendations, styles)
 
 
 def _build_products_section(styles, work_order) -> List:

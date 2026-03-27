@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Elevar o comprovante de execucao / ordem de servico para um padrao mais profissional, com estrutura documental clara, validacoes obrigatorias de conformidade e separacao do template em modulo reutilizavel.
+Elevar o comprovante de execucao / ordem de servico e o relatorio tecnico para um padrao mais profissional, com estrutura documental clara, validacoes obrigatorias de conformidade e separacao do template em modulo reutilizavel.
 
 ## Arquivos principais
 
@@ -25,7 +25,7 @@ Isso trouxe:
 
 ### 2. Nova estrutura documental
 
-O PDF passou a seguir secoes fixas:
+O PDF da OS passou a seguir secoes fixas:
 
 - cabecalho com dados da empresa
 - identificacao da OS
@@ -34,6 +34,17 @@ O PDF passou a seguir secoes fixas:
 - produtos aplicados em tabela
 - orientacoes
 - observacoes
+- dados legais da empresa
+- assinaturas
+
+O relatorio tecnico agora segue a mesma linguagem visual e a mesma base documental, com foco em:
+
+- identificacao da OS
+- cliente
+- diagnostico tecnico
+- pragas e riscos observados
+- produtos aplicados em tabela
+- orientacoes e recomendacoes tecnicas
 - dados legais da empresa
 - assinaturas
 
@@ -49,6 +60,8 @@ A geracao agora bloqueia se faltarem dados essenciais de conformidade:
 - CIT
 
 O bloqueio retorna erro de negocio antes da emissao do PDF, evitando documento com informacao regulatoria incompleta ou placeholder.
+
+Essas validacoes agora se aplicam tanto a OS quanto ao relatorio tecnico.
 
 ### 4. Padronizacao de dados
 
@@ -85,7 +98,30 @@ Os produtos deixaram de ser uma lista corrida e passaram para tabela com:
 
 - geracao de documentos continua funcional
 - bloqueio da OS quando faltam dados regulatorios obrigatorios
+- bloqueio do relatorio tecnico quando faltam dados regulatorios obrigatorios
 - isolamento multiempresa continua preservado
+
+## Configuracao na interface
+
+O modulo de configuracoes agora possui uma secao dedicada para:
+
+- razao social
+- nome fantasia
+- CNPJ
+- endereco completo
+- telefone
+- responsavel tecnico
+- registro profissional
+- licenca sanitaria
+- validade da licenca sanitaria
+- licenca ambiental
+- validade da licenca ambiental
+- CIT
+
+Observacao:
+
+- nesta entrega o sistema passou a ter um ponto claro para cadastrar os dados regulatorios
+- upload de arquivos digitalizados das licencas ainda nao foi implementado
 
 ## Riscos mitigados
 

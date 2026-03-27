@@ -928,6 +928,21 @@ class SettingsEnvironmentRead(BaseModel):
     allow_remote_access: bool
 
 
+class SettingsCompanyRead(BaseModel):
+    legal_name: str
+    trade_name: str
+    cnpj: Optional[str] = None
+    address: str
+    phone: Optional[str] = None
+    technical_responsible_name: str
+    technical_responsible_registry: str
+    sanitary_license_number: str
+    sanitary_license_expiry: Optional[str] = None
+    environmental_license_number: str
+    environmental_license_expiry: Optional[str] = None
+    toxicology_center_phone: str
+
+
 class SystemSettingsRead(BaseModel):
     integrations: SettingsIntegrationsRead
     contracts: SettingsContractsRead
@@ -935,6 +950,7 @@ class SystemSettingsRead(BaseModel):
     email: SettingsEmailRead
     database: SettingsDatabaseRead
     environment: SettingsEnvironmentRead
+    company: SettingsCompanyRead
 
 
 class SettingsIntegrationsUpdate(BaseModel):
@@ -972,12 +988,28 @@ class SettingsDatabaseUpdate(BaseModel):
     backup_dir: Optional[str] = None
 
 
+class SettingsCompanyUpdate(BaseModel):
+    legal_name: Optional[str] = None
+    trade_name: Optional[str] = None
+    cnpj: Optional[str] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    technical_responsible_name: Optional[str] = None
+    technical_responsible_registry: Optional[str] = None
+    sanitary_license_number: Optional[str] = None
+    sanitary_license_expiry: Optional[str] = None
+    environmental_license_number: Optional[str] = None
+    environmental_license_expiry: Optional[str] = None
+    toxicology_center_phone: Optional[str] = None
+
+
 class SystemSettingsUpdate(BaseModel):
     integrations: Optional[SettingsIntegrationsUpdate] = None
     contracts: Optional[SettingsContractsUpdate] = None
     system: Optional[SettingsSystemUpdate] = None
     email: Optional[SettingsEmailUpdate] = None
     database: Optional[SettingsDatabaseUpdate] = None
+    company: Optional[SettingsCompanyUpdate] = None
 
 
 class DatabaseMaintenanceRead(BaseModel):

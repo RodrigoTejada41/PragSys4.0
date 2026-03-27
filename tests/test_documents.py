@@ -125,6 +125,20 @@ def test_work_order_pdf_blocks_when_required_company_document_data_is_missing(cl
     get_settings.cache_clear()
 
 
+def test_technical_report_blocks_when_required_company_document_data_is_missing(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENTAL_LICENSE_NUMBER", "Licenca ambiental nao configurada")
+    monkeypatch.setenv("TECHNICAL_RESPONSIBLE_REGISTRY", "Registro profissional nao configurado")
+    get_settings.cache_clear()
+
+    work_order = _create_base_work_order(client, auth_headers)
+    response = client.get(f"/api/v1/os/{work_order['id']}/relatorio-tecnico.pdf", headers=auth_headers)
+
+    assert response.status_code == 400
+    assert "Registro profissional" in response.json()["detail"]
+    assert "Licenca ambiental" in response.json()["detail"]
+    get_settings.cache_clear()
+
+
 def test_framed_certificate_text_covers_food_risk_compliance_language():
     work_order = SimpleNamespace(
         cliente=SimpleNamespace(razao_social="Industria Delta"),
