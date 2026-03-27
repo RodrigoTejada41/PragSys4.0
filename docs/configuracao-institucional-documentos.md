@@ -54,6 +54,7 @@ Em `Configuracoes` foi criada uma secao institucional com:
 - canvas para assinatura desenhada
 - preview de arquivos enviados
 - tentativa de extracao automatica dos dados regulatorios quando a licenca em PDF possui texto selecionavel
+- orientacao visual explicita informando que CIT nao e upload e pode exigir preenchimento manual
 
 ## Integracao documental
 

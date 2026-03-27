@@ -1242,6 +1242,17 @@ function renderSettings() {
                 <h4>Dados regulatorios da empresa</h4>
                 <p>Esses campos alimentam automaticamente a Ordem de Servico, o Relatorio Tecnico e os certificados com moldura. Sem eles a emissao fica bloqueada.</p>
             </div>
+            <section class="technical-guidance-card full-width">
+                <div class="section-heading compact">
+                    <h4>CIT e preenchimento manual</h4>
+                    <p>O CIT nao e um arquivo separado para upload. Ele deve ser informado manualmente nos campos abaixo, a menos que venha escrito dentro do PDF da licenca.</p>
+                </div>
+                <div class="settings-side-list">
+                    ${settingsInfoRow("Upload disponivel", "Licenca sanitaria, licenca ambiental e assinatura")}
+                    ${settingsInfoRow("Preenchimento manual", "Centro de Informacao Toxicologica e telefone CIT")}
+                </div>
+                <p class="origin-note">Se o PDF nao tiver o texto do CIT, o sistema nao consegue preencher esse dado sozinho.</p>
+            </section>
             <div class="settings-field-grid two-columns">
                 <label>
                     <span>Razao social</span>
@@ -1297,11 +1308,12 @@ function renderSettings() {
                 </label>
                 <label>
                     <span>Centro de Informacao Toxicologica</span>
-                    <input name="toxicology_center_name" value="${escapeHtml(settingsState.company.toxicology_center_name || "Centro de Informacao Toxicologica")}" required>
+                    <input name="toxicology_center_name" value="${escapeHtml(settingsState.company.toxicology_center_name || "Centro de Informacao Toxicologica")}" required placeholder="Ex.: CEATOX / Centro de Informacao Toxicologica">
                 </label>
-                <label>
+                <label class="cit-field-highlight">
                     <span>CIT</span>
                     <input name="toxicology_center_phone" value="${escapeHtml(settingsState.company.toxicology_center_phone || "")}" required placeholder="0800 722 6001">
+                    <small>Esse campo e manual quando a licenca nao traz o telefone do CIT no proprio PDF.</small>
                 </label>
             </div>
             <div class="settings-field-grid two-columns technical-assets-grid">
