@@ -4,8 +4,8 @@ Para o pipeline `CI/CD` funcionar com separacao entre `dev` e `production`, conf
 
 ## Desenvolvimento
 
-- `DEV_SSH_PRIVATE_KEY`: chave privada do usuario de deploy.
-- `DEV_SSH_KNOWN_HOSTS`: saida do `ssh-keyscan` da VPS de desenvolvimento.
+- `DEV_SSH_PRIVATE_KEY`:ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO4mPLr5YGCJ/DMdYzMJRfmAIXrBr9Et7YMgIJhorejL syspragas-dev
+- `DEV_SSH_KNOWN_HOSTS`:SHA256:68jhuWO0FYry/MmMEGvBvuaS3uBTrgfoHnyH4zz2T/g syspragas-dev
 - `DEV_HOST`: 172.233.183.241
 - `DEV_USER`: root
 - `DEV_DEPLOY_PATH`:/opt/syspragas/dev
