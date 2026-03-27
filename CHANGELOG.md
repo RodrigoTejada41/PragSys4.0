@@ -1,5 +1,10 @@
 # Changelog
 
+## [4.1.9] - 2026-03-27
+
+- Documentacao de deploy atualizada para refletir o workflow simplificado ativo da branch `dev`.
+- Guia de secrets do GitHub Actions higienizado para remover valores especificos de ambiente e manter apenas placeholders seguros.
+
 ## [4.1.8] - 2026-03-27
 
 - Backend passou a validar `JWT_SECRET` e `DEFAULT_ADMIN_PASSWORD` inseguros quando `APP_ENV=production`.

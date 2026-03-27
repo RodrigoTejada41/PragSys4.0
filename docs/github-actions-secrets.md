@@ -1,30 +1,25 @@
 # Segredos do GitHub Actions
 
-Para o pipeline `CI/CD` funcionar com separacao entre `dev` e `production`, configure os segredos abaixo.
+Para o workflow simplificado de deploy da branch `dev`, configure os segredos abaixo.
 
-## Desenvolvimento
+## Segredos obrigatorios
 
-- `DEV_SSH_PRIVATE_KEY`:ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO4mPLr5YGCJ/DMdYzMJRfmAIXrBr9Et7YMgIJhorejL syspragas-dev
-- `DEV_SSH_KNOWN_HOSTS`:SHA256:68jhuWO0FYry/MmMEGvBvuaS3uBTrgfoHnyH4zz2T/g syspragas-dev
-- `DEV_HOST`: 172.233.183.241
-- `DEV_USER`: root
-- `DEV_DEPLOY_PATH`:/opt/syspragas/dev
+- `HOST`: hostname ou IP da VPS de desenvolvimento.
+- `SSH_USER`: usuario SSH de deploy na VPS.
+- `SSH_PRIVATE_KEY`: chave privada OpenSSH usada pelo GitHub Actions.
 
-## Producao
+## Script remoto esperado
 
-- `PROD_SSH_PRIVATE_KEY`: chave privada do usuario de deploy.
-- `PROD_SSH_KNOWN_HOSTS`: saida do `ssh-keyscan` da VPS de producao.
-- `PROD_HOST`: hostname ou IP da VPS de producao.
-- `PROD_USER`: usuario SSH de deploy.
-- `PROD_DEPLOY_PATH`: caminho do checkout da aplicacao na VPS, por exemplo `/opt/syspragas/prod`.
+O workflow atual executa este comando na VPS:
 
-## Variaveis opcionais
-
-- `PRODUCTION_APP_URL`: URL do ambiente produtivo exibida no GitHub Environment `production`.
+```bash
+bash /var/www/deploy_dev.sh
+```
 
 ## Recomendacoes de seguranca
 
-- use uma chave SSH diferente para cada ambiente;
-- conceda acesso apenas ao diretorio do deploy;
-- proteja o environment `production` com aprovadores;
-- nao reutilize credenciais locais de desenvolvimento nas VPS.
+- nao versione valores reais de host, fingerprint, usuarios ou chaves neste repositrio;
+- use uma chave exclusiva para o GitHub Actions;
+- conceda ao usuario acesso apenas ao checkout e ao runtime necessarios;
+- se possivel, substitua `root` por um usuario dedicado de deploy;
+- mantenha backup e rollback no script remoto da VPS, ja que o workflow atual so dispara o comando remoto.
