@@ -74,6 +74,23 @@ Consolidacao de tres frentes principais no SysPragas:
 
 ## 5. Validacao executada
 
+## 5A. Complemento visual - botoes e navegacao
+
+### Implementado
+
+- consolidacao de uma base visual unica para botoes do sistema
+- reforco do alinhamento de acoes de formulario sem empurrar botoes auxiliares para posicoes erradas
+- helper central em `app.js` para gerar botoes dinamicos com variantes padronizadas
+- correcao da navegacao para que apenas a view ativa fique visivel
+- correcao especifica para o Dashboard nao permanecer renderizado ao trocar de tela
+- refinamento final dos `toolbar-link` e atalhos documentais para reduzir a diferenca visual entre links de acao e botoes
+
+### Arquivos centrais
+
+- `E:\Projetos\Controle_de_pragas1.1\app\interfaces\web\static\design-system.css`
+- `E:\Projetos\Controle_de_pragas1.1\app\interfaces\web\static\styles.css`
+- `E:\Projetos\Controle_de_pragas1.1\app\interfaces\web\static\app.js`
+
 ### Testes automatizados
 
 - `pytest tests\\test_auth.py tests\\test_settings.py tests\\test_access_control.py tests\\test_multitenancy.py -q`

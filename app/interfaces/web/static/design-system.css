@@ -39,6 +39,12 @@
     --ds-focus-ring: 0 0 0 0.22rem rgba(41, 95, 73, 0.16);
     --ds-success-ring: 0 0 0 0.22rem rgba(31, 122, 87, 0.13);
     --ds-danger-ring: 0 0 0 0.22rem rgba(177, 69, 52, 0.13);
+    --ds-button-height: 44px;
+    --ds-button-height-sm: 36px;
+    --ds-button-padding-x: 16px;
+    --ds-button-padding-sm-x: 12px;
+    --ds-button-radius: 999px;
+    --ds-button-transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 140ms ease, opacity 140ms ease;
     --sys-color-primary: var(--ds-color-primary);
     --sys-color-primary-strong: var(--ds-color-primary-strong);
     --sys-color-secondary: var(--ds-color-secondary);
@@ -77,6 +83,12 @@
     --sys-focus-ring: var(--ds-focus-ring);
     --sys-danger-ring: var(--ds-danger-ring);
     --sys-success-ring: var(--ds-success-ring);
+}
+
+@keyframes ds-button-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 body {
@@ -389,13 +401,86 @@ textarea.ui-control {
     align-items: center;
 }
 
-.ui-form-actions,
-.inline-actions {
+.ui-form-actions {
     justify-content: flex-end;
 }
 
+.inline-actions,
 .compact-actions {
     justify-content: flex-start;
+}
+
+.btn,
+.toolbar-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: var(--ds-button-height);
+    min-width: var(--ds-button-height);
+    padding: 0 var(--ds-button-padding-x);
+    border-radius: var(--ds-button-radius);
+    border: 1px solid transparent;
+    font-family: var(--ds-font-family-body);
+    font-size: 0.94rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: var(--ds-button-transition);
+    box-shadow: none;
+}
+
+.btn:hover,
+.toolbar-link:hover {
+    transform: translateY(-1px);
+    text-decoration: none;
+}
+
+.btn:active,
+.toolbar-link:active {
+    transform: translateY(0);
+}
+
+.btn:focus,
+.btn:focus-visible,
+.toolbar-link:focus,
+.toolbar-link:focus-visible {
+    outline: none;
+    box-shadow: var(--ds-focus-ring);
+}
+
+.btn:disabled,
+.btn.disabled,
+.toolbar-link[aria-disabled="true"] {
+    opacity: 0.58;
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
+}
+
+.btn.btn-sm,
+.btn.btn-xs {
+    min-height: var(--ds-button-height-sm);
+    min-width: var(--ds-button-height-sm);
+    padding: 0 var(--ds-button-padding-sm-x);
+    font-size: 0.84rem;
+}
+
+.btn.btn-block {
+    width: 100%;
+}
+
+.btn.icon-button,
+.btn.btn-icon {
+    padding: 0;
+    width: var(--ds-button-height);
+}
+
+.btn.btn-sm.icon-button,
+.btn.btn-sm.btn-icon {
+    width: var(--ds-button-height-sm);
 }
 
 .ui-form .btn,
@@ -409,9 +494,9 @@ textarea.ui-control {
 .complete-work-order,
 .settle-work-order,
 .pay-finance {
-    min-height: 44px;
-    padding: 0 16px;
-    border-radius: 999px;
+    min-height: var(--ds-button-height);
+    padding: 0 var(--ds-button-padding-x);
+    border-radius: var(--ds-button-radius);
     font-weight: 700;
     letter-spacing: 0.01em;
 }
@@ -556,13 +641,11 @@ textarea.ui-control {
     }
 
     .ui-form-actions,
-    .inline-actions,
     .finance-filter-actions {
         justify-content: stretch;
     }
 
     .ui-form-actions .btn,
-    .inline-actions .btn,
     .finance-filter-actions .btn {
         width: 100%;
     }
@@ -765,6 +848,13 @@ button.btn:focus-visible,
     background: linear-gradient(135deg, var(--ds-color-primary-strong), #143427);
 }
 
+.btn-primary:focus,
+.btn-primary:focus-visible,
+.btn-success:focus,
+.btn-success:focus-visible {
+    box-shadow: var(--ds-focus-ring);
+}
+
 .btn-default,
 .btn-outline-secondary,
 .ghost-button,
@@ -795,6 +885,22 @@ button.btn:focus-visible,
     background: rgba(177, 69, 52, 0.12);
     border-color: rgba(177, 69, 52, 0.26);
     color: #8c3225;
+}
+
+.btn.btn-loading,
+.toolbar-link.is-loading {
+    pointer-events: none;
+}
+
+.btn.btn-loading::after,
+.toolbar-link.is-loading::after {
+    content: "";
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    animation: ds-button-spin 0.75s linear infinite;
 }
 
 .badge {

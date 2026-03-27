@@ -1014,10 +1014,15 @@ function switchView(view) {
     const workOrderScreen = resolveWorkOrderScreenFromView(view);
     const appointmentScreen = resolveAppointmentScreenFromView(view);
     document.querySelectorAll(".nav-link[data-view]").forEach((button) => {
-        button.classList.toggle("active", button.dataset.view === view);
+        const isActive = button.dataset.view === view;
+        button.classList.toggle("active", isActive);
+        button.setAttribute("aria-current", isActive ? "page" : "false");
     });
     document.querySelectorAll(".view").forEach((section) => {
-        section.classList.toggle("active", section.id === `view-${appView}`);
+        const isActive = section.id === `view-${appView}`;
+        section.classList.toggle("active", isActive);
+        section.hidden = !isActive;
+        section.setAttribute("aria-hidden", isActive ? "false" : "true");
     });
     if (appView === "ordens") {
         setWorkOrderWorkspaceView(workOrderScreen || "new");
@@ -1029,6 +1034,7 @@ function switchView(view) {
         setAppointmentWorkspaceView(appointmentScreen || "operational");
     }
     document.getElementById("view-title").textContent = viewTitles[view] || viewTitles[appView] || viewTitles.dashboard;
+    window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function setWorkOrderWorkspaceView(view) {
@@ -1579,8 +1585,8 @@ function applyUserRolePermissionPreset(role, form = document.getElementById("use
 function formActionHtml(kind, saveLabel, cancelLabel) {
     return `
         <div class="inline-actions">
-            <button type="submit" class="btn btn-success" data-save-button="${kind}">${saveLabel}</button>
-            <button type="button" class="btn btn-default ghost-button hidden" data-cancel-button="${kind}">${cancelLabel}</button>
+            ${buildButtonHtml({ label: saveLabel, variant: "primary", type: "submit", dataAttributes: `data-save-button=\"${kind}\"` })}
+            ${buildButtonHtml({ label: cancelLabel, variant: "secondary", type: "button", hidden: true, dataAttributes: `data-cancel-button=\"${kind}\"` })}
         </div>
         <p class="origin-note hidden" data-mode-note="${kind}"></p>
         <p class="form-error hidden"></p>
@@ -8123,8 +8129,50 @@ function userCanAccessFinance() {
     return hasPermission("finance.view");
 }
 
+function buildButtonHtml({
+    label,
+    variant = "secondary",
+    type = "button",
+    size = "",
+    classes = "",
+    dataAttributes = "",
+    hidden = false,
+    disabled = false,
+}) {
+    const classNames = ["btn"];
+    if (size) {
+        classNames.push(size);
+    }
+    if (variant === "primary") {
+        classNames.push("btn-primary");
+    } else if (variant === "success") {
+        classNames.push("btn-success");
+    } else if (variant === "danger") {
+        classNames.push("btn-danger");
+    } else if (variant === "warning") {
+        classNames.push("btn-warning");
+    } else {
+        classNames.push("btn-default", "ghost-button");
+    }
+    if (classes) {
+        classNames.push(classes);
+    }
+    if (hidden) {
+        classNames.push("hidden");
+    }
+    return `<button type="${type}" class="${classNames.join(" ")}" ${dataAttributes}${disabled ? " disabled" : ""}>${escapeHtml(label)}</button>`;
+}
+
 function actionButton(className, label, dataAttributes = "") {
-    return `<button type="button" class="btn btn-sm ghost-button action-button ${className}" ${dataAttributes}>${escapeHtml(label)}</button>`;
+    const variant = className.includes("danger") ? "danger" : "secondary";
+    return buildButtonHtml({
+        label,
+        variant,
+        type: "button",
+        size: "btn-sm",
+        classes: `action-button ${className}`,
+        dataAttributes,
+    });
 }
 
 function actionButtons(kind, id, extraHtml = "") {
@@ -8133,8 +8181,8 @@ function actionButtons(kind, id, extraHtml = "") {
         <div class="toolbar compact-toolbar">
             ${extraGroup}
             <div class="toolbar-group">
-                <button type="button" class="btn btn-sm ghost-button action-button secondary edit-entity" data-kind="${kind}" data-id="${id}">Editar</button>
-                <button type="button" class="btn btn-sm ghost-button action-button danger delete-entity" data-kind="${kind}" data-id="${id}">Excluir</button>
+                ${buildButtonHtml({ label: "Editar", variant: "secondary", type: "button", size: "btn-sm", classes: "action-button secondary edit-entity", dataAttributes: `data-kind=\"${kind}\" data-id=\"${id}\"` })}
+                ${buildButtonHtml({ label: "Excluir", variant: "danger", type: "button", size: "btn-sm", classes: "action-button danger delete-entity", dataAttributes: `data-kind=\"${kind}\" data-id=\"${id}\"` })}
             </div>
         </div>
     `;

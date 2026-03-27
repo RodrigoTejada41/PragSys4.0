@@ -79,6 +79,19 @@ Esta etapa final padronizou:
 - visual de impressao resumida de agendamento
 - ajustes finos de responsividade para mobile
 
+### 7. Botoes e navegacao dinamica
+
+Nesta revisao foram consolidados dois pontos de usabilidade que ainda causavam ruído:
+
+- base unica para botoes com tokens de altura, padding, raio e transicoes
+- variacoes visuais coerentes para `primary`, `secondary`, `danger`, `success` e botoes compactos
+- estados padronizados de `hover`, `focus`, `active`, `disabled` e classe pronta para `loading`
+- helper central no frontend para gerar botoes dinamicos sem repetir HTML e classes
+- reforco da troca de views para manter apenas a tela ativa visivel
+- Dashboard tratado como tela normal, sem permanecer fixo ao navegar pelos modulos
+- botoes estruturais do login, navbar e sidebar alinhados ao mesmo padrao sem variantes soltas
+- links de acao documentais e atalhos de painel refinados para a mesma linguagem visual dos botoes
+
 ## Decisao tecnica
 
 Em vez de substituir `styles.css`, a entrega adiciona um arquivo central novo, carregado depois do legado. Isso reduz risco de regressao e permite migracao progressiva para o Design System.
@@ -108,6 +121,8 @@ Em vez de substituir `styles.css`, a entrega adiciona um arquivo central novo, c
 - badges de status em financeiro, licencas e usuarios
 - toast de feedback apos salvar ou excluir registros
 - dashboard inicial e cards de KPI
+- troca de menu lateral sem persistencia visual do Dashboard
+- alinhamento de botoes em formularios, filtros e tabelas
 - ordens em foco e cards da agenda operacional
 - estados vazios em contratos, estoque, agenda e empresas
 - tela de login em desktop e mobile
