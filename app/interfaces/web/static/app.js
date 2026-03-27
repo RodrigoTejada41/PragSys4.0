@@ -1296,6 +1296,10 @@ function renderSettings() {
                     <input name="environmental_license_expiry" value="${escapeHtml(settingsState.company.environmental_license_expiry || "")}" placeholder="31/12/2026">
                 </label>
                 <label>
+                    <span>Centro de Informacao Toxicologica</span>
+                    <input name="toxicology_center_name" value="${escapeHtml(settingsState.company.toxicology_center_name || "Centro de Informacao Toxicologica")}" required>
+                </label>
+                <label>
                     <span>CIT</span>
                     <input name="toxicology_center_phone" value="${escapeHtml(settingsState.company.toxicology_center_phone || "")}" required placeholder="0800 722 6001">
                 </label>
@@ -1769,6 +1773,7 @@ function getSystemSettingsPayload(form) {
             sanitary_license_expiry: form.querySelector('[name="sanitary_license_expiry"]').value.trim() || null,
             environmental_license_number: form.querySelector('[name="environmental_license_number"]').value.trim(),
             environmental_license_expiry: form.querySelector('[name="environmental_license_expiry"]').value.trim() || null,
+            toxicology_center_name: form.querySelector('[name="toxicology_center_name"]').value.trim(),
             toxicology_center_phone: form.querySelector('[name="toxicology_center_phone"]').value.trim(),
         },
         system: {

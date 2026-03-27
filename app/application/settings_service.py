@@ -256,6 +256,7 @@ def get_document_company_settings(db: Session, provider_company_id: Optional[int
         sanitary_license_expiry=settings.sanitary_license_expiry,
         environmental_license_number=settings.environmental_license_number,
         environmental_license_expiry=settings.environmental_license_expiry,
+        toxicology_center_name=settings.toxicology_center_name,
         toxicology_center_phone=settings.toxicology_center_phone,
         sanitary_license_filename=settings.sanitary_license_file.filename,
         environmental_license_filename=settings.environmental_license_file.filename,
@@ -429,6 +430,7 @@ def _read_company_technical_data(
         environmental_license_expiry=_clean_optional_setting_text(
             record.environmental_license_expiry or settings.environmental_license_expiry
         ),
+        toxicology_center_name=record.toxicology_center_name or "Centro de Informacao Toxicologica",
         toxicology_center_phone=record.toxicology_center_phone or settings.toxicology_center_phone,
         sanitary_license_file=_build_asset_read(
             record.sanitary_license_filename,
@@ -468,6 +470,7 @@ def _update_company_technical_data(db: Session, payload, current_user: User) -> 
         "sanitary_license_expiry": payload.sanitary_license_expiry,
         "environmental_license_number": payload.environmental_license_number,
         "environmental_license_expiry": payload.environmental_license_expiry,
+        "toxicology_center_name": payload.toxicology_center_name,
         "toxicology_center_phone": payload.toxicology_center_phone,
     }
     for field_name, raw_value in updates.items():
@@ -485,6 +488,7 @@ def _update_company_technical_data(db: Session, payload, current_user: User) -> 
         "technical_registry_state",
         "sanitary_license_number",
         "environmental_license_number",
+        "toxicology_center_name",
         "toxicology_center_phone",
     ):
         if not str(getattr(record, field_name, "") or "").strip():
@@ -528,6 +532,7 @@ def _get_or_create_company_technical_data(
         sanitary_license_expiry=settings.sanitary_license_expiry,
         environmental_license_number=settings.environmental_license_number,
         environmental_license_expiry=settings.environmental_license_expiry,
+        toxicology_center_name="Centro de Informacao Toxicologica",
         toxicology_center_phone=settings.toxicology_center_phone,
     )
     db.add(record)

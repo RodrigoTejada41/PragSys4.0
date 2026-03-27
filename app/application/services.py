@@ -2509,7 +2509,34 @@ def _company_identification_summary_lines_for_document(settings) -> List[str]:
         f"Endereco e contato: {settings.company_address} | Telefone: {settings.company_phone}",
         f"Licenca sanitaria: {settings.sanitary_license_number} | validade: {settings.sanitary_license_expiry or '-'}",
         f"Licenca ambiental: {settings.environmental_license_number} | validade: {settings.environmental_license_expiry or '-'}",
+        _cit_footer_line(settings),
     ]
+
+
+def _cit_footer_line(settings) -> str:
+    return f"Centro de Informacao Toxicologica: {settings.toxicology_center_phone}"
+
+
+def _validate_company_document_requirements(settings) -> None:
+    required_fields = [
+        ("Dados da empresa", getattr(settings, "company_legal_name", "")),
+        ("Responsavel tecnico", getattr(settings, "technical_responsible_name", "")),
+        ("Registro profissional", getattr(settings, "technical_responsible_registry", "")),
+        ("Licenca sanitaria", getattr(settings, "sanitary_license_number", "")),
+        ("Licenca ambiental", getattr(settings, "environmental_license_number", "")),
+        ("Endereco da empresa", getattr(settings, "company_address", "")),
+        ("Centro de Informacao Toxicologica", getattr(settings, "toxicology_center_name", "")),
+        ("CIT", getattr(settings, "toxicology_center_phone", "")),
+    ]
+    missing = []
+    for label, value in required_fields:
+        normalized = str(value or "").strip().lower()
+        if not normalized or "nao configurado" in normalized or normalized == "-":
+            missing.append(label)
+    if missing:
+        raise BusinessRuleViolation(
+            "Nao foi possivel gerar o certificado. Configure antes: " + ", ".join(missing) + "."
+        )
 
 
 def _resolve_sanitary_certificate_template_path() -> Optional[Path]:
@@ -2790,15 +2817,25 @@ def _draw_signature_stamp(
     max_width: float = 40 * mm,
     max_height: float = 14 * mm,
 ) -> None:
+    box_padding = 1.8 * mm
+    container_x = center_x - (max_width / 2)
+    container_y = line_y + 1.2 * mm
+    pdf.saveState()
+    pdf.setFillColor(colors.white)
+    pdf.rect(container_x, container_y, max_width, max_height + (box_padding * 2), stroke=0, fill=1)
+    clip_path = pdf.beginPath()
+    clip_path.rect(container_x + box_padding, container_y + box_padding, max_width - (box_padding * 2), max_height)
+    pdf.clipPath(clip_path, stroke=0, fill=0)
     if signature_image:
         image_width, image_height = signature_image.getSize()
-        scale = min(max_width / image_width, max_height / image_height)
+        available_width = max_width - (box_padding * 2)
+        scale = min(available_width / image_width, max_height / image_height, 1.0)
         draw_width = image_width * scale
         draw_height = image_height * scale
         pdf.drawImage(
             signature_image,
             center_x - (draw_width / 2),
-            line_y + 2 * mm,
+            container_y + box_padding + ((max_height - draw_height) / 2),
             width=draw_width,
             height=draw_height,
             preserveAspectRatio=True,
@@ -2807,6 +2844,7 @@ def _draw_signature_stamp(
     else:
         pdf.setFont("Helvetica-Oblique", 7.4)
         pdf.drawCentredString(center_x, line_y + 5.4 * mm, "Assinatura tecnica pendente no cadastro")
+    pdf.restoreState()
     pdf.line(center_x - (max_width / 2), line_y, center_x + (max_width / 2), line_y)
     _draw_centered_text_to_fit(
         pdf,
@@ -3021,6 +3059,7 @@ def _generate_standard_sanitary_certificate_pdf(
 ) -> bytes:
     work_order = get_work_order(db, work_order_id, current_user=current_user)
     settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
+    _validate_company_document_requirements(settings)
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     y = _draw_document_frame(
@@ -3087,26 +3126,28 @@ def _generate_standard_sanitary_certificate_pdf(
 
     pdf.setFillColor(colors.HexColor("#273431"))
     pdf.setFont("Helvetica-Bold", 10.5)
-    pdf.drawCentredString(105 * mm, 38 * mm, "DOCUMENTO EMITIDO PELO SISTEMA SYSPRAGAS")
+    pdf.drawCentredString(105 * mm, 40 * mm, "DOCUMENTO EMITIDO PELO SISTEMA SYSPRAGAS")
+    pdf.setFont("Helvetica", 8.4)
+    pdf.drawCentredString(105 * mm, 33.6 * mm, _cit_footer_line(settings))
     pdf.setStrokeColor(colors.HexColor("#7f8d86"))
-    pdf.line(26 * mm, 28 * mm, 91 * mm, 28 * mm)
-    pdf.line(119 * mm, 28 * mm, 184 * mm, 28 * mm)
+    pdf.line(26 * mm, 24 * mm, 91 * mm, 24 * mm)
+    pdf.line(119 * mm, 24 * mm, 184 * mm, 24 * mm)
     pdf.setFillColor(colors.black)
     _draw_centered_text_to_fit(
         pdf,
         responsible_name,
         center_x=58.5 * mm,
-        baseline_y=21.5 * mm,
+        baseline_y=17.5 * mm,
         max_width=60 * mm,
         font_name="Helvetica",
         initial_size=8.6,
         min_size=7.0,
     )
     pdf.setFont("Helvetica", 8.6)
-    pdf.drawCentredString(151.5 * mm, 21.5 * mm, emission_date)
+    pdf.drawCentredString(151.5 * mm, 17.5 * mm, emission_date)
     pdf.setFont("Helvetica-Oblique", 8.1)
-    pdf.drawCentredString(58.5 * mm, 15.2 * mm, "Responsavel tecnico")
-    pdf.drawCentredString(151.5 * mm, 15.2 * mm, "Data de emissao")
+    pdf.drawCentredString(58.5 * mm, 11.2 * mm, "Responsavel tecnico")
+    pdf.drawCentredString(151.5 * mm, 11.2 * mm, "Data de emissao")
     pdf.showPage()
     pdf.save()
     return buffer.getvalue()
@@ -3115,6 +3156,7 @@ def _generate_standard_sanitary_certificate_pdf(
 def _generate_template_sanitary_certificate_pdf(db: Session, work_order_id: int, template_path: Path) -> bytes:
     work_order = get_work_order(db, work_order_id)
     settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
+    _validate_company_document_requirements(settings)
     buffer = BytesIO()
     page_width, page_height = landscape(A4)
     pdf = canvas.Canvas(buffer, pagesize=(page_width, page_height))
@@ -3197,6 +3239,8 @@ def _generate_template_sanitary_certificate_pdf(db: Session, work_order_id: int,
         responsible_name = work_order.tecnico.nome
 
     pdf.setFillColor(colors.HexColor("#3e3732"))
+    pdf.setFont("Times-Roman", 8.8)
+    pdf.drawCentredString(154 * mm, 31 * mm, _cit_footer_line(settings))
     pdf.setFont("Times-Roman", 11)
     pdf.drawCentredString(111 * mm, 18.5 * mm, emission_date)
     _draw_centered_text_to_fit(
@@ -3224,6 +3268,7 @@ def _generate_official_sanitary_certificate_pdf(
 ) -> bytes:
     work_order = get_work_order(db, work_order_id, current_user=current_user)
     settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
+    _validate_company_document_requirements(settings)
     signature_image = _resolve_signature_image(settings, work_order)
     if signature_image is None:
         LOGGER.warning(
@@ -3359,8 +3404,8 @@ def _generate_official_sanitary_certificate_pdf(
     pdf.setFont("Times-Italic", 9)
     pdf.drawCentredString(
         width / 2,
-        25.2 * mm,
-        "Documento tecnico emitido com assinatura do responsavel e base normativa sanitaria aplicavel.",
+        25.8 * mm,
+        _cit_footer_line(settings),
     )
 
     responsible_name = _resolve_responsible_name(settings, work_order)
@@ -3404,6 +3449,7 @@ def _generate_ornamental_sanitary_certificate_pdf(
 ) -> bytes:
     work_order = get_work_order(db, work_order_id, current_user=current_user)
     settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
+    _validate_company_document_requirements(settings)
     buffer = BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
@@ -3464,7 +3510,7 @@ def _generate_ornamental_sanitary_certificate_pdf(
     pdf.drawCentredString(
         width / 2,
         46 * mm,
-        f"Licenca sanitaria: {settings.sanitary_license_number} | Licenca ambiental: {settings.environmental_license_number}",
+        _cit_footer_line(settings),
     )
 
     pdf.setFont("Helvetica", 10)
@@ -3485,6 +3531,7 @@ def _generate_premium_framed_sanitary_certificate_pdf(
 ) -> bytes:
     work_order = get_work_order(db, work_order_id, current_user=current_user)
     settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
+    _validate_company_document_requirements(settings)
     buffer = BytesIO()
     width, height = landscape(A4)
     pdf = canvas.Canvas(buffer, pagesize=(width, height))
@@ -3612,10 +3659,11 @@ def _generate_premium_framed_sanitary_certificate_pdf(
         29 * mm,
         (
             f"Licenca sanitaria: {settings.sanitary_license_number} | "
-            f"Licenca ambiental: {settings.environmental_license_number} | "
-            "Documento tecnico sem implicar endosso oficial."
+            f"Licenca ambiental: {settings.environmental_license_number}"
         ),
     )
+    pdf.setFont("Times-Roman", 8.6)
+    pdf.drawCentredString(width / 2, 23.6 * mm, _cit_footer_line(settings))
 
     emission_date = date.today().strftime("%d/%m/%Y")
     responsible_name = settings.technical_responsible_name
@@ -3665,6 +3713,7 @@ def generate_guarantee_certificate_pdf(db: Session, work_order_id: int, current_
     def _builder() -> bytes:
         work_order = get_work_order(db, work_order_id, current_user=current_user)
         settings = get_document_company_settings(db, work_order.empresa_prestadora_id)
+        _validate_company_document_requirements(settings)
         template_path = _resolve_guarantee_template_path()
         if template_path is None:
             LOGGER.warning("guarantee_certificate_template_missing work_order_id=%s", work_order_id)
@@ -3727,7 +3776,7 @@ def generate_guarantee_certificate_pdf(db: Session, work_order_id: int, current_
         pdf.drawCentredString(page_width / 2, 53 * mm, "CVS nº 006, de 12 de janeiro de 2011.")
         pdf.setFont("Helvetica", 13)
         pdf.drawCentredString(page_width / 2, 42 * mm, f"Este certificado tem validade conforme prazo informado: {validity_text}.")
-        pdf.drawCentredString(page_width / 2, 31 * mm, "Produto utilizado devidamente autorizado pelos orgaos competentes.")
+        pdf.drawCentredString(page_width / 2, 31 * mm, _cit_footer_line(settings))
 
         pdf.setFillColor(colors.HexColor("#43a047"))
         pdf.setFont("Helvetica-Bold", 10.5)

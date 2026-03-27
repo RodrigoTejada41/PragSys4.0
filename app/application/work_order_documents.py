@@ -11,7 +11,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
-from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import HRFlowable, KeepInFrame, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.application.certificate_assets import resolve_technical_signature_path
 from app.core.exceptions import BusinessRuleViolation
@@ -85,11 +85,13 @@ def generate_technical_report_document_pdf(work_order, settings) -> bytes:
 
 def _validate_work_order_document_requirements(settings) -> None:
     required_fields = [
+        ("Dados da empresa", settings.company_legal_name),
         ("Responsavel tecnico", settings.technical_responsible_name),
         ("Registro profissional", settings.technical_responsible_registry),
         ("Licenca sanitaria", settings.sanitary_license_number),
         ("Licenca ambiental", settings.environmental_license_number),
         ("Endereco da empresa", settings.company_address),
+        ("Centro de Informacao Toxicologica", getattr(settings, "toxicology_center_name", "")),
         ("CIT", settings.toxicology_center_phone),
     ]
     missing = [label for label, value in required_fields if _is_missing_config(value)]
@@ -393,7 +395,8 @@ def _build_legal_section(styles, settings) -> List:
         ("Licenca sanitaria", _license_line(settings.sanitary_license_number, settings.sanitary_license_expiry)),
         ("Licenca ambiental", _license_line(settings.environmental_license_number, settings.environmental_license_expiry)),
         ("Endereco da empresa", settings.company_address),
-        ("CIT", settings.toxicology_center_phone),
+        ("Centro de Informacao Toxicologica", getattr(settings, "toxicology_center_name", "Centro de Informacao Toxicologica")),
+        ("Telefone CIT", settings.toxicology_center_phone),
     ]
     return _build_info_section("Dados legais da empresa", rows, styles)
 
@@ -503,9 +506,9 @@ def _signature_cell(styles, *, label: str, signer: str, signature_source=None, h
     if signature_source:
         image_reader = ImageReader(signature_source if not isinstance(signature_source, bytes) else BytesIO(signature_source))
         image_width, image_height = image_reader.getSize()
-        max_width = 50 * mm
-        max_height = 16 * mm
-        scale = min(max_width / image_width, max_height / image_height)
+        max_width = 42 * mm
+        max_height = 12 * mm
+        scale = min(max_width / image_width, max_height / image_height, 1.0)
         draw_width = image_width * scale
         draw_height = image_height * scale
         from reportlab.platypus import Image
@@ -520,7 +523,7 @@ def _signature_cell(styles, *, label: str, signer: str, signature_source=None, h
     elements.append(Spacer(1, 2 * mm))
     elements.append(Paragraph(_safe_text(signer, "Nao informado"), styles["signature"]))
     elements.append(Paragraph(label, styles["signature_hint"]))
-    return elements
+    return KeepInFrame(74 * mm, 28 * mm, elements, mode="shrink")
 
 
 def _license_line(number: Optional[str], expiry: Optional[str]) -> str:

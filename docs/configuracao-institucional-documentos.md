@@ -31,6 +31,7 @@ Esta entrega cria um cadastro institucional por empresa prestadora para abastece
 - UF do registro
 - numero e validade da licenca sanitaria
 - numero e validade da licenca ambiental
+- centro de informacao toxicologica
 - CIT
 
 ## Regras de seguranca
@@ -40,6 +41,7 @@ Esta entrega cria um cadastro institucional por empresa prestadora para abastece
 - ativos tecnicos nao sao expostos por caminho publico
 - preview e download usam rotas autenticadas
 - validacao de tipo e tamanho no upload
+- CIT padronizado em todos os documentos
 
 ## UX implementada
 
@@ -65,7 +67,15 @@ Campos bloqueantes:
 - licenca sanitaria
 - licenca ambiental
 - endereco da empresa
+- centro de informacao toxicologica
 - CIT
+
+## Padrao visual aplicado nos documentos
+
+- mesma referencia de CIT no rodape dos certificados
+- mesma logica de assinatura do responsavel tecnico
+- assinatura com area fixa, redimensionamento proporcional e contencao dentro da margem
+- botoes de acao das telas de configuracao alinhados no mesmo padrao visual
 
 ## Estrategia de migracao
 

@@ -717,6 +717,7 @@ class CompanyTechnicalData(Base):
     sanitary_license_expiry: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     environmental_license_number: Mapped[str] = mapped_column(String(80), nullable=False)
     environmental_license_expiry: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    toxicology_center_name: Mapped[str] = mapped_column(String(160), nullable=False, default="Centro de Informacao Toxicologica")
     toxicology_center_phone: Mapped[str] = mapped_column(String(40), nullable=False)
     sanitary_license_filename: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     sanitary_license_content_type: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)

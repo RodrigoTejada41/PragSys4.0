@@ -451,6 +451,13 @@ textarea.ui-control {
     justify-content: flex-start;
 }
 
+.settings-form-section .inline-actions,
+.settings-side-section .inline-actions,
+.technical-asset-card .inline-actions,
+.technical-signature-drawing .inline-actions {
+    justify-content: flex-end;
+}
+
 .btn,
 .toolbar-link {
     display: inline-flex;
@@ -540,6 +547,12 @@ textarea.ui-control {
     border-radius: var(--ds-button-radius);
     font-weight: 700;
     letter-spacing: 0.01em;
+}
+
+.inline-actions .btn,
+.ui-form-actions .btn,
+.finance-filter-actions .btn {
+    min-width: 152px;
 }
 
 .data-form button[type="submit"],

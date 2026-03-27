@@ -93,6 +93,7 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
                 "sanitary_license_expiry": "31/12/2026",
                 "environmental_license_number": "LA-7788",
                 "environmental_license_expiry": "31/12/2026",
+                "toxicology_center_name": "CEATOX SP",
                 "toxicology_center_phone": "0800 722 6001",
             },
             "system": {
@@ -133,6 +134,7 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert updated["company"]["technical_responsible_registry"] == "CRQ 445566 / SP"
     assert updated["company"]["sanitary_license_number"] == "LS-0099"
     assert updated["company"]["environmental_license_number"] == "LA-7788"
+    assert updated["company"]["toxicology_center_name"] == "CEATOX SP"
     assert updated["company"]["toxicology_center_phone"] == "0800 722 6001"
     assert updated["company"]["sanitary_license_file"]["has_file"] is False
     assert updated["company"]["technical_signature"]["has_file"] is False

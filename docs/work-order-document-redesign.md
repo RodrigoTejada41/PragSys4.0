@@ -57,6 +57,7 @@ A geracao agora bloqueia se faltarem dados essenciais de conformidade:
 - licenca sanitaria
 - licenca ambiental
 - endereco da empresa
+- centro de informacao toxicologica
 - CIT
 
 O bloqueio retorna erro de negocio antes da emissao do PDF, evitando documento com informacao regulatoria incompleta ou placeholder.
@@ -121,6 +122,8 @@ O modulo de configuracoes agora possui uma secao dedicada para:
 - upload da licenca ambiental digitalizada
 - upload de assinatura
 - assinatura desenhada em canvas
+- centro de informacao toxicologica
+- telefone CIT
 
 Esses dados agora ficam vinculados por empresa em `dados_tecnicos_empresa`.
 

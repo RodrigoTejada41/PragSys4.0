@@ -951,6 +951,7 @@ class SettingsCompanyRead(BaseModel):
     sanitary_license_expiry: Optional[str] = None
     environmental_license_number: str
     environmental_license_expiry: Optional[str] = None
+    toxicology_center_name: str
     toxicology_center_phone: str
     sanitary_license_file: SettingsAssetRead
     environmental_license_file: SettingsAssetRead
@@ -1017,6 +1018,7 @@ class SettingsCompanyUpdate(BaseModel):
     sanitary_license_expiry: Optional[str] = None
     environmental_license_number: Optional[str] = None
     environmental_license_expiry: Optional[str] = None
+    toxicology_center_name: Optional[str] = None
     toxicology_center_phone: Optional[str] = None
 
 

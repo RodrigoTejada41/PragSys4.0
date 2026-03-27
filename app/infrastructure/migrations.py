@@ -634,6 +634,7 @@ def _migration_20260327_004_company_technical_data(engine: Engine) -> None:
                     sanitary_license_expiry VARCHAR(20),
                     environmental_license_number VARCHAR(80) NOT NULL,
                     environmental_license_expiry VARCHAR(20),
+                    toxicology_center_name VARCHAR(160) NOT NULL DEFAULT 'Centro de Informacao Toxicologica',
                     toxicology_center_phone VARCHAR(40) NOT NULL,
                     sanitary_license_filename VARCHAR(255),
                     sanitary_license_content_type VARCHAR(120),
@@ -673,6 +674,7 @@ def _migration_20260327_004_company_technical_data(engine: Engine) -> None:
                     sanitary_license_expiry,
                     environmental_license_number,
                     environmental_license_expiry,
+                    toxicology_center_name,
                     toxicology_center_phone,
                     created_at,
                     updated_at
@@ -734,6 +736,7 @@ def _migration_20260327_004_company_technical_data(engine: Engine) -> None:
                         json_quote('Licenca ambiental nao configurada')
                     ),
                     COALESCE((SELECT value FROM system_settings WHERE key = 'environmental_license_expiry'), json_quote(NULL)),
+                    json_quote('Centro de Informacao Toxicologica'),
                     COALESCE(
                         (SELECT value FROM system_settings WHERE key = 'toxicology_center_phone'),
                         json_quote('0800 nao configurado')
@@ -764,6 +767,7 @@ def _migration_20260327_004_company_technical_data(engine: Engine) -> None:
                     sanitary_license_expiry = json_extract(sanitary_license_expiry, '$'),
                     environmental_license_number = json_extract(environmental_license_number, '$'),
                     environmental_license_expiry = json_extract(environmental_license_expiry, '$'),
+                    toxicology_center_name = json_extract(toxicology_center_name, '$'),
                     toxicology_center_phone = json_extract(toxicology_center_phone, '$')
                 """
             )
@@ -774,6 +778,25 @@ def _migration_20260327_004_company_technical_data(engine: Engine) -> None:
         "ix_dados_tecnicos_empresa_empresa_prestadora_id",
         ["empresa_prestadora_id"],
     )
+
+
+def _migration_20260327_005_cit_name(engine: Engine) -> None:
+    _add_column_if_missing(
+        engine,
+        "dados_tecnicos_empresa",
+        "toxicology_center_name",
+        "toxicology_center_name VARCHAR(160) NOT NULL DEFAULT 'Centro de Informacao Toxicologica'",
+    )
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE dados_tecnicos_empresa
+                SET toxicology_center_name = 'Centro de Informacao Toxicologica'
+                WHERE toxicology_center_name IS NULL OR trim(toxicology_center_name) = ''
+                """
+            )
+        )
 
 
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
@@ -789,6 +812,7 @@ MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260327_002_multiempresa_estoque", _migration_20260327_002_multiempresa_estoque),
     ("20260327_003_user_permissions", _migration_20260327_003_user_permissions),
     ("20260327_004_company_technical_data", _migration_20260327_004_company_technical_data),
+    ("20260327_005_cit_name", _migration_20260327_005_cit_name),
 ]
 
 
