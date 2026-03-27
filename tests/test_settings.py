@@ -1,3 +1,8 @@
+from io import BytesIO
+
+from reportlab.pdfgen import canvas
+
+
 def _create_company_user(client, auth_headers, username: str, company_suffix: str) -> dict:
     cnpj = f"{company_suffix * 4}0001{company_suffix}"
     response = client.post(
@@ -36,6 +41,17 @@ def _create_company_user(client, auth_headers, username: str, company_suffix: st
     )
     assert login.status_code == 200
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+def _build_regulatory_pdf(*lines: str) -> bytes:
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer)
+    y = 800
+    for line in lines:
+        pdf.drawString(40, y, line)
+        y -= 18
+    pdf.save()
+    return buffer.getvalue()
 
 
 def test_admin_can_read_and_update_system_settings(client, auth_headers):
@@ -172,6 +188,35 @@ def test_admin_can_upload_company_technical_assets(client, auth_headers):
     assert download_response.status_code == 200
     assert download_response.headers["content-type"] == "application/pdf"
     assert download_response.content.startswith(b"%PDF")
+
+
+def test_pdf_upload_extracts_regulatory_fields_automatically(client, auth_headers):
+    pdf_content = _build_regulatory_pdf(
+        "Razao Social: Laboratorio Delta Ltda",
+        "Endereco da empresa: Rua Tecnica 500 - Sao Paulo/SP",
+        "Responsavel Tecnico: Dra. Helena Prado",
+        "Registro Profissional: CRQ 445566",
+        "Centro de Informacao Toxicologica: CEATOX",
+        "Telefone CIT: 0800 722 6001",
+        "Licenca ambiental: LA-7788",
+    )
+
+    upload_response = client.post(
+        "/api/v1/settings/technical-documents/assets/environmental_license",
+        headers=auth_headers,
+        files={"file": ("licenca-ambiental.pdf", pdf_content, "application/pdf")},
+    )
+
+    assert upload_response.status_code == 200
+    company = upload_response.json()
+    assert company["legal_name"] == "Laboratorio Delta Ltda"
+    assert company["address"] == "Rua Tecnica 500 - Sao Paulo/SP"
+    assert company["technical_responsible_name"] == "Dra. Helena Prado"
+    assert company["technical_registry_type"] == "CRQ"
+    assert company["technical_registry_number"] == "445566"
+    assert company["environmental_license_number"] == "LA-7788"
+    assert company["toxicology_center_name"].lower().startswith("centro de informacao toxicol")
+    assert company["toxicology_center_phone"] == "0800 722 6001"
 
 
 def test_operador_cannot_access_system_settings(client, auth_headers):

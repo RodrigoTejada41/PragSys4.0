@@ -2,11 +2,14 @@ import base64
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timezone
+from io import BytesIO
 from types import SimpleNamespace
 from typing import Any, Optional
 
 from cryptography.fernet import Fernet, InvalidToken
+from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
 from app.application.schemas import (
@@ -340,6 +343,10 @@ def save_company_technical_asset(
     else:
         raise BusinessRuleViolation("Tipo de ativo tecnico invalido.")
 
+    if normalized_type == "application/pdf":
+        extracted_fields = _extract_regulatory_fields_from_pdf(content)
+        _apply_extracted_regulatory_fields(record, extracted_fields, asset_kind=asset_kind)
+
     db.add(record)
     db.commit()
     return _read_company_technical_data(db, current_user)
@@ -616,3 +623,167 @@ def _asset_fallback_filename(asset_kind: str, content_type: str) -> str:
 
 def _normalize_content_type(content_type: Optional[str]) -> str:
     return str(content_type or "application/octet-stream").strip().lower()
+
+
+def _extract_regulatory_fields_from_pdf(content: bytes) -> dict[str, str]:
+    try:
+        reader = PdfReader(BytesIO(content))
+    except Exception:
+        LOGGER.warning("technical_pdf_parse_failed")
+        return {}
+
+    pages_text = []
+    for page in reader.pages:
+        try:
+            pages_text.append(page.extract_text() or "")
+        except Exception:
+            continue
+    raw_text = "\n".join(pages_text)
+    if not raw_text.strip():
+        return {}
+
+    normalized_lines = [re.sub(r"\s+", " ", line).strip() for line in raw_text.splitlines() if line.strip()]
+    normalized_text = "\n".join(normalized_lines)
+
+    extracted: dict[str, str] = {}
+    extracted_name = _extract_pdf_line_value(
+        normalized_text,
+        [
+            r"respons[aá]vel t[eé]cnico\s*[:\-]\s*(.+)",
+            r"resp\.?\s*t[eé]cnico\s*[:\-]\s*(.+)",
+        ],
+    )
+    if extracted_name:
+        extracted["technical_responsible_name"] = extracted_name
+
+    registry_label = _extract_pdf_line_value(
+        normalized_text,
+        [
+            r"registro profissional\s*[:\-]\s*(.+)",
+            r"conselho profissional\s*[:\-]\s*(.+)",
+        ],
+    )
+    if registry_label:
+        extracted["technical_registry_raw"] = registry_label
+
+    address = _extract_pdf_line_value(
+        normalized_text,
+        [
+            r"endere[cç]o(?: da empresa)?\s*[:\-]\s*(.+)",
+            r"endere[cç]o completo\s*[:\-]\s*(.+)",
+        ],
+    )
+    if address:
+        extracted["address"] = address
+
+    company_name = _extract_pdf_line_value(
+        normalized_text,
+        [
+            r"raz[aã]o social\s*[:\-]\s*(.+)",
+            r"empresa\s*[:\-]\s*(.+)",
+        ],
+    )
+    if company_name:
+        extracted["legal_name"] = company_name
+
+    cnpj = _extract_pdf_inline_value(normalized_text, [r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b"])
+    if cnpj:
+        extracted["cnpj"] = cnpj
+
+    sanitary_number = _extract_pdf_line_value(
+        normalized_text,
+        [
+            r"licen[cç]a sanit[aá]ria\s*(?:n[ºo°.]*)?\s*[:\-]\s*([A-Z0-9./-]+)",
+            r"alvar[aá] sanit[aá]rio\s*[:\-]\s*([A-Z0-9./-]+)",
+        ],
+    )
+    if sanitary_number:
+        extracted["sanitary_license_number"] = sanitary_number
+
+    environmental_number = _extract_pdf_line_value(
+        normalized_text,
+        [
+            r"licen[cç]a ambiental\s*(?:n[ºo°.]*)?\s*[:\-]\s*([A-Z0-9./-]+)",
+            r"licen[cç]a de opera[cç][aã]o\s*[:\-]\s*([A-Z0-9./-]+)",
+            r"n[úu]mero da licen[cç]a ambiental\s*[:\-]\s*([A-Z0-9./-]+)",
+        ],
+    )
+    if environmental_number:
+        extracted["environmental_license_number"] = environmental_number
+
+    cit_name = _extract_pdf_line_value(
+        normalized_text,
+        [
+            r"(centro de informa[cç][aã]o toxicol[oó]gica)\s*[:\-]?\s*(?:telefone|fone|contato)?",
+            r"(ceatox[^\n:]*)\s*[:\-]?\s*(?:telefone|fone|contato)?",
+        ],
+    )
+    if cit_name:
+        extracted["toxicology_center_name"] = cit_name
+
+    cit_phone = _extract_pdf_line_value(
+        normalized_text,
+        [
+            r"centro de informa[cç][aã]o toxicol[oó]gica\s*[:\-]?\s*(.+)",
+            r"\bcit\s*[:\-]\s*(.+)",
+            r"telefone cit\s*[:\-]\s*(.+)",
+        ],
+    )
+    phone_match = _extract_pdf_inline_value(
+        cit_phone or normalized_text,
+        [
+            r"0800[\s\-]?\d{3}[\s\-]?\d{4}",
+            r"\(?\d{2}\)?\s?\d{4,5}[\s\-]?\d{4}",
+        ],
+    )
+    if phone_match:
+        extracted["toxicology_center_phone"] = phone_match
+
+    return extracted
+
+
+def _extract_pdf_line_value(text: str, patterns: list[str]) -> Optional[str]:
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        value = match.group(1).strip(" .:-")
+        if value:
+            return value
+    return None
+
+
+def _extract_pdf_inline_value(text: str, patterns: list[str]) -> Optional[str]:
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(0).strip()
+    return None
+
+
+def _apply_extracted_regulatory_fields(record: CompanyTechnicalData, extracted_fields: dict[str, str], *, asset_kind: str) -> None:
+    if not extracted_fields:
+        return
+
+    field_map = {
+        "technical_responsible_name": "technical_responsible_name",
+        "address": "address",
+        "legal_name": "legal_name",
+        "cnpj": "cnpj",
+        "toxicology_center_name": "toxicology_center_name",
+        "toxicology_center_phone": "toxicology_center_phone",
+    }
+    for source_key, target_attr in field_map.items():
+        value = extracted_fields.get(source_key)
+        if value:
+            setattr(record, target_attr, value)
+
+    registry_label = extracted_fields.get("technical_registry_raw")
+    if registry_label:
+        record.technical_registry_type = _infer_registry_type(registry_label)
+        record.technical_registry_number = _infer_registry_number(registry_label)
+
+    if asset_kind == "sanitary_license" and extracted_fields.get("sanitary_license_number"):
+        record.sanitary_license_number = extracted_fields["sanitary_license_number"]
+    if asset_kind == "environmental_license" and extracted_fields.get("environmental_license_number"):
+        record.environmental_license_number = extracted_fields["environmental_license_number"]

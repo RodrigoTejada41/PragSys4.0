@@ -53,6 +53,7 @@ Em `Configuracoes` foi criada uma secao institucional com:
 - upload de assinatura
 - canvas para assinatura desenhada
 - preview de arquivos enviados
+- tentativa de extracao automatica dos dados regulatorios quando a licenca em PDF possui texto selecionavel
 
 ## Integracao documental
 
@@ -76,6 +77,21 @@ Campos bloqueantes:
 - mesma logica de assinatura do responsavel tecnico
 - assinatura com area fixa, redimensionamento proporcional e contencao dentro da margem
 - botoes de acao das telas de configuracao alinhados no mesmo padrao visual
+
+## Extracao automatica por PDF
+
+Quando a licenca sanitaria ou ambiental e enviada em PDF com camada de texto, o sistema tenta preencher automaticamente:
+
+- responsavel tecnico
+- registro profissional
+- endereco da empresa
+- centro de informacao toxicologica
+- telefone CIT
+- numero da licenca correspondente
+
+Observacao:
+
+- PDFs apenas escaneados, sem texto selecionavel, ainda podem exigir preenchimento manual
 
 ## Estrategia de migracao
 
