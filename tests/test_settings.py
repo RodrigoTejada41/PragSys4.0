@@ -199,6 +199,7 @@ def test_pdf_upload_extracts_regulatory_fields_automatically(client, auth_header
         "Centro de Informacao Toxicologica: CEATOX",
         "Telefone CIT: 0800 722 6001",
         "Licenca ambiental: LA-7788",
+        "Validade: 31/12/2027",
     )
 
     upload_response = client.post(
@@ -215,6 +216,7 @@ def test_pdf_upload_extracts_regulatory_fields_automatically(client, auth_header
     assert company["technical_registry_type"] == "CRQ"
     assert company["technical_registry_number"] == "445566"
     assert company["environmental_license_number"] == "LA-7788"
+    assert company["environmental_license_expiry"] == "31/12/2027"
     assert company["toxicology_center_name"] == "CEATOX"
     assert company["toxicology_center_phone"] == "0800 722 6001"
 
@@ -278,6 +280,30 @@ def test_pdf_upload_extracts_fields_from_realistic_license_layout(client, auth_h
     assert company["technical_registry_type"] == "CRBio"
     assert company["technical_registry_number"] == "123456"
     assert company["environmental_license_number"] == "LA-TESTE-0001/2026"
+    assert company["environmental_license_expiry"] == "01/01/2027"
+
+
+def test_pdf_upload_extracts_sanitary_license_expiry(client, auth_headers):
+    pdf_content = _build_regulatory_pdf(
+        "LICENÇA SANITÁRIA (TESTE)",
+        "Número da Licença: LS-TESTE-0001/2026",
+        "Validade: 15/08/2027",
+        "Razão Social: EMPRESA MODELO CONTROLE DE PRAGAS LTDA",
+        "Endereço: Rua Exemplo, 123 - Centro - Carapicuíba/SP",
+        "Responsável Técnico: João da Silva",
+        "Registro: CRBio 123456/01-D",
+    )
+
+    upload_response = client.post(
+        "/api/v1/settings/technical-documents/assets/sanitary_license",
+        headers=auth_headers,
+        files={"file": ("licenca-sanitaria-real.pdf", pdf_content, "application/pdf")},
+    )
+
+    assert upload_response.status_code == 200
+    company = upload_response.json()
+    assert company["sanitary_license_number"] == "LS-TESTE-0001/2026"
+    assert company["sanitary_license_expiry"] == "15/08/2027"
 
 
 def test_operador_cannot_access_system_settings(client, auth_headers):

@@ -86,6 +86,7 @@ Quando a licenca sanitaria ou ambiental e enviada em PDF com camada de texto, o 
 - responsavel tecnico
 - registro profissional
 - endereco da empresa
+- validade da licenca
 - centro de informacao toxicologica
 - telefone CIT
 - numero da licenca correspondente
