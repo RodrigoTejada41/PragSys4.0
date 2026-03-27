@@ -26,6 +26,7 @@ from app.application.certificate_assets import (
     resolve_certificate_model_path,
     resolve_technical_signature_path,
 )
+from app.application.work_order_documents import generate_work_order_document_pdf
 from app.application.schemas import (
     AddressLookupRead,
     CustomerCnpjLookupRead,
@@ -2978,65 +2979,7 @@ def generate_work_order_pdf(db: Session, work_order_id: int, current_user: Optio
     def _builder() -> bytes:
         work_order = get_work_order(db, work_order_id, current_user=current_user)
         settings = get_settings()
-        buffer = BytesIO()
-        pdf = canvas.Canvas(buffer, pagesize=A4)
-        y = _draw_document_frame(
-            pdf,
-            "Comprovante de Execucao / Ordem de Servico",
-            "Conforme requisitos aplicaveis da RDC 622/2022",
-        )
-
-        y = _draw_section_title(pdf, y, "Identificacao do atendimento")
-        y = _draw_key_values(
-            pdf,
-            y,
-            [
-                ("Cliente", work_order.cliente.razao_social),
-                ("Endereco do imovel", f"{work_order.cliente.endereco} - {work_order.cliente.cidade}/{work_order.cliente.estado}"),
-                ("Praga(s) alvo", ", ".join([item.praga.nome_comum for item in work_order.pragas]) if work_order.pragas else "Nao informada"),
-                ("Data de execucao", work_order.data_execucao.strftime("%d/%m/%Y")),
-                ("Prazo de assistencia tecnica", _assistance_text(work_order)),
-                ("Horario", f"{work_order.hora_inicio} ate {work_order.hora_fim or '--:--'}"),
-                ("Local", work_order.local_execucao),
-                ("Responsavel tecnico", f"{settings.technical_responsible_name} - {settings.technical_responsible_registry}"),
-                ("Centro de Informacao Toxicologica", settings.toxicology_center_phone),
-                ("Valor", f"R$ {Decimal(work_order.valor_servico):.2f}"),
-            ],
-        )
-
-        y = _draw_section_title(pdf, y - 2 * mm, "Produtos aplicados")
-        y = _draw_bullets(
-            pdf,
-            y,
-            [
-                f"{item.produto.nome} | Grupo quimico: {item.produto.grupo_quimico} | Concentracao de uso: {item.produto.concentracao} | Quantidade: {item.quantidade} | Diluicao: {item.diluicao}"
-                for item in work_order.produtos
-            ],
-        )
-
-        y = _draw_section_title(pdf, y - 2 * mm, "Orientacoes pertinentes ao servico executado")
-        y = _draw_bullets(
-            pdf,
-            y,
-            [
-                "Manter pessoas e animais afastados das areas tratadas durante o periodo de seguranca definido pela empresa.",
-                "Nao remover residuos de barreiras quimicas ou iscas tecnicas sem orientacao profissional.",
-                "Em caso de intercorrencia com o produto utilizado, contatar imediatamente o Centro de Informacao Toxicologica informado neste comprovante.",
-            ],
-        )
-
-        y = _draw_section_title(pdf, y - 2 * mm, "Observacoes")
-        y = _draw_paragraph(pdf, y, work_order.observacoes or "Sem observacoes registradas.")
-
-        y = _draw_section_title(pdf, y - 2 * mm, "Identificacao da empresa prestadora")
-        y = _draw_bullets(pdf, y, _company_identification_lines(), width_chars=84)
-
-        pdf.setFont("Helvetica", 10)
-        pdf.drawString(20 * mm, 24 * mm, "Assinatura do tecnico: ______________________________")
-        pdf.drawRightString(190 * mm, 24 * mm, "Assinatura do cliente: ______________________________")
-        pdf.showPage()
-        pdf.save()
-        return buffer.getvalue()
+        return generate_work_order_document_pdf(work_order, settings)
 
     return _run_document_generation("work_order_pdf", work_order_id, _builder)
 

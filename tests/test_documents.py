@@ -111,6 +111,20 @@ def test_all_work_order_documents_are_generated(client, auth_headers):
         assert len(response.content) > 1200
 
 
+def test_work_order_pdf_blocks_when_required_company_document_data_is_missing(client, auth_headers, monkeypatch):
+    monkeypatch.setenv("TECHNICAL_RESPONSIBLE_NAME", "Responsavel tecnico nao configurado")
+    monkeypatch.setenv("TOXICOLOGY_CENTER_PHONE", "0800 nao configurado")
+    get_settings.cache_clear()
+
+    work_order = _create_base_work_order(client, auth_headers)
+    response = client.get(f"/api/v1/os/{work_order['id']}/pdf", headers=auth_headers)
+
+    assert response.status_code == 400
+    assert "Responsavel tecnico" in response.json()["detail"]
+    assert "CIT" in response.json()["detail"]
+    get_settings.cache_clear()
+
+
 def test_framed_certificate_text_covers_food_risk_compliance_language():
     work_order = SimpleNamespace(
         cliente=SimpleNamespace(razao_social="Industria Delta"),
