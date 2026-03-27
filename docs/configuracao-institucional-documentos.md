@@ -88,6 +88,7 @@ Quando a licenca sanitaria ou ambiental e enviada em PDF com camada de texto, o 
 - centro de informacao toxicologica
 - telefone CIT
 - numero da licenca correspondente
+- com tolerancia a acentos e variacoes comuns de rotulo no PDF
 
 Observacao:
 
@@ -111,6 +112,6 @@ docker compose up --build -d
 
 Resultado:
 
-- `33 passed`
+- `36 passed`
 - build local em Docker concluido
 - `health` validado em `http://127.0.0.1:8000/health`

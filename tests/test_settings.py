@@ -215,7 +215,36 @@ def test_pdf_upload_extracts_regulatory_fields_automatically(client, auth_header
     assert company["technical_registry_type"] == "CRQ"
     assert company["technical_registry_number"] == "445566"
     assert company["environmental_license_number"] == "LA-7788"
-    assert company["toxicology_center_name"].lower().startswith("centro de informacao toxicol")
+    assert company["toxicology_center_name"] == "CEATOX"
+    assert company["toxicology_center_phone"] == "0800 722 6001"
+
+
+def test_pdf_upload_extracts_regulatory_fields_with_accents(client, auth_headers):
+    pdf_content = _build_regulatory_pdf(
+        "Razão Social: Clínica Ápice Ltda",
+        "Endereço da empresa: Rua São Bento, 250 - São Paulo/SP",
+        "Responsável Técnico: Dr. João Álvares",
+        "Registro Profissional: CRBio 12345 / SP",
+        "Centro de Informação Toxicológica: CEATOX",
+        "Telefone CIT: 0800 722 6001",
+        "Licença ambiental nº: la-9001",
+    )
+
+    upload_response = client.post(
+        "/api/v1/settings/technical-documents/assets/environmental_license",
+        headers=auth_headers,
+        files={"file": ("licenca-ambiental-acento.pdf", pdf_content, "application/pdf")},
+    )
+
+    assert upload_response.status_code == 200
+    company = upload_response.json()
+    assert company["legal_name"] == "Clínica Ápice Ltda"
+    assert company["address"] == "Rua São Bento, 250 - São Paulo/SP"
+    assert company["technical_responsible_name"] == "Dr. João Álvares"
+    assert company["technical_registry_type"] == "CRBio"
+    assert company["technical_registry_number"] == "12345"
+    assert company["technical_registry_state"] == "SP"
+    assert company["environmental_license_number"] == "LA-9001"
     assert company["toxicology_center_phone"] == "0800 722 6001"
 
 

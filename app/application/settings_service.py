@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import re
+import unicodedata
 from datetime import datetime, timezone
 from io import BytesIO
 from types import SimpleNamespace
@@ -567,7 +568,19 @@ def _infer_registry_type(registry_label: Optional[str]) -> str:
 
 def _infer_registry_number(registry_label: Optional[str]) -> str:
     parts = str(registry_label or "").strip().split(maxsplit=1)
-    return parts[1] if len(parts) > 1 else ""
+    if len(parts) <= 1:
+        return ""
+    number = parts[1].strip()
+    if "/" in number:
+        number = number.split("/", 1)[0].strip()
+    return number
+
+
+def _infer_registry_state(registry_label: Optional[str]) -> Optional[str]:
+    match = re.search(r"/\s*([A-Za-z]{2})\b", str(registry_label or ""))
+    if match:
+        return match.group(1).upper()
+    return None
 
 
 def _compose_registry_label(registry_type: Optional[str], registry_number: Optional[str], registry_state: Optional[str]) -> str:
@@ -642,79 +655,81 @@ def _extract_regulatory_fields_from_pdf(content: bytes) -> dict[str, str]:
     if not raw_text.strip():
         return {}
 
-    normalized_lines = [re.sub(r"\s+", " ", line).strip() for line in raw_text.splitlines() if line.strip()]
-    normalized_text = "\n".join(normalized_lines)
+    cleaned_lines = [re.sub(r"\s+", " ", line).strip() for line in raw_text.splitlines() if line.strip()]
+    searchable_lines = [(_normalize_pdf_search_text(line), line) for line in cleaned_lines]
+    searchable_text = "\n".join(normalized for normalized, _ in searchable_lines)
 
     extracted: dict[str, str] = {}
     extracted_name = _extract_pdf_line_value(
-        normalized_text,
+        searchable_lines,
         [
-            r"respons[aá]vel t[eé]cnico\s*[:\-]\s*(.+)",
-            r"resp\.?\s*t[eé]cnico\s*[:\-]\s*(.+)",
+            r"responsavel tecnico\s*[:\-]\s*(.+)",
+            r"resp\.?\s*tecnico\s*[:\-]\s*(.+)",
         ],
     )
     if extracted_name:
         extracted["technical_responsible_name"] = extracted_name
 
     registry_label = _extract_pdf_line_value(
-        normalized_text,
+        searchable_lines,
         [
             r"registro profissional\s*[:\-]\s*(.+)",
             r"conselho profissional\s*[:\-]\s*(.+)",
+            r"(crbio|crea|crq|crm|crmv|cro)\s*(?:n[o0.\-]*\s*)?[:\-]?\s*([a-z0-9./-]+(?:\s*/\s*[a-z]{2})?)",
         ],
     )
     if registry_label:
         extracted["technical_registry_raw"] = registry_label
 
     address = _extract_pdf_line_value(
-        normalized_text,
+        searchable_lines,
         [
-            r"endere[cç]o(?: da empresa)?\s*[:\-]\s*(.+)",
-            r"endere[cç]o completo\s*[:\-]\s*(.+)",
+            r"endereco(?: da empresa)?\s*[:\-]\s*(.+)",
+            r"endereco completo\s*[:\-]\s*(.+)",
         ],
     )
     if address:
         extracted["address"] = address
 
     company_name = _extract_pdf_line_value(
-        normalized_text,
+        searchable_lines,
         [
-            r"raz[aã]o social\s*[:\-]\s*(.+)",
+            r"razao social\s*[:\-]\s*(.+)",
             r"empresa\s*[:\-]\s*(.+)",
         ],
     )
     if company_name:
         extracted["legal_name"] = company_name
 
-    cnpj = _extract_pdf_inline_value(normalized_text, [r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b"])
+    cnpj = _extract_pdf_inline_value(raw_text, [r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b"])
     if cnpj:
         extracted["cnpj"] = cnpj
 
     sanitary_number = _extract_pdf_line_value(
-        normalized_text,
+        searchable_lines,
         [
-            r"licen[cç]a sanit[aá]ria\s*(?:n[ºo°.]*)?\s*[:\-]\s*([A-Z0-9./-]+)",
-            r"alvar[aá] sanit[aá]rio\s*[:\-]\s*([A-Z0-9./-]+)",
+            r"licenca sanitaria\s*(?:n[o0.\-]*\s*)?[:\-]\s*([a-z0-9./-]+)",
+            r"alvara sanitario\s*[:\-]\s*([a-z0-9./-]+)",
         ],
     )
     if sanitary_number:
-        extracted["sanitary_license_number"] = sanitary_number
+        extracted["sanitary_license_number"] = sanitary_number.upper()
 
     environmental_number = _extract_pdf_line_value(
-        normalized_text,
+        searchable_lines,
         [
-            r"licen[cç]a ambiental\s*(?:n[ºo°.]*)?\s*[:\-]\s*([A-Z0-9./-]+)",
-            r"licen[cç]a de opera[cç][aã]o\s*[:\-]\s*([A-Z0-9./-]+)",
-            r"n[úu]mero da licen[cç]a ambiental\s*[:\-]\s*([A-Z0-9./-]+)",
+            r"licenca ambiental\s*(?:n[o0.\-]*\s*)?[:\-]\s*([a-z0-9./-]+)",
+            r"licenca de operacao\s*[:\-]\s*([a-z0-9./-]+)",
+            r"numero da licenca ambiental\s*[:\-]\s*([a-z0-9./-]+)",
         ],
     )
     if environmental_number:
-        extracted["environmental_license_number"] = environmental_number
+        extracted["environmental_license_number"] = environmental_number.upper()
 
     cit_name = _extract_pdf_line_value(
-        normalized_text,
+        searchable_lines,
         [
-            r"(centro de informa[cç][aã]o toxicol[oó]gica)\s*[:\-]?\s*(?:telefone|fone|contato)?",
+            r"(centro de informacao toxicologica)\s*[:\-]?\s*(?:telefone|fone|contato)?",
             r"(ceatox[^\n:]*)\s*[:\-]?\s*(?:telefone|fone|contato)?",
         ],
     )
@@ -722,15 +737,16 @@ def _extract_regulatory_fields_from_pdf(content: bytes) -> dict[str, str]:
         extracted["toxicology_center_name"] = cit_name
 
     cit_phone = _extract_pdf_line_value(
-        normalized_text,
+        searchable_lines,
         [
-            r"centro de informa[cç][aã]o toxicol[oó]gica\s*[:\-]?\s*(.+)",
+            r"centro de informacao toxicologica\s*[:\-]?\s*(.+)",
             r"\bcit\s*[:\-]\s*(.+)",
             r"telefone cit\s*[:\-]\s*(.+)",
+            r"ceatox[^\n:]*\s*[:\-]\s*(.+)",
         ],
     )
     phone_match = _extract_pdf_inline_value(
-        cit_phone or normalized_text,
+        cit_phone or raw_text or searchable_text,
         [
             r"0800[\s\-]?\d{3}[\s\-]?\d{4}",
             r"\(?\d{2}\)?\s?\d{4,5}[\s\-]?\d{4}",
@@ -742,13 +758,31 @@ def _extract_regulatory_fields_from_pdf(content: bytes) -> dict[str, str]:
     return extracted
 
 
-def _extract_pdf_line_value(text: str, patterns: list[str]) -> Optional[str]:
+def _normalize_pdf_search_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"\s+", " ", ascii_value).strip().lower()
+
+
+def _extract_pdf_line_value(lines: list[tuple[str, str]], patterns: list[str]) -> Optional[str]:
     for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
-        if not match:
-            continue
-        value = match.group(1).strip(" .:-")
-        if value:
+        compiled = re.compile(pattern, flags=re.IGNORECASE)
+        for normalized_line, original_line in lines:
+            match = compiled.search(normalized_line)
+            if not match:
+                continue
+            groups = [group for group in match.groups() if group]
+            value = " ".join(groups).strip() if groups else original_line.strip()
+            if not value:
+                continue
+            if ":" in original_line:
+                right = original_line.split(":", 1)[1].strip()
+                if right:
+                    return right
+            if " - " in original_line:
+                right = original_line.split(" - ", 1)[1].strip()
+                if right:
+                    return right
             return value
     return None
 
@@ -782,6 +816,9 @@ def _apply_extracted_regulatory_fields(record: CompanyTechnicalData, extracted_f
     if registry_label:
         record.technical_registry_type = _infer_registry_type(registry_label)
         record.technical_registry_number = _infer_registry_number(registry_label)
+        inferred_state = _infer_registry_state(registry_label)
+        if inferred_state:
+            record.technical_registry_state = inferred_state
 
     if asset_kind == "sanitary_license" and extracted_fields.get("sanitary_license_number"):
         record.sanitary_license_number = extracted_fields["sanitary_license_number"]
