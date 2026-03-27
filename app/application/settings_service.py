@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.application.schemas import (
     SettingsContractsRead,
+    SettingsDatabaseRead,
     SettingsEmailRead,
     SettingsEnvironmentRead,
     SettingsIntegrationsRead,
@@ -33,6 +34,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "smtp_use_ssl": False,
     "smtp_sender_email": None,
     "smtp_sender_name": None,
+    "database_backup_dir": "backups/database",
     "multiempresa_enabled": True,
     "operation_mode": "local",
     "notifications_enabled": True,
@@ -124,11 +126,19 @@ def update_system_settings(db: Session, payload: SystemSettingsUpdate, current_u
             if key == "smtp_password" and value == "":
                 continue
             updates[key] = value
+    if payload.database:
+        database_payload = payload.database.model_dump()
+        for key, value in database_payload.items():
+            if value is None:
+                continue
+            updates[f"database_{key}"] = value
 
     if "operation_mode" in updates and updates["operation_mode"] not in {"local", "rede"}:
         raise BusinessRuleViolation("O modo de operacao deve ser 'local' ou 'rede'.")
     if "contract_storage_dir" in updates and not str(updates["contract_storage_dir"]).strip():
         raise BusinessRuleViolation("O diretorio de contratos nao pode ficar vazio.")
+    if "database_backup_dir" in updates and not str(updates["database_backup_dir"]).strip():
+        raise BusinessRuleViolation("O diretorio de backup do banco nao pode ficar vazio.")
 
     for key, value in updates.items():
         set_setting_value(db, key, value, updated_by_user_id=current_user.id)
@@ -168,6 +178,11 @@ def get_system_settings(db: Session) -> SystemSettingsRead:
             smtp_sender_name=_clean_optional_setting_text(get_setting_value(db, "smtp_sender_name", settings.smtp_sender_name)),
             smtp_password_configured=bool(_clean_optional_setting_text(get_setting_value(db, "smtp_password", settings.smtp_password))),
         ),
+        database=SettingsDatabaseRead(
+            backup_dir=str(get_setting_value(db, "database_backup_dir", DEFAULT_SETTINGS["database_backup_dir"])),
+            engine="sqlite" if settings.database_url.startswith("sqlite") else settings.database_url.split(":", 1)[0],
+            database_file_name=_extract_database_file_name(settings.database_url),
+        ),
         environment=SettingsEnvironmentRead(
             database_url_masked=_mask_database_url(settings.database_url),
             app_host=settings.app_host,
@@ -193,3 +208,13 @@ def _mask_database_url(database_url: str) -> str:
         return f"{prefix}://***@{right}"
     username, _ = credentials.split(":", 1)
     return f"{prefix}://{username}:***@{right}"
+
+
+def _extract_database_file_name(database_url: str) -> Optional[str]:
+    if not database_url.startswith("sqlite"):
+        return None
+    database_path = database_url.split("///", 1)[-1].strip()
+    if not database_path or database_path == ":memory:":
+        return None
+    normalized = database_path.replace("\\", "/")
+    return normalized.rsplit("/", 1)[-1]

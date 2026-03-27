@@ -73,13 +73,20 @@ Observacoes:
 
 - `GET /settings`
 - `PUT /settings`
+- `GET /settings/database/backup`
+- `POST /settings/database/restore`
+- `POST /settings/database/cleanup`
 
 Observacoes:
 
 - o payload administrativo passou a incluir o bloco `email`;
 - `email` aceita `smtp_host`, `smtp_port`, `smtp_username`, `smtp_password`, `smtp_use_tls`, `smtp_use_ssl`, `smtp_sender_email` e `smtp_sender_name`;
+- o bloco `database` aceita `backup_dir`;
 - a resposta devolve `smtp_password_configured` no lugar da senha em claro;
 - notificacoes automáticas de contratos usam primeiro o SMTP salvo em configuracoes e mantem fallback para `.env` quando ainda nao houve sobrescrita administrativa.
+- `GET /settings/database/backup` exporta o banco SQLite atual em formato `.db`;
+- `POST /settings/database/restore` recebe `multipart/form-data` com `file` e `confirmation = RESTAURAR`;
+- `POST /settings/database/cleanup` recebe JSON com `confirmation = CONFIRMAR` e `include_finance`.
 
 ### Empresas prestadoras
 

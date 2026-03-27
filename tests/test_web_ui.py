@@ -40,6 +40,11 @@ def test_static_app_js_includes_appointment_availability_feedback(client):
     assert "Porta SMTP" in response.text
     assert "SMTP nao configurado" in response.text
     assert "Credenciais salvas para envio automatico de e-mail." in response.text
+    assert "Backup, restauracao e limpeza operacional" in response.text
+    assert "Fazer Backup" in response.text
+    assert "Restaurar Backup" in response.text
+    assert "Limpar Movimentacoes" in response.text
+    assert "Diretorio padrao para backups de seguranca" in response.text
     assert "Tipo da O.S." in response.text
     assert "Esta O.S. nao gerara cobranca automatica." in response.text
     assert "Reabrir agendamento" in response.text

@@ -47,6 +47,7 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert "contracts" in payload
     assert "system" in payload
     assert "email" in payload
+    assert "database" in payload
     assert payload["system"]["operation_mode"] in {"local", "rede"}
 
     update_response = client.put(
@@ -74,6 +75,9 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
                 "smtp_sender_email": "naoresponda@empresa.com",
                 "smtp_sender_name": "SysPragas",
             },
+            "database": {
+                "backup_dir": "test_assets/backups",
+            },
             "system": {
                 "multiempresa_enabled": False,
                 "operation_mode": "rede",
@@ -100,6 +104,9 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert updated["email"]["smtp_sender_email"] == "naoresponda@empresa.com"
     assert updated["email"]["smtp_sender_name"] == "SysPragas"
     assert updated["email"]["smtp_password_configured"] is True
+    assert updated["database"]["backup_dir"] == "test_assets/backups"
+    assert updated["database"]["engine"] == "sqlite"
+    assert updated["database"]["database_file_name"].endswith(".db")
     assert updated["system"]["multiempresa_enabled"] is False
     assert updated["system"]["operation_mode"] == "rede"
     assert updated["system"]["notifications_enabled"] is False

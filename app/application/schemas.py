@@ -859,6 +859,12 @@ class SettingsEmailRead(BaseModel):
     smtp_password_configured: bool
 
 
+class SettingsDatabaseRead(BaseModel):
+    backup_dir: str
+    engine: str
+    database_file_name: Optional[str] = None
+
+
 class SettingsEnvironmentRead(BaseModel):
     database_url_masked: str
     app_host: str
@@ -871,6 +877,7 @@ class SystemSettingsRead(BaseModel):
     contracts: SettingsContractsRead
     system: SettingsSystemRead
     email: SettingsEmailRead
+    database: SettingsDatabaseRead
     environment: SettingsEnvironmentRead
 
 
@@ -905,11 +912,29 @@ class SettingsEmailUpdate(BaseModel):
     smtp_sender_name: Optional[str] = None
 
 
+class SettingsDatabaseUpdate(BaseModel):
+    backup_dir: Optional[str] = None
+
+
 class SystemSettingsUpdate(BaseModel):
     integrations: Optional[SettingsIntegrationsUpdate] = None
     contracts: Optional[SettingsContractsUpdate] = None
     system: Optional[SettingsSystemUpdate] = None
     email: Optional[SettingsEmailUpdate] = None
+    database: Optional[SettingsDatabaseUpdate] = None
+
+
+class DatabaseMaintenanceRead(BaseModel):
+    message: str
+    file_name: Optional[str] = None
+    backup_dir: Optional[str] = None
+    safety_backup_file: Optional[str] = None
+    details: dict[str, int] = Field(default_factory=dict)
+
+
+class DatabaseCleanupRequest(BaseModel):
+    confirmation: str = Field(min_length=1)
+    include_finance: bool = False
 
 
 class ContractBase(BaseModel):

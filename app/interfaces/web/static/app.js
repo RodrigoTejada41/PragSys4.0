@@ -225,10 +225,10 @@ function bindGoogleCalendarOAuth() {
 }
 
 function bindSettingsActions() {
-    const root = document.getElementById("settings-root");
-    if (!root) {
-        return;
-    }
+  const root = document.getElementById("settings-root");
+  if (!root) {
+    return;
+  }
 
     root.addEventListener("submit", async (event) => {
         const form = event.target;
@@ -266,11 +266,29 @@ function bindSettingsActions() {
         }
     });
 
-    root.addEventListener("click", async (event) => {
-        const button = event.target.closest("[data-settings-action], [data-settings-shortcut]");
-        if (!button) {
-            return;
-        }
+  root.addEventListener("change", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.id !== "database-restore-input") {
+      return;
+    }
+    const file = target.files && target.files[0];
+    if (!file) {
+      return;
+    }
+    try {
+      await restoreDatabaseFromFile(file);
+    } catch (error) {
+      toast(error.message || "Erro ao restaurar o banco de dados.");
+    } finally {
+      target.value = "";
+    }
+  });
+
+  root.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-settings-action], [data-settings-shortcut]");
+    if (!button) {
+      return;
+    }
 
         const shortcut = button.dataset.settingsShortcut;
         if (shortcut) {
@@ -298,14 +316,25 @@ function bindSettingsActions() {
                 await connectWhatsAppQr();
                 return;
             }
-            if (action === "whatsapp-logout") {
-                await logoutWhatsApp();
-                return;
-            }
-        } catch (error) {
-            toast(error.message || "Nao foi possivel concluir a acao.");
-        }
-    });
+      if (action === "whatsapp-logout") {
+        await logoutWhatsApp();
+        return;
+      }
+      if (action === "database-backup") {
+        await downloadDatabaseBackup();
+        return;
+      }
+      if (action === "database-restore") {
+        await openDatabaseRestorePicker();
+        return;
+      }
+      if (action === "database-cleanup") {
+        await cleanupDatabaseOperationalData();
+      }
+    } catch (error) {
+      toast(error.message || "Nao foi possivel concluir a acao.");
+    }
+  });
 }
 
 function bindWorkOrderModuleNavigation() {
@@ -700,7 +729,162 @@ async function apiFetch(url, options = {}, withAuth = true) {
     if (contentType.includes("application/json")) {
         return response.json();
     }
-    return response.blob();
+  return response.blob();
+}
+
+async function apiFetchResponse(url, options = {}, withAuth = true) {
+  const headers = { ...(options.headers || {}) };
+  if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (withAuth && state.token) {
+    headers.Authorization = `Bearer ${state.token}`;
+  }
+
+  const response = await fetch(url, { ...options, headers });
+  if (!response.ok) {
+    const text = await response.text();
+    let detail = "Nao foi possivel concluir a operacao.";
+    try {
+      detail = JSON.parse(text).detail || detail;
+    } catch {
+      detail = text || detail;
+    }
+    if (response.status === 401) {
+      logout();
+    }
+    throw new Error(detail);
+  }
+  return response;
+}
+
+async function downloadDatabaseBackup() {
+  const response = await apiFetchResponse("/api/v1/settings/database/backup", { method: "GET" });
+  const blob = await response.blob();
+  const fileName = extractDownloadFileName(response.headers.get("content-disposition")) || `backup_${todayIso().replaceAll("-", "")}.db`;
+
+  if (window.showDirectoryPicker) {
+    try {
+      const directoryHandle = await window.showDirectoryPicker();
+      const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      toast("Backup realizado com sucesso.");
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        toast("Operacao cancelada.");
+        return;
+      }
+      console.warn("directory_picker_backup_failed", error);
+    }
+  }
+
+  triggerBlobDownload(blob, fileName);
+  toast("Backup realizado com sucesso.");
+}
+
+async function openDatabaseRestorePicker() {
+  if (window.showOpenFilePicker) {
+    try {
+      const [fileHandle] = await window.showOpenFilePicker({
+        multiple: false,
+        excludeAcceptAllOption: true,
+        types: [
+          {
+            description: "Backup SQLite",
+            accept: {
+              "application/octet-stream": [".db", ".sqlite", ".sqlite3"],
+            },
+          },
+        ],
+      });
+      const file = await fileHandle.getFile();
+      await restoreDatabaseFromFile(file);
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        toast("Operacao cancelada.");
+        return;
+      }
+      console.warn("open_file_picker_restore_failed", error);
+    }
+  }
+
+  const input = document.getElementById("database-restore-input");
+  input?.click();
+}
+
+async function restoreDatabaseFromFile(file) {
+  const confirmed = window.confirm("A restauracao do banco substituira os dados atuais. Um backup de seguranca sera gerado antes de prosseguir. Deseja continuar?");
+  if (!confirmed) {
+    toast("Operacao cancelada.");
+    return;
+  }
+  const confirmation = window.prompt('Digite RESTAURAR para confirmar a restauracao do banco.', "");
+  if ((confirmation || "").trim().toUpperCase() !== "RESTAURAR") {
+    toast("Operacao cancelada.");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("confirmation", confirmation);
+
+  const payload = await apiFetch("/api/v1/settings/database/restore", {
+    method: "POST",
+    body: formData,
+  });
+  await loadAllData();
+  toast(payload.message || "Restauracao concluida.");
+}
+
+async function cleanupDatabaseOperationalData() {
+  const includeFinance = Boolean(document.querySelector('[name="database_reset_include_finance"]')?.checked);
+  const confirmed = window.confirm(
+    includeFinance
+      ? "Esta limpeza removera ordens de servico, agendamentos, historicos, logs e dados financeiros. Deseja continuar?"
+      : "Esta limpeza removera ordens de servico, agendamentos, historicos e logs. Os registros financeiros serao preservados. Deseja continuar?"
+  );
+  if (!confirmed) {
+    toast("Operacao cancelada.");
+    return;
+  }
+  const confirmation = window.prompt('Digite CONFIRMAR para limpar as movimentacoes operacionais.', "");
+  if ((confirmation || "").trim().toUpperCase() !== "CONFIRMAR") {
+    toast("Operacao cancelada.");
+    return;
+  }
+
+  const payload = await apiFetch("/api/v1/settings/database/cleanup", {
+    method: "POST",
+    body: JSON.stringify({
+      confirmation,
+      include_finance: includeFinance,
+    }),
+  });
+  await loadAllData();
+  toast(payload.message || "Limpeza concluida.");
+}
+
+function extractDownloadFileName(contentDisposition) {
+  if (!contentDisposition) {
+    return null;
+  }
+  const match = /filename=\"?([^\";]+)\"?/i.exec(contentDisposition);
+  return match ? match[1] : null;
+}
+
+function triggerBlobDownload(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function switchView(view) {
@@ -836,6 +1020,9 @@ function renderSettings() {
     const smtpSummaryLabel = settingsState.email.smtp_host
         ? `${escapeHtml(settingsState.email.smtp_host)}:${escapeHtml(String(settingsState.email.smtp_port))}`
         : "SMTP nao configurado";
+    const databaseSummaryLabel = settingsState.database.database_file_name
+        ? `${escapeHtml(settingsState.database.engine)} | ${escapeHtml(settingsState.database.database_file_name)}`
+        : escapeHtml(settingsState.database.engine);
     const googleLabel = formatIntegrationStatus(google.status || "desconectado");
     const whatsappLabel = formatIntegrationStatus(whatsapp.status || "desconectado");
     const whatsappEnabledInSettings = Boolean(settingsState.integrations.whatsapp_enabled);
@@ -851,6 +1038,7 @@ function renderSettings() {
             ${settingsSummaryCard("Notificacoes", notificationsLabel, settingsState.system.notifications_enabled ? "Avisos operacionais seguem habilitados." : "Avisos operacionais desabilitados." )}
             ${settingsSummaryCard("Contratos", contractNotificationsLabel, `${settingsState.contracts.alert_days} dias de antecedencia e armazenamento em ${settingsState.contracts.storage_dir}.`)}
             ${settingsSummaryCard("SMTP", smtpSummaryLabel, settingsState.email.smtp_password_configured ? "Credenciais salvas para envio automatico de e-mail." : "Defina host, porta e remetente para habilitar notificacoes por e-mail.")}
+            ${settingsSummaryCard("Banco de dados", databaseSummaryLabel, `Backups operacionais em ${escapeHtml(settingsState.database.backup_dir)}.`)}
             ${settingsSummaryCard("Usuarios ativos", String(state.users.length || 0), isMaster ? "Leitura da administracao global disponivel neste perfil." : "Use a area de usuarios com perfil master para governanca completa.")}
         </div>
     `;
@@ -925,6 +1113,27 @@ function renderSettings() {
                     <input name="smtp_sender_name" value="${escapeHtml(settingsState.email.smtp_sender_name || "")}" placeholder="SysPragas">
                 </label>
             </div>
+        </section>
+        <section class="settings-form-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Banco de dados</p>
+                <h4>Backup, restauracao e limpeza operacional</h4>
+                <p>Use este painel para exportar o banco, restaurar backups SQLite e limpar movimentacoes sem afetar os cadastros principais.</p>
+            </div>
+            <div class="settings-field-grid two-columns">
+                <label class="full-width">
+                    <span>Diretorio padrao para backups de seguranca</span>
+                    <input name="database_backup_dir" value="${escapeHtml(settingsState.database.backup_dir || "backups/database")}">
+                </label>
+                ${toggleField("database_reset_include_finance", "Limpar financeiro junto", "Quando ativo, a limpeza remove tambem financeiro, recibos, fluxo de caixa e NF-e.", false)}
+            </div>
+            <div class="inline-actions">
+                <button type="button" class="btn btn-primary" data-settings-action="database-backup">Fazer Backup</button>
+                <button type="button" class="btn btn-default" data-settings-action="database-restore">Restaurar Backup</button>
+                <button type="button" class="btn btn-danger" data-settings-action="database-cleanup">Limpar Movimentacoes</button>
+            </div>
+            <input id="database-restore-input" type="file" accept=".db,.sqlite,.sqlite3" class="hidden">
+            <p class="origin-note">No navegador compativel, o backup pode ser salvo diretamente em uma pasta escolhida. Caso contrario, o arquivo sera baixado normalmente.</p>
         </section>
         <section class="settings-form-section">
             <div class="section-heading compact">
@@ -1120,6 +1329,9 @@ function getSystemSettingsPayload(form) {
             smtp_use_ssl: form.querySelector('[name="smtp_use_ssl"]').checked,
             smtp_sender_email: form.querySelector('[name="smtp_sender_email"]').value.trim() || null,
             smtp_sender_name: form.querySelector('[name="smtp_sender_name"]').value.trim() || null,
+        },
+        database: {
+            backup_dir: form.querySelector('[name="database_backup_dir"]').value.trim() || "backups/database",
         },
         system: {
             multiempresa_enabled: form.querySelector('[name="multiempresa_enabled"]').checked,

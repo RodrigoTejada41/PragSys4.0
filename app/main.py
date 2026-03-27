@@ -39,9 +39,11 @@ configure_logging()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    contract_scheduler.start()
+    if settings.contract_scheduler_enabled:
+        contract_scheduler.start()
     yield
-    contract_scheduler.stop()
+    if settings.contract_scheduler_enabled:
+        contract_scheduler.stop()
 
 
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)

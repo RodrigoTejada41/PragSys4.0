@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 from base64 import b64decode
 from pathlib import Path
 
@@ -14,6 +15,7 @@ os.environ["DEFAULT_ADMIN_PASSWORD"] = "syspragas123"
 os.environ["NFE_PROVIDER"] = "focus_nfe"
 os.environ["FOCUS_NFE_API_BASE_URL"] = ""
 os.environ["FOCUS_NFE_API_KEY"] = ""
+os.environ["CONTRACT_SCHEDULER_ENABLED"] = "false"
 
 TEST_PNG_BYTES = b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5W9JcAAAAASUVORK5CYII="
@@ -38,6 +40,7 @@ TEST_MARKERS_BY_FILE = {
     "test_appointments.py": ("integration",),
     "test_auth.py": ("integration",),
     "test_contracts.py": ("integration",),
+    "test_database_admin.py": ("integration",),
     "test_crud_operations.py": ("integration",),
     "test_financial_module.py": ("integration",),
     "test_multitenancy.py": ("integration",),
@@ -67,8 +70,18 @@ def _configure_test_assets() -> None:
 
 
 def _cleanup_file(path: Path) -> None:
-    if path.exists():
-        path.unlink()
+    if not path.exists():
+        return
+    last_error = None
+    for _ in range(50):
+        try:
+            path.unlink()
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.1)
+    if last_error:
+        return
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.1.5] - 2026-03-26
+
+- Painel de `Configuracoes` ganhou a secao `Banco de dados` com acoes de backup, restauracao e limpeza operacional.
+- Backup manual do SQLite passou a ser exportado em `.db` com nome automatico e suporte a salvamento direto no navegador quando disponivel.
+- Restauracao de banco passou a validar o arquivo recebido e criar backup de seguranca antes de substituir a base atual.
+- Limpeza operacional passou a remover OS, agendamentos, logs e historicos com dupla confirmacao, mantendo cadastros e permitindo opcionalmente incluir financeiro.
+- Diretorio padrao para backups de seguranca passou a ser configuravel via settings persistidos.
+- Regressao adicionada para backup, restauracao e limpeza operacional do banco.
+
 ## [4.1.4] - 2026-03-26
 
 - Painel de `Configuracoes` passou a expor bloco administrativo para SMTP, com host, porta, usuario, senha, TLS/SSL e remetente.

@@ -91,6 +91,14 @@ O SysPragas e um sistema operacional para empresas de controle de pragas com foc
 - fluxo de caixa derivado dos pagamentos;
 - status pendente, pago e atrasado.
 
+### Banco de dados
+
+- backup manual do banco SQLite com nome automatico e exportacao estruturada em `.db`;
+- restauracao a partir de backup validado, com criacao obrigatoria de backup de seguranca antes da substituicao;
+- limpeza operacional com dupla confirmacao para remover OS, agendamentos, logs e historicos;
+- opcao de incluir financeiro, recibos, fluxo de caixa e NF-e na limpeza operacional;
+- persistencia do diretorio padrao de backup no painel de configuracoes.
+
 ### Documentos
 
 - ordem de servico em PDF;
