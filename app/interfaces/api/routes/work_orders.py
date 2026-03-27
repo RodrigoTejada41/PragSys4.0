@@ -24,7 +24,7 @@ from app.application.services import (
 )
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/os", tags=["ordens-de-servico"])
 
@@ -35,7 +35,7 @@ router = APIRouter(prefix="/os", tags=["ordens-de-servico"])
 )
 def get_work_orders(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.view"])),
 ) -> List[WorkOrderRead]:
     return list_work_orders(db, current_user=current_user)
 
@@ -47,7 +47,7 @@ def get_work_orders(
 def post_work_order(
     payload: WorkOrderCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.manage"])),
 ) -> WorkOrderRead:
     return create_work_order(db, payload, current_user_id=current_user.id)
 
@@ -60,7 +60,7 @@ def put_work_order(
     work_order_id: int,
     payload: WorkOrderUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.manage"])),
 ) -> WorkOrderRead:
     return update_work_order(db, work_order_id, payload, current_user_id=current_user.id)
 
@@ -72,7 +72,7 @@ def put_work_order(
 def complete_work_order(
     work_order_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.manage"])),
 ) -> WorkOrderRead:
     return mark_work_order_as_completed(db, work_order_id, current_user_id=current_user.id)
 
@@ -84,7 +84,7 @@ def complete_work_order(
 def settle_work_order_route(
     work_order_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["work_orders.manage", "finance.manage"])),
 ) -> WorkOrderRead:
     return settle_work_order(db, work_order_id, current_user_id=current_user.id)
 
@@ -96,7 +96,7 @@ def settle_work_order_route(
 def reopen_work_order_route(
     work_order_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.manage"])),
 ) -> WorkOrderRead:
     return reopen_work_order(db, work_order_id, current_user_id=current_user.id)
 
@@ -109,7 +109,7 @@ def upload_work_order_photos(
     work_order_id: int,
     files: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.manage"])),
 ) -> WorkOrderRead:
     payload = [(file.filename, file.content_type or "", file.file.read()) for file in files]
     return add_work_order_photos(db, work_order_id, payload, current_user=current_user)
@@ -123,7 +123,7 @@ def remove_work_order_photo(
     work_order_id: int,
     photo_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.manage"])),
 ) -> WorkOrderRead:
     return delete_work_order_photo(db, work_order_id, photo_id, current_user=current_user)
 
@@ -134,7 +134,7 @@ def remove_work_order_photo(
 def get_work_order_photo(
     photo_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.view"])),
 ) -> Response:
     filename, content_type, image_data = get_work_order_photo_content(db, photo_id, current_user=current_user)
     headers = {
@@ -150,7 +150,7 @@ def get_work_order_photo(
 def remove_work_order(
     work_order_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.manage", "records.delete"])),
 ) -> Response:
     delete_work_order(db, work_order_id, current_user=current_user)
     return Response(status_code=204)
@@ -162,7 +162,7 @@ def remove_work_order(
 def get_work_order_pdf(
     work_order_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.view"])),
 ) -> Response:
     pdf_bytes = generate_work_order_pdf(db, work_order_id, current_user=current_user)
     headers = {
@@ -177,7 +177,7 @@ def get_work_order_pdf(
 def get_technical_report_pdf(
     work_order_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.view"])),
 ) -> Response:
     pdf_bytes = generate_technical_report_pdf(db, work_order_id, current_user=current_user)
     headers = {
@@ -192,7 +192,7 @@ def get_technical_report_pdf(
 def get_sanitary_certificate_pdf(
     work_order_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.view"])),
 ) -> Response:
     pdf_bytes = generate_sanitary_certificate_pdf(db, work_order_id, current_user=current_user)
     headers = {
@@ -207,7 +207,7 @@ def get_sanitary_certificate_pdf(
 def get_guarantee_certificate_pdf(
     work_order_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.view"])),
 ) -> Response:
     pdf_bytes, filename = generate_guarantee_certificate_pdf_bundle(db, work_order_id, current_user=current_user)
     headers = {
@@ -222,7 +222,7 @@ def get_guarantee_certificate_pdf(
 def get_framed_sanitary_certificate_pdf(
     work_order_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.view"])),
 ) -> Response:
     pdf_bytes = generate_framed_sanitary_certificate_pdf(db, work_order_id, current_user=current_user)
     headers = {

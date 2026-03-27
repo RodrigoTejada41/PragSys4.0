@@ -516,6 +516,103 @@ def _migration_20260327_001_backend_hardening(engine: Engine) -> None:
     _create_index_if_missing(engine, "background_job_runs", "ix_background_job_runs_task_name", ["task_name"])
 
 
+def _migration_20260327_002_multiempresa_estoque(engine: Engine) -> None:
+    _add_column_if_missing(
+        engine,
+        "empresas_prestadoras",
+        "is_active",
+        "is_active BOOLEAN NOT NULL DEFAULT 1",
+    )
+    _add_column_if_missing(
+        engine,
+        "empresas_prestadoras",
+        "is_provider",
+        "is_provider BOOLEAN NOT NULL DEFAULT 1",
+    )
+    _add_column_if_missing(
+        engine,
+        "empresas_prestadoras",
+        "empresa_pai_id",
+        "empresa_pai_id INTEGER",
+    )
+    _add_column_if_missing(
+        engine,
+        "empresas_prestadoras",
+        "compartilha_visualizacao_estoque",
+        "compartilha_visualizacao_estoque BOOLEAN NOT NULL DEFAULT 0",
+    )
+    _create_index_if_missing(engine, "empresas_prestadoras", "ix_empresas_prestadoras_is_active", ["is_active"])
+    _create_index_if_missing(engine, "empresas_prestadoras", "ix_empresas_prestadoras_is_provider", ["is_provider"])
+    _create_index_if_missing(engine, "empresas_prestadoras", "ix_empresas_prestadoras_empresa_pai_id", ["empresa_pai_id"])
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE users
+                SET empresa_prestadora_id = (
+                    SELECT id FROM empresas_prestadoras ORDER BY id LIMIT 1
+                )
+                WHERE empresa_prestadora_id IS NULL
+                """
+            )
+        )
+        connection.execute(text("UPDATE empresas_prestadoras SET is_active = 1 WHERE is_active IS NULL"))
+        connection.execute(text("UPDATE empresas_prestadoras SET is_provider = 1 WHERE is_provider IS NULL"))
+        connection.execute(
+            text(
+                "UPDATE empresas_prestadoras SET compartilha_visualizacao_estoque = 0 "
+                "WHERE compartilha_visualizacao_estoque IS NULL"
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS estoque_movimentacoes (
+                    id INTEGER PRIMARY KEY,
+                    produto_id INTEGER NOT NULL,
+                    empresa_prestadora_id INTEGER NOT NULL,
+                    empresa_relacionada_id INTEGER,
+                    usuario_id INTEGER,
+                    tipo_movimento VARCHAR(30) NOT NULL,
+                    origem VARCHAR(50) NOT NULL DEFAULT 'manual',
+                    motivo VARCHAR(255) NOT NULL,
+                    quantidade NUMERIC NOT NULL,
+                    saldo_anterior NUMERIC NOT NULL DEFAULT 0,
+                    saldo_posterior NUMERIC NOT NULL DEFAULT 0,
+                    referencia VARCHAR(120),
+                    observacoes TEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+    _create_index_if_missing(
+        engine,
+        "estoque_movimentacoes",
+        "ix_estoque_movimentacoes_empresa_data",
+        ["empresa_prestadora_id", "created_at"],
+    )
+    _create_index_if_missing(
+        engine,
+        "estoque_movimentacoes",
+        "ix_estoque_movimentacoes_produto_data",
+        ["produto_id", "created_at"],
+    )
+    _create_index_if_missing(
+        engine,
+        "estoque_movimentacoes",
+        "ix_estoque_movimentacoes_tipo_empresa",
+        ["tipo_movimento", "empresa_prestadora_id"],
+    )
+    _create_index_if_missing(engine, "estoque_movimentacoes", "ix_estoque_movimentacoes_referencia", ["referencia"])
+    _create_index_if_missing(engine, "estoque_movimentacoes", "ix_estoque_movimentacoes_usuario_id", ["usuario_id"])
+
+
+def _migration_20260327_003_user_permissions(engine: Engine) -> None:
+    _add_column_if_missing(engine, "users", "permissions_json", "permissions_json TEXT")
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
@@ -526,6 +623,8 @@ MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260326_003_contract_billing_reporting", _migration_20260326_003_contract_billing_reporting),
     ("20260326_004_work_order_contract_type", _migration_20260326_004_work_order_contract_type),
     ("20260327_001_backend_hardening", _migration_20260327_001_backend_hardening),
+    ("20260327_002_multiempresa_estoque", _migration_20260327_002_multiempresa_estoque),
+    ("20260327_003_user_permissions", _migration_20260327_003_user_permissions),
 ]
 
 

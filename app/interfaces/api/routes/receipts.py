@@ -15,7 +15,7 @@ from app.application.receipt_services import (
 from app.application.schemas import ReceiptCreate, ReceiptPreviewRead, ReceiptRead, ReceiptUpdate
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/recibos", tags=["recibos"])
 
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/recibos", tags=["recibos"])
 )
 def get_receipts(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.view"])),
 ) -> List[ReceiptRead]:
     return list_receipts(db)
 
@@ -38,7 +38,7 @@ def get_receipts(
 def get_receipt_by_id(
     receipt_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.view"])),
 ) -> ReceiptRead:
     return get_receipt(db, receipt_id)
 
@@ -50,7 +50,7 @@ def get_receipt_by_id(
 def post_receipt_preview(
     payload: ReceiptCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.manage"])),
 ) -> ReceiptPreviewRead:
     return preview_receipt(db, payload)
 
@@ -63,7 +63,7 @@ def post_receipt_preview(
 def post_receipt(
     payload: ReceiptCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.manage"])),
 ) -> ReceiptRead:
     return create_receipt(db, payload, current_user_id=current_user.id)
 
@@ -76,7 +76,7 @@ def put_receipt(
     receipt_id: int,
     payload: ReceiptUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.manage"])),
 ) -> ReceiptRead:
     return update_receipt(db, receipt_id, payload, current_user_id=current_user.id)
 
@@ -88,7 +88,7 @@ def put_receipt(
 def remove_receipt(
     receipt_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.manage", "records.delete"])),
 ) -> Response:
     delete_receipt(db, receipt_id, current_user_id=current_user.id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -101,7 +101,7 @@ def get_receipt_pdf(
     receipt_id: int,
     download: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.view"])),
 ) -> Response:
     pdf_bytes = generate_receipt_pdf(db, receipt_id, current_user_id=current_user.id)
     disposition = "attachment" if download else "inline"

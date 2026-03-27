@@ -6,6 +6,8 @@ const state = {
     contractDashboard: null,
     contractReport: null,
     products: [],
+    stockPositions: [],
+    stockMovements: [],
     nfeInvoices: [],
     simplesConfigs: [],
     pests: [],
@@ -108,6 +110,95 @@ const state = {
         contractReportDueEndDate: "",
         contractReportBillingActive: "todos",
         simplesReferenceMonth: new Date().toISOString().slice(0, 7),
+    },
+};
+
+const permissionCatalog = {
+    clientes: [
+        ["customers.view", "Ver clientes"],
+        ["customers.edit", "Criar e editar clientes"],
+    ],
+    contratos: [
+        ["contracts.view", "Ver contratos"],
+        ["contracts.manage", "Criar e editar contratos"],
+    ],
+    estoque: [
+        ["stock.view", "Ver estoque"],
+        ["stock.manage", "Cadastrar produtos"],
+        ["stock.move", "Movimentar estoque"],
+    ],
+    financeiro: [
+        ["finance.view", "Ver financeiro"],
+        ["finance.manage", "Lancar e editar financeiro"],
+    ],
+    operacao: [
+        ["work_orders.view", "Ver ordens de servico"],
+        ["work_orders.manage", "Gerenciar ordens de servico"],
+        ["appointments.view", "Ver agenda"],
+        ["appointments.manage", "Gerenciar agenda"],
+    ],
+    sistema: [
+        ["settings.view", "Ver configuracoes"],
+        ["settings.manage", "Alterar configuracoes"],
+        ["users.manage", "Gerenciar usuarios"],
+        ["records.delete", "Excluir registros"],
+        ["provider_companies.manage", "Gerenciar empresas prestadoras"],
+        ["licenses.manage", "Gerenciar licencas"],
+        ["fiscal.view", "Ver fiscal e NF-e"],
+        ["fiscal.manage", "Emitir e gerenciar NF-e"],
+        ["integrations.manage", "Gerenciar integracoes"],
+    ],
+};
+
+const defaultPermissionsByRole = {
+    master: Object.fromEntries(Object.values(permissionCatalog).flat().map(([key]) => [key, true])),
+    admin: {
+        "customers.view": true,
+        "customers.edit": true,
+        "contracts.view": true,
+        "contracts.manage": true,
+        "stock.view": true,
+        "stock.manage": true,
+        "stock.move": true,
+        "finance.view": true,
+        "finance.manage": true,
+        "work_orders.view": true,
+        "work_orders.manage": true,
+        "appointments.view": true,
+        "appointments.manage": true,
+        "settings.view": true,
+        "settings.manage": true,
+        "users.manage": true,
+        "records.delete": true,
+        "provider_companies.manage": false,
+        "licenses.manage": false,
+        "fiscal.view": true,
+        "fiscal.manage": true,
+        "integrations.manage": true,
+    },
+    operador: {
+        "customers.view": true,
+        "customers.edit": false,
+        "contracts.view": true,
+        "contracts.manage": false,
+        "stock.view": true,
+        "stock.manage": false,
+        "stock.move": false,
+        "finance.view": false,
+        "finance.manage": false,
+        "work_orders.view": true,
+        "work_orders.manage": true,
+        "appointments.view": true,
+        "appointments.manage": true,
+        "settings.view": false,
+        "settings.manage": false,
+        "users.manage": false,
+        "records.delete": false,
+        "provider_companies.manage": false,
+        "licenses.manage": false,
+        "fiscal.view": true,
+        "fiscal.manage": false,
+        "integrations.manage": false,
     },
 };
 
@@ -601,24 +692,40 @@ function logout() {
 
 async function loadAllData() {
     setSyncStatus("Sincronizando...");
+    const stockManagerOnly = state.user?.role === "gestor_estoque";
     const basePromises = [
-        apiFetch("/api/v1/clientes"),
-        apiFetch("/api/v1/contratos"),
-        apiFetch("/api/v1/contratos/dashboard"),
+        stockManagerOnly ? Promise.resolve([]) : apiFetch("/api/v1/clientes"),
+        stockManagerOnly ? Promise.resolve([]) : apiFetch("/api/v1/contratos"),
+        stockManagerOnly ? Promise.resolve(null) : apiFetch("/api/v1/contratos/dashboard"),
         apiFetch("/api/v1/produtos"),
-        apiFetch("/api/v1/pragas"),
-        apiFetch("/api/v1/tecnicos"),
-        apiFetch("/api/v1/os"),
-        apiFetch("/api/v1/agendamentos"),
-        apiFetch("/api/v1/agendamentos/dashboard"),
-        apiFetch("/api/v1/whatsapp/status").catch(() => ({
+        apiFetch("/api/v1/produtos/estoque"),
+        apiFetch("/api/v1/produtos/estoque/movimentacoes"),
+        stockManagerOnly ? Promise.resolve([]) : apiFetch("/api/v1/pragas"),
+        stockManagerOnly ? Promise.resolve([]) : apiFetch("/api/v1/tecnicos"),
+        stockManagerOnly ? Promise.resolve([]) : apiFetch("/api/v1/os"),
+        stockManagerOnly ? Promise.resolve([]) : apiFetch("/api/v1/agendamentos"),
+        stockManagerOnly ? Promise.resolve(null) : apiFetch("/api/v1/agendamentos/dashboard"),
+        stockManagerOnly ? Promise.resolve({
+            status: "desconectado",
+            provider: "custom",
+            instance_name: null,
+            error_message: null,
+            configured: false,
+        }) : apiFetch("/api/v1/whatsapp/status").catch(() => ({
             status: "erro",
             provider: "custom",
             instance_name: null,
             error_message: "Falha ao consultar o status do WhatsApp.",
             configured: false,
         })),
-        apiFetch("/api/v1/google-calendar/status").catch(() => ({
+        stockManagerOnly ? Promise.resolve({
+            status: "desconectado",
+            message: null,
+            company_id: 0,
+            company_name: "Nao identificado",
+            account_email: null,
+            calendar_id: null,
+        }) : apiFetch("/api/v1/google-calendar/status").catch(() => ({
             status: "erro",
             message: "Falha ao consultar a conexao com Google Agenda.",
             company_id: 0,
@@ -627,8 +734,8 @@ async function loadAllData() {
             calendar_id: null,
         })),
     ];
-    const canAccessFinance = state.user?.role === "master" || state.user?.role === "admin";
-    const canAccessSettings = canAccessFinance;
+    const canAccessFinance = hasPermission("finance.view");
+    const canAccessSettings = hasPermission("settings.view");
     if (canAccessFinance) {
         basePromises.push(apiFetch("/api/v1/financeiro"));
         basePromises.push(apiFetch("/api/v1/financeiro/caixa"));
@@ -646,24 +753,26 @@ async function loadAllData() {
         basePromises.push(apiFetch("/api/v1/whatsapp/configuracao"));
     }
     const results = await Promise.all(basePromises);
-    const [customers, contracts, contractDashboard, products, pests, technicians, workOrders, appointments, appointmentDashboard, whatsappStatus, googleStatus] = results;
-    const finance = canAccessFinance ? results[11] : [];
-    const cashLedger = canAccessFinance ? results[12] : [];
-    const financeDashboard = canAccessFinance ? results[13] : null;
-    const contractReport = canAccessFinance ? results[14] : null;
-    const receipts = canAccessFinance ? results[15] : [];
-    const nfeInvoices = canAccessFinance ? results[16] : [];
-    const sefazReadiness = canAccessFinance ? results[17] : null;
-    const simplesConfigs = canAccessFinance ? results[18] : [];
-    const cashFlowSummary = canAccessFinance ? results[19] : null;
-    const simplesSummary = canAccessFinance ? results[20] : null;
-    const settingsState = canAccessSettings ? results[21] : null;
-    const whatsappConfig = canAccessSettings ? results[22] : null;
+    const [customers, contracts, contractDashboard, products, stockPositions, stockMovements, pests, technicians, workOrders, appointments, appointmentDashboard, whatsappStatus, googleStatus] = results;
+    const finance = canAccessFinance ? results[13] : [];
+    const cashLedger = canAccessFinance ? results[14] : [];
+    const financeDashboard = canAccessFinance ? results[15] : null;
+    const contractReport = canAccessFinance ? results[16] : null;
+    const receipts = canAccessFinance ? results[17] : [];
+    const nfeInvoices = canAccessFinance ? results[18] : [];
+    const sefazReadiness = canAccessFinance ? results[19] : null;
+    const simplesConfigs = canAccessFinance ? results[20] : [];
+    const cashFlowSummary = canAccessFinance ? results[21] : null;
+    const simplesSummary = canAccessFinance ? results[22] : null;
+    const settingsState = canAccessSettings ? results[23] : null;
+    const whatsappConfig = canAccessSettings ? results[24] : null;
 
     state.customers = customers;
     state.contracts = contracts;
     state.contractDashboard = contractDashboard;
     state.products = products;
+    state.stockPositions = stockPositions;
+    state.stockMovements = stockMovements;
     state.pests = pests;
     state.technicians = technicians;
     state.workOrders = workOrders;
@@ -684,15 +793,23 @@ async function loadAllData() {
     state.settings = settingsState;
     state.integrations.whatsappConfig = whatsappConfig;
 
-    if (state.user?.role === "master") {
+    if (hasPermission("users.manage")) {
         const [users, licenses, providerCompanies] = await Promise.all([
             apiFetch("/api/v1/usuarios"),
-            apiFetch("/api/v1/licencas"),
-            apiFetch("/api/v1/empresas-prestadoras"),
+            hasPermission("licenses.manage") ? apiFetch("/api/v1/licencas") : Promise.resolve([]),
+            hasPermission("provider_companies.manage") ? apiFetch("/api/v1/empresas-prestadoras") : Promise.resolve([]),
         ]);
         state.users = users;
         state.licenses = licenses;
-        state.providerCompanies = providerCompanies;
+        state.providerCompanies = hasPermission("provider_companies.manage")
+            ? providerCompanies
+            : (state.user?.empresa_prestadora_id
+                ? [{
+                    id: state.user.empresa_prestadora_id,
+                    razao_social: state.user.empresa_prestadora_nome || "Minha empresa",
+                    nome_fantasia: state.user.empresa_prestadora_nome || "Minha empresa",
+                }]
+                : []);
     } else {
         state.users = [];
         state.licenses = [];
@@ -1005,7 +1122,7 @@ function renderSettings() {
         return;
     }
 
-    const canAccessSettings = state.user?.role === "master" || state.user?.role === "admin";
+    const canAccessSettings = hasPermission("settings.view");
     if (!canAccessSettings || !state.settings) {
         renderSettingsLoadingState();
         return;
@@ -1375,16 +1492,87 @@ function renderAll() {
 
 function toggleMasterSections() {
     const isMaster = state.user?.role === "master";
-    const canAccessAdminSettings = state.user?.role === "master" || state.user?.role === "admin";
+    const canAccessAdminSettings = hasPermission("settings.view") || hasPermission("users.manage");
     document.querySelectorAll(".master-only").forEach((node) => {
         node.classList.toggle("hidden", !isMaster);
     });
-    const canAccessFinance = state.user?.role === "master" || state.user?.role === "admin";
+    const canAccessFinance = hasPermission("finance.view");
     document.querySelectorAll(".finance-only").forEach((node) => {
         node.classList.toggle("hidden", !canAccessFinance);
     });
     document.querySelectorAll(".admin-only").forEach((node) => {
         node.classList.toggle("hidden", !canAccessAdminSettings);
+    });
+}
+
+function getEffectivePermissions(role, permissions = null) {
+    const defaults = { ...(defaultPermissionsByRole[role] || defaultPermissionsByRole.operador) };
+    if (role === "master") {
+        Object.keys(defaults).forEach((key) => {
+            defaults[key] = true;
+        });
+        return defaults;
+    }
+    if (!permissions) {
+        return defaults;
+    }
+    Object.entries(permissions).forEach(([key, value]) => {
+        if (Object.prototype.hasOwnProperty.call(defaults, key)) {
+            defaults[key] = Boolean(value);
+        }
+    });
+    return defaults;
+}
+
+function hasPermission(permissionKey, user = state.user) {
+    if (!user) {
+        return false;
+    }
+    const permissions = getEffectivePermissions(user.role, user.permissions || {});
+    return Boolean(permissions[permissionKey]);
+}
+
+function renderUserPermissionGroups() {
+    return Object.entries(permissionCatalog)
+        .map(([category, permissions]) => `
+            <section class="permission-group">
+                <div class="section-heading compact">
+                    <h4>${escapeHtml(category.charAt(0).toUpperCase() + category.slice(1))}</h4>
+                </div>
+                <div class="permission-checklist">
+                    ${permissions
+                        .map(([key, label]) => `
+                            <label class="checkbox-field">
+                                <input type="checkbox" name="permission_${key}">
+                                <span>${escapeHtml(label)}</span>
+                            </label>
+                        `)
+                        .join("")}
+                </div>
+            </section>
+        `)
+        .join("");
+}
+
+function collectUserPermissions(form) {
+    const permissions = {};
+    Object.values(permissionCatalog).flat().forEach(([key]) => {
+        permissions[key] = Boolean(form.querySelector(`[name="permission_${CSS.escape(key)}"]`)?.checked);
+    });
+    return permissions;
+}
+
+function applyUserRolePermissionPreset(role, form = document.getElementById("user-form")) {
+    if (!form) {
+        return;
+    }
+    const permissions = getEffectivePermissions(role);
+    Object.entries(permissions).forEach(([key, value]) => {
+        const field = form.querySelector(`[name="permission_${CSS.escape(key)}"]`);
+        if (field) {
+            field.checked = Boolean(value);
+            field.disabled = role === "master";
+        }
     });
 }
 
@@ -1533,6 +1721,27 @@ function buildForms() {
                 <button type="button" class="btn btn-default ghost-button" id="product-csv-import-button">Importar CSV</button>
             </div>
         </div>
+        <div class="section-heading">
+            <h3>Movimentacao manual de estoque</h3>
+            <p>Registre entradas, saídas e acompanhe o histórico sem misturar saldos entre empresas.</p>
+        </div>
+        <form id="stock-movement-form" class="form-grid">
+            <label><span>Produto</span><select name="produto_id" required><option value="">Selecione um produto</option></select></label>
+            <label><span>Tipo</span>
+                <select name="tipo_movimento">
+                    <option value="entrada">Entrada</option>
+                    <option value="saida">Saida</option>
+                </select>
+            </label>
+            <label><span>Quantidade</span><input name="quantidade" type="number" min="0.01" step="0.01" required></label>
+            <label><span>Motivo</span><input name="motivo" required placeholder="Ex.: Compra, ajuste, consumo interno"></label>
+            <label><span>Referencia</span><input name="referencia" placeholder="NF, lote, OS, ajuste..."></label>
+            <label class="full-width"><span>Observacoes</span><textarea name="observacoes" rows="2"></textarea></label>
+            <div class="inline-actions">
+                <button type="submit" class="btn btn-default ghost-button">Registrar movimentacao</button>
+            </div>
+        </form>
+        <div id="stock-movement-history" class="inline-details-panel"></div>
         ${formActionHtml("product", "Salvar produto", "Cancelar edicao")}
     `;
 
@@ -1977,6 +2186,25 @@ function buildForms() {
                 <label><span>Bairro</span><input name="bairro"></label>
                 <label><span>Cidade</span><input name="cidade"></label>
                 <label><span>Estado</span><input name="estado" maxlength="2"></label>
+                <label><span>Status</span>
+                    <select name="is_active">
+                        <option value="true">Ativa</option>
+                        <option value="false">Inativa</option>
+                    </select>
+                </label>
+                <label><span>Tipo</span>
+                    <select name="is_provider">
+                        <option value="true">Empresa prestadora</option>
+                        <option value="false">Apenas unidade de apoio</option>
+                    </select>
+                </label>
+                <label><span>Empresa matriz</span><select name="empresa_pai_id"><option value="">Sem matriz</option></select></label>
+                <label><span>Compartilhar visao de estoque</span>
+                    <select name="compartilha_visualizacao_estoque">
+                        <option value="false">Nao</option>
+                        <option value="true">Sim</option>
+                    </select>
+                </label>
             </div>
         </section>
         <section class="company-tab-panel" data-company-tab-panel="usuarios">
@@ -2028,6 +2256,7 @@ function buildForms() {
             <label><span>Perfil</span>
                 <select name="role">
                     <option value="operador">OPERADOR / TECNICO</option>
+                    <option value="gestor_estoque">GESTOR DE ESTOQUE</option>
                     <option value="admin">ADMIN</option>
                     <option value="master">MASTER</option>
                 </select>
@@ -2038,8 +2267,13 @@ function buildForms() {
                     <option value="false">Inativo</option>
                 </select>
             </label>
-            <label class="full-width"><span>Empresa prestadora</span><select name="empresa_prestadora_id"><option value="">Selecione uma empresa</option></select></label>
+            <label class="full-width"><span>Empresa prestadora</span><select name="empresa_prestadora_id" required><option value="">Selecione uma empresa</option></select></label>
         </div>
+        <div class="section-heading">
+            <h3>Permissoes do usuario</h3>
+            <p>O nivel define o padrão inicial. Ajuste os acessos finos abaixo.</p>
+        </div>
+        <div id="user-permissions-panel">${renderUserPermissionGroups()}</div>
         ${formActionHtml("user", "Salvar usuario", "Cancelar edicao")}
     `;
 
@@ -2065,6 +2299,7 @@ function buildForms() {
     bindCrudForms();
     bindProductXmlImport();
     bindProductCsvImport();
+    bindStockMovementForm();
     bindCustomerAutoLookup();
     bindNfeFormHelpers();
     bindProductFiscalControls();
@@ -2916,6 +3151,10 @@ function bindCrudForms() {
 
     bindForm("provider-company-form", "providerCompany", async (form) => {
         const payload = objectFromForm(form);
+        payload.is_active = payload.is_active === "true";
+        payload.is_provider = payload.is_provider === "true";
+        payload.compartilha_visualizacao_estoque = payload.compartilha_visualizacao_estoque === "true";
+        payload.empresa_pai_id = payload.empresa_pai_id ? Number(payload.empresa_pai_id) : null;
         payload.usuarios_vinculados_ids = Array.from(form.querySelector('[name="usuarios_vinculados_ids"]').selectedOptions)
             .map((option) => Number(option.value));
         const id = state.editing.providerCompany;
@@ -2947,11 +3186,24 @@ function bindCrudForms() {
         const payload = objectFromForm(form);
         payload.is_active = payload.is_active === "true";
         payload.empresa_prestadora_id = payload.empresa_prestadora_id ? Number(payload.empresa_prestadora_id) : null;
+        payload.permissions = collectUserPermissions(form);
+        if (!payload.empresa_prestadora_id) {
+            toast("Selecione a empresa prestadora antes de salvar o usuario.");
+            return;
+        }
         if (state.editing.user && !payload.password) {
             delete payload.password;
         }
         await submitCrud("user", "/api/v1/usuarios", payload);
     });
+
+    const userRoleField = document.querySelector('#user-form [name="role"]');
+    if (userRoleField) {
+        userRoleField.addEventListener("change", (event) => {
+            applyUserRolePermissionPreset(event.currentTarget.value);
+        });
+        applyUserRolePermissionPreset(userRoleField.value);
+    }
 
     bindForm("license-form", "license", async (form) => {
         const payload = objectFromForm(form);
@@ -3668,6 +3920,21 @@ function hydrateDynamicControls() {
     setSelectOptions(
         document.querySelector('#license-form [name="empresa_prestadora_id"]'),
         state.providerCompanies.map((item) => ({ ...item, display_name: item.nome_fantasia || item.razao_social })),
+        "id",
+        "display_name",
+    );
+    setSelectOptions(
+        document.querySelector('#provider-company-form [name="empresa_pai_id"]'),
+        state.providerCompanies.map((item) => ({ ...item, display_name: item.nome_fantasia || item.razao_social })),
+        "id",
+        "display_name",
+    );
+    setSelectOptions(
+        document.querySelector('#stock-movement-form [name="produto_id"]'),
+        state.products.map((item) => ({
+            ...item,
+            display_name: `${item.nome} | ${item.empresa_prestadora_nome || "Sem empresa"} | saldo ${item.estoque_atual}`,
+        })),
         "id",
         "display_name",
     );
@@ -5850,6 +6117,31 @@ function bindCustomerContractSelectors() {
     });
 }
 
+function bindStockMovementForm() {
+    const form = document.getElementById("stock-movement-form");
+    if (!form) {
+        return;
+    }
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = objectFromForm(form);
+        if (!payload.produto_id) {
+            toast("Selecione um produto para movimentar o estoque.");
+            return;
+        }
+        payload.produto_id = Number(payload.produto_id);
+        payload.quantidade = String(payload.quantidade || "").trim();
+        payload.referencia = payload.referencia || null;
+        payload.observacoes = payload.observacoes || null;
+        await apiFetch("/api/v1/produtos/estoque/movimentacoes", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        });
+        form.reset();
+        await afterMutation("Movimentacao de estoque registrada com sucesso.");
+    });
+}
+
 function currentContractCustomer() {
     return getEntityByKind("customer", Number(state.contractWorkspace.customerId || 0));
 }
@@ -5989,9 +6281,10 @@ function bindContractFileActions() {
 function renderProducts() {
     setTableContent(
         "products-table",
-        ["Produto", "NCM", "Tributacao", "Estoque", "Minimo", "Registro", "Acoes"],
+        ["Produto", "Empresa", "NCM", "Tributacao", "Estoque", "Minimo", "Registro", "Acoes"],
         state.products.map((item) => [
             `<div>${escapeHtml(item.nome)}<div class="origin-note">${escapeHtml(item.principio_ativo)}</div></div>`,
+            escapeHtml(item.empresa_prestadora_nome || "-"),
             item.ncm ? `<div>${escapeHtml(item.ncm)}<div class="origin-note">${escapeHtml(item.ncm_descricao || "")}</div></div>` : "-",
             `<div>ICMS ${escapeHtml(String(item.aliquota_icms || 0))}%<div class="origin-note">IPI ${escapeHtml(String(item.aliquota_ipi || 0))}% | PIS ${escapeHtml(String(item.aliquota_pis || 0))}% | COFINS ${escapeHtml(String(item.aliquota_cofins || 0))}%</div></div>`,
             `${item.estoque_atual}`,
@@ -6000,9 +6293,39 @@ function renderProducts() {
             actionButtons("product", item.id),
         ]),
         "Nenhum produto cadastrado.",
-        { nonSortableTargets: [6] },
+        { nonSortableTargets: [7] },
     );
+    renderStockMovementHistory();
     bindEntityActions("product");
+}
+
+function renderStockMovementHistory() {
+    const target = document.getElementById("stock-movement-history");
+    if (!target) {
+        return;
+    }
+    const recentItems = state.stockMovements.slice(0, 10);
+    if (!recentItems.length) {
+        target.innerHTML = `<div class="empty-state">Nenhuma movimentacao de estoque registrada ainda.</div>`;
+        return;
+    }
+    target.innerHTML = `
+        <div class="section-heading compact">
+            <h4>Historico recente de estoque</h4>
+            <p>Visualizacao por empresa/unidade, sem consolidar saldos.</p>
+        </div>
+        <div class="stack-list">
+            ${recentItems
+                .map((item) => `
+                    <article class="list-card">
+                        <strong>${escapeHtml(item.produto_nome)}</strong>
+                        <div class="origin-note">${escapeHtml(item.empresa_prestadora_nome || "-")} | ${escapeHtml(item.tipo_movimento)} | saldo ${escapeHtml(String(item.saldo_posterior))}</div>
+                        <div>${escapeHtml(item.motivo)}</div>
+                    </article>
+                `)
+                .join("")}
+        </div>
+    `;
 }
 
 function renderPests() {
@@ -6577,31 +6900,42 @@ function printAppointmentSummary(appointmentId) {
                 <meta charset="utf-8">
                 <title>Agendamento ${appointment.id}</title>
                 <style>
-                    body { font-family: "Segoe UI", sans-serif; margin: 24px; color: #1e2a22; }
-                    h1 { margin-bottom: 6px; }
-                    .meta { color: #5d675f; margin-bottom: 18px; }
-                    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; }
-                    .card { border: 1px solid #d7ded1; border-radius: 12px; padding: 12px 14px; }
-                    .card span { display: block; color: #5d675f; font-size: 12px; margin-bottom: 4px; }
-                    .note { margin-top: 18px; white-space: pre-wrap; }
-                    @media print { body { margin: 12mm; } }
+                    body { font-family: "Trebuchet MS", "Segoe UI", sans-serif; margin: 0; color: #1c2922; background: #eff3ec; }
+                    .print-shell { display: grid; gap: 20px; padding: 24px; }
+                    .print-header { padding: 22px 24px; border: 1px solid rgba(28, 67, 51, 0.08); border-radius: 22px; background: linear-gradient(135deg, rgba(220, 239, 215, 0.72), rgba(255, 255, 255, 0.96)); }
+                    .eyebrow { margin: 0 0 8px; color: #617065; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+                    h1 { margin: 0 0 6px; font-family: Georgia, "Times New Roman", serif; }
+                    .meta { color: #617065; margin: 0; line-height: 1.5; }
+                    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
+                    .card { border: 1px solid #d7dfd3; border-radius: 18px; padding: 14px 16px; background: rgba(255, 255, 255, 0.96); }
+                    .card span { display: block; color: #617065; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px; }
+                    .note { display: grid; gap: 10px; padding: 18px 20px; border: 1px solid #d7dfd3; border-radius: 18px; background: rgba(255, 255, 255, 0.96); white-space: pre-wrap; }
+                    .note strong { font-family: Georgia, "Times New Roman", serif; }
+                    .note p { margin: 0; line-height: 1.65; }
+                    @media (max-width: 640px) { .print-shell { padding: 16px; } .grid { grid-template-columns: 1fr; } }
+                    @media print { body { background: #fff; } .print-shell { padding: 0; } }
                 </style>
             </head>
             <body>
-                <h1>Agendamento #${appointment.id}</h1>
-                <p class="meta">${escapeHtml(appointment.cliente_nome)} | ${escapeHtml(appointment.tipo_servico)}</p>
-                <div class="grid">
-                    <div class="card"><span>Data</span><strong>${escapeHtml(formatDate(appointment.data_agendamento))}</strong></div>
-                    <div class="card"><span>Hora</span><strong>${escapeHtml(formatTime(appointment.hora_agendamento))}</strong></div>
-                    <div class="card"><span>Tecnico</span><strong>${escapeHtml(appointment.tecnico_nome || "Nao definido")}</strong></div>
-                    <div class="card"><span>Status</span><strong>${escapeHtml(appointment.status.replaceAll("_", " "))}</strong></div>
-                    <div class="card"><span>Telefone</span><strong>${escapeHtml(appointment.telefone || "-")}</strong></div>
-                    <div class="card"><span>OS vinculada</span><strong>${escapeHtml(appointment.os_numero || "Sem vinculacao")}</strong></div>
-                    <div class="card" style="grid-column: 1 / -1;"><span>Endereco</span><strong>${escapeHtml(appointment.endereco_completo || "-")}</strong></div>
-                </div>
-                <div class="note">
-                    <strong>Observacoes</strong>
-                    <p>${escapeHtml(appointment.observacoes || appointment.observacoes_internas || "Sem observacoes adicionais.")}</p>
+                <div class="print-shell">
+                    <section class="print-header">
+                        <p class="eyebrow">Resumo de agendamento</p>
+                        <h1>Agendamento #${appointment.id}</h1>
+                        <p class="meta">${escapeHtml(appointment.cliente_nome)} | ${escapeHtml(appointment.tipo_servico)}</p>
+                    </section>
+                    <div class="grid">
+                        <div class="card"><span>Data</span><strong>${escapeHtml(formatDate(appointment.data_agendamento))}</strong></div>
+                        <div class="card"><span>Hora</span><strong>${escapeHtml(formatTime(appointment.hora_agendamento))}</strong></div>
+                        <div class="card"><span>Tecnico</span><strong>${escapeHtml(appointment.tecnico_nome || "Nao definido")}</strong></div>
+                        <div class="card"><span>Status</span><strong>${escapeHtml(appointment.status.replaceAll("_", " "))}</strong></div>
+                        <div class="card"><span>Telefone</span><strong>${escapeHtml(appointment.telefone || "-")}</strong></div>
+                        <div class="card"><span>OS vinculada</span><strong>${escapeHtml(appointment.os_numero || "Sem vinculacao")}</strong></div>
+                        <div class="card" style="grid-column: 1 / -1;"><span>Endereco</span><strong>${escapeHtml(appointment.endereco_completo || "-")}</strong></div>
+                    </div>
+                    <div class="note">
+                        <strong>Observacoes</strong>
+                        <p>${escapeHtml(appointment.observacoes || appointment.observacoes_internas || "Sem observacoes adicionais.")}</p>
+                    </div>
                 </div>
                 <script>
                     window.addEventListener("load", () => {
@@ -6717,13 +7051,14 @@ function renderPreviewWindowState(previewWindow, title, options = {}) {
                 <meta charset="utf-8">
                 <title>${escapeHtml(title)}</title>
                 <style>
-                    body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #eef2ea; color: #1e2a22; }
-                    .preview-shell { display: grid; gap: 12px; min-height: 100vh; padding: 16px; }
-                    .preview-note { padding: 12px 14px; background: #ffffff; border-bottom: 1px solid #d7ded1; border-radius: 14px; }
-                    .preview-state { display: grid; place-items: center; min-height: calc(100vh - 120px); padding: 24px; text-align: center; border-radius: 18px; background: rgba(255, 255, 255, 0.92); border: 1px solid #d7ded1; }
+                    body { margin: 0; font-family: 'Trebuchet MS', 'Segoe UI', sans-serif; background: #eff3ec; color: #1c2922; }
+                    .preview-shell { display: grid; gap: 14px; min-height: 100vh; padding: 18px; background: radial-gradient(circle at top left, rgba(41, 95, 73, 0.08), transparent 26%), linear-gradient(180deg, #f7f9f4 0%, #eff3ec 100%); }
+                    .preview-note { padding: 14px 16px; border: 1px solid #d7dfd3; background: linear-gradient(135deg, rgba(220, 239, 215, 0.72), rgba(255,255,255,0.96)); border-radius: 18px; color: #1c4333; font-weight: 700; }
+                    .preview-state { display: grid; place-items: center; min-height: calc(100vh - 128px); padding: 28px; text-align: center; border-radius: 20px; background: rgba(255, 255, 255, 0.95); border: 1px solid #d7dfd3; box-shadow: 0 18px 50px rgba(20, 36, 24, 0.08); }
                     .preview-state-loading { color: #2d6a4f; font-weight: 700; }
                     .preview-state-error { color: #b14534; font-weight: 700; }
-                    iframe { width: 100%; height: calc(100vh - 86px); border: 0; background: #fff; border-radius: 18px; }
+                    iframe { width: 100%; height: calc(100vh - 94px); border: 0; background: #fff; border-radius: 20px; box-shadow: 0 18px 50px rgba(20, 36, 24, 0.08); }
+                    @media (max-width: 640px) { .preview-shell { padding: 12px; } .preview-note { border-radius: 16px; } .preview-state, iframe { border-radius: 16px; } }
                 </style>
             </head>
             <body>
@@ -7501,22 +7836,23 @@ function renderProviderCompanies() {
     if (!target) {
         return;
     }
-    if (state.user?.role !== "master") {
-        target.innerHTML = `<div class="empty-state">Disponivel apenas para o perfil MASTER.</div>`;
+    if (!hasPermission("provider_companies.manage")) {
+        target.innerHTML = `<div class="empty-state">Disponivel apenas para usuarios com permissao de empresas prestadoras.</div>`;
         return;
     }
     setTableContent(
         "provider-companies-table",
-        ["Empresa", "CNPJ", "Cidade", "Usuarios vinculados", "Acoes"],
+        ["Empresa", "Hierarquia", "CNPJ", "Cidade", "Usuarios vinculados", "Acoes"],
         state.providerCompanies.map((item) => [
             item.nome_fantasia ? `${item.razao_social} (${item.nome_fantasia})` : item.razao_social,
+            item.empresa_pai_nome ? `Filial de ${item.empresa_pai_nome}` : "Matriz/independente",
             item.cnpj,
             item.cidade ? `${item.cidade}/${item.estado || ""}` : "-",
             item.usuarios_vinculados_nomes?.length ? item.usuarios_vinculados_nomes.join(", ") : "Nenhum usuario",
             actionButtons("providerCompany", item.id),
         ]),
         "Nenhuma empresa prestadora cadastrada.",
-        { nonSortableTargets: [4] },
+        { nonSortableTargets: [5] },
     );
     bindEntityActions("providerCompany");
 }
@@ -7526,8 +7862,8 @@ function renderUsers() {
     if (!target) {
         return;
     }
-    if (state.user?.role !== "master") {
-        target.innerHTML = `<div class="empty-state">Disponivel apenas para o perfil MASTER.</div>`;
+    if (!hasPermission("users.manage")) {
+        target.innerHTML = `<div class="empty-state">Disponivel apenas para usuarios com permissao de gestao de usuarios.</div>`;
         return;
     }
     setTableContent(
@@ -7536,7 +7872,7 @@ function renderUsers() {
         state.users.map((item) => [
             item.nome,
             item.username,
-            item.empresa_prestadora_nome || "Global",
+            item.empresa_prestadora_nome || "-",
             item.role,
             badge(item.is_active ? "Ativo" : "Inativo", item.is_active ? "" : "warn"),
             actionButtons("user", item.id),
@@ -7552,8 +7888,8 @@ function renderLicenses() {
     if (!target) {
         return;
     }
-    if (state.user?.role !== "master") {
-        target.innerHTML = `<div class="empty-state">Disponivel apenas para o perfil MASTER.</div>`;
+    if (!hasPermission("licenses.manage")) {
+        target.innerHTML = `<div class="empty-state">Disponivel apenas para usuarios com permissao de licencas.</div>`;
         return;
     }
     setTableContent(
@@ -7784,7 +8120,7 @@ function setText(id, value) {
 }
 
 function userCanAccessFinance() {
-    return state.user?.role === "master" || state.user?.role === "admin";
+    return hasPermission("finance.view");
 }
 
 function actionButton(className, label, dataAttributes = "") {
@@ -7975,7 +8311,13 @@ function startEditing(kind, id) {
         return;
     }
     if (kind === "providerCompany") {
-        fillForm(form, item);
+        fillForm(form, {
+            ...item,
+            is_active: String(item.is_active),
+            is_provider: String(item.is_provider),
+            compartilha_visualizacao_estoque: String(item.compartilha_visualizacao_estoque),
+            empresa_pai_id: item.empresa_pai_id || "",
+        });
         Array.from(form.querySelector('[name="usuarios_vinculados_ids"]').options).forEach((option) => {
             option.selected = (item.usuarios_vinculados_ids || []).includes(Number(option.value));
         });
@@ -8024,6 +8366,14 @@ function startEditing(kind, id) {
             empresa_prestadora_id: item.empresa_prestadora_id || "",
             is_active: String(item.is_active),
             password: "",
+        });
+        const permissions = getEffectivePermissions(item.role, item.permissions || {});
+        Object.entries(permissions).forEach(([key, value]) => {
+            const field = form.querySelector(`[name="permission_${CSS.escape(key)}"]`);
+            if (field) {
+                field.checked = Boolean(value);
+                field.disabled = item.role === "master";
+            }
         });
         form.querySelector('[name="password"]').required = false;
         return;
@@ -8109,6 +8459,10 @@ function resetFormMode(kind) {
     }
     if (kind === "user") {
         form.querySelector('[name="password"]').required = true;
+        const roleField = form.querySelector('[name="role"]');
+        if (roleField) {
+            applyUserRolePermissionPreset(roleField.value, form);
+        }
     }
     if (kind === "product") {
         syncProductTaxFields();

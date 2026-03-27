@@ -18,7 +18,7 @@ from app.application.schemas import (
 from app.application.settings_service import get_system_settings, update_system_settings
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 @router.get("", response_model=SystemSettingsRead)
 def get_settings_view(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.view"])),
 ) -> SystemSettingsRead:
     return get_system_settings(db)
 
@@ -35,7 +35,7 @@ def get_settings_view(
 def put_settings_view(
     payload: SystemSettingsUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
 ) -> SystemSettingsRead:
     return update_system_settings(db, payload, current_user)
 
@@ -43,7 +43,7 @@ def put_settings_view(
 @router.get("/database/backup")
 def download_database_backup(
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
 ):
     backup_path = export_database_backup()
     background_tasks.add_task(_cleanup_temp_backup, backup_path)
@@ -59,7 +59,7 @@ async def restore_database_view(
     file: UploadFile = File(...),
     confirmation: str = Form(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
 ) -> DatabaseMaintenanceRead:
     file_bytes = await file.read()
     return restore_database_backup(
@@ -74,7 +74,7 @@ async def restore_database_view(
 def cleanup_database_view(
     payload: DatabaseCleanupRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
 ) -> DatabaseMaintenanceRead:
     return cleanup_operational_data(
         db,

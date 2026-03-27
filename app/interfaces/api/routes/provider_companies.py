@@ -13,7 +13,7 @@ from app.application.services import (
     update_provider_company,
 )
 from app.infrastructure.db import get_db
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/empresas-prestadoras", tags=["empresas-prestadoras"])
 
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/empresas-prestadoras", tags=["empresas-prestadoras"]
 @router.get(
     "",
     response_model=List[ProviderCompanyRead],
-    dependencies=[Depends(require_roles(["master"]))],
+    dependencies=[Depends(require_access(["master"], ["provider_companies.manage"]))],
 )
 def get_provider_companies(db: Session = Depends(get_db)) -> List[ProviderCompanyRead]:
     return list_provider_companies(db)
@@ -30,7 +30,7 @@ def get_provider_companies(db: Session = Depends(get_db)) -> List[ProviderCompan
 @router.get(
     "/consultar-cnpj/{cnpj}",
     response_model=CustomerCnpjLookupRead,
-    dependencies=[Depends(require_roles(["master"]))],
+    dependencies=[Depends(require_access(["master"], ["provider_companies.manage"]))],
 )
 def get_provider_company_by_cnpj(cnpj: str) -> CustomerCnpjLookupRead:
     return lookup_company_by_cnpj(cnpj)
@@ -40,7 +40,7 @@ def get_provider_company_by_cnpj(cnpj: str) -> CustomerCnpjLookupRead:
     "",
     response_model=ProviderCompanyRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_roles(["master"]))],
+    dependencies=[Depends(require_access(["master"], ["provider_companies.manage"]))],
 )
 def post_provider_company(payload: ProviderCompanyCreate, db: Session = Depends(get_db)) -> ProviderCompanyRead:
     company = create_provider_company(db, payload)
@@ -51,7 +51,7 @@ def post_provider_company(payload: ProviderCompanyCreate, db: Session = Depends(
 @router.put(
     "/{provider_company_id}",
     response_model=ProviderCompanyRead,
-    dependencies=[Depends(require_roles(["master"]))],
+    dependencies=[Depends(require_access(["master"], ["provider_companies.manage"]))],
 )
 def put_provider_company(
     provider_company_id: int,
@@ -64,7 +64,7 @@ def put_provider_company(
 @router.delete(
     "/{provider_company_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_roles(["master"]))],
+    dependencies=[Depends(require_access(["master"], ["provider_companies.manage"]))],
 )
 def remove_provider_company(provider_company_id: int, db: Session = Depends(get_db)) -> Response:
     delete_provider_company(db, provider_company_id)

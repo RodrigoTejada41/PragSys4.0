@@ -28,6 +28,14 @@ class ProviderCompany(Base):
     bairro: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     cidade: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     estado: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    is_provider: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    empresa_pai_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+        index=True,
+    )
+    compartilha_visualizacao_estoque: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     google_calendar_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     google_account_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     google_access_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -36,8 +44,21 @@ class ProviderCompany(Base):
     google_connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
 
+    empresa_pai: Mapped[Optional["ProviderCompany"]] = relationship(
+        remote_side=[id],
+        back_populates="filiais",
+        foreign_keys=[empresa_pai_id],
+    )
+    filiais: Mapped[List["ProviderCompany"]] = relationship(
+        back_populates="empresa_pai",
+        foreign_keys=[empresa_pai_id],
+    )
     usuarios: Mapped[List["User"]] = relationship(back_populates="empresa_prestadora")
     licencas: Mapped[List["License"]] = relationship(back_populates="empresa_prestadora")
+    estoque_movimentacoes: Mapped[List["StockMovement"]] = relationship(
+        back_populates="empresa_prestadora",
+        foreign_keys="StockMovement.empresa_prestadora_id",
+    )
 
 
 class User(Base):
@@ -48,14 +69,15 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(30), nullable=False, default="operador")
+    permissions_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
-    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(
+    empresa_prestadora_id: Mapped[int] = mapped_column(
         ForeignKey("empresas_prestadoras.id"),
-        nullable=True,
+        nullable=False,
     )
 
-    empresa_prestadora: Mapped[Optional["ProviderCompany"]] = relationship(back_populates="usuarios")
+    empresa_prestadora: Mapped["ProviderCompany"] = relationship(back_populates="usuarios")
     agendamentos_criados: Mapped[List["Appointment"]] = relationship(
         back_populates="usuario_responsavel",
         foreign_keys="Appointment.usuario_responsavel_id",
@@ -67,6 +89,7 @@ class User(Base):
     historico_agendamentos: Mapped[List["AppointmentHistory"]] = relationship(back_populates="usuario")
     historico_whatsapp_agendamentos: Mapped[List["AppointmentWhatsAppLog"]] = relationship(back_populates="usuario")
     historico_recibos: Mapped[List["ReceiptHistory"]] = relationship(back_populates="usuario")
+    estoque_movimentacoes: Mapped[List["StockMovement"]] = relationship(back_populates="usuario")
 
 
 class License(Base):
@@ -203,7 +226,53 @@ class Product(Base):
     )
 
     perfil_ncm: Mapped[Optional["NcmTaxProfile"]] = relationship(back_populates="produtos")
+    empresa_prestadora: Mapped[Optional["ProviderCompany"]] = relationship()
     itens_ordem_servico: Mapped[List["WorkOrderProduct"]] = relationship(back_populates="produto")
+    estoque_movimentacoes: Mapped[List["StockMovement"]] = relationship(
+        back_populates="produto",
+        cascade="all, delete-orphan",
+        order_by="StockMovement.created_at.desc()",
+    )
+
+
+class StockMovement(Base):
+    __tablename__ = "estoque_movimentacoes"
+    __table_args__ = (
+        Index("ix_estoque_movimentacoes_empresa_data", "empresa_prestadora_id", "created_at"),
+        Index("ix_estoque_movimentacoes_produto_data", "produto_id", "created_at"),
+        Index("ix_estoque_movimentacoes_tipo_empresa", "tipo_movimento", "empresa_prestadora_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    produto_id: Mapped[int] = mapped_column(ForeignKey("produtos.id"), nullable=False, index=True)
+    empresa_prestadora_id: Mapped[int] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=False,
+        index=True,
+    )
+    empresa_relacionada_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=True,
+        index=True,
+    )
+    usuario_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    tipo_movimento: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    origem: Mapped[str] = mapped_column(String(50), nullable=False, default="manual", index=True)
+    motivo: Mapped[str] = mapped_column(String(255), nullable=False)
+    quantidade: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    saldo_anterior: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    saldo_posterior: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    referencia: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
+
+    produto: Mapped["Product"] = relationship(back_populates="estoque_movimentacoes")
+    empresa_prestadora: Mapped["ProviderCompany"] = relationship(
+        back_populates="estoque_movimentacoes",
+        foreign_keys=[empresa_prestadora_id],
+    )
+    empresa_relacionada: Mapped[Optional["ProviderCompany"]] = relationship(foreign_keys=[empresa_relacionada_id])
+    usuario: Mapped[Optional["User"]] = relationship(back_populates="estoque_movimentacoes")
 
 
 class Pest(Base):

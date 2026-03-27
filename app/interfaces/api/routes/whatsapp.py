@@ -9,7 +9,7 @@ from app.application.schemas import (
 )
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 from app.modules.whatsapp.service import (
     get_whatsapp_configuration_status,
     get_whatsapp_connection_status,
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 )
 def get_whatsapp_configuration(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["integrations.manage"])),
 ) -> WhatsAppConfigStatusRead:
     return WhatsAppConfigStatusRead(**get_whatsapp_configuration_status(db))
 
@@ -38,7 +38,7 @@ def get_whatsapp_configuration(
 )
 def get_whatsapp_status(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.view"])),
 ) -> WhatsAppConnectionStatusRead:
     return WhatsAppConnectionStatusRead(**get_whatsapp_connection_status(db))
 
@@ -49,7 +49,7 @@ def get_whatsapp_status(
 )
 def post_whatsapp_session_qr(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["integrations.manage"])),
 ) -> WhatsAppQrSessionRead:
     return WhatsAppQrSessionRead(**request_whatsapp_qr_session(db))
 
@@ -60,7 +60,7 @@ def post_whatsapp_session_qr(
 )
 def post_whatsapp_session_logout(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["integrations.manage"])),
 ) -> WhatsAppConnectionStatusRead:
     return WhatsAppConnectionStatusRead(**logout_whatsapp_session(db))
 
@@ -72,7 +72,7 @@ def post_whatsapp_session_logout(
 def post_appointment_whatsapp_send(
     appointment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.manage"])),
 ) -> AppointmentRead:
     return send_appointment_whatsapp_message(
         db,

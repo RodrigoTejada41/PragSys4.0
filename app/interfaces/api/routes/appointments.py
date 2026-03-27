@@ -23,7 +23,7 @@ from app.application.scheduling_services import (
 from app.application.google_calendar_service import sync_appointment_with_google_or_request_oauth
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/agendamentos", tags=["agendamentos"])
 
@@ -34,7 +34,7 @@ router = APIRouter(prefix="/agendamentos", tags=["agendamentos"])
 )
 def get_appointments(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.view"])),
 ) -> List[AppointmentRead]:
     return list_appointments(db)
 
@@ -45,7 +45,7 @@ def get_appointments(
 )
 def get_appointments_dashboard(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.view"])),
 ) -> AppointmentDashboardRead:
     return get_appointment_dashboard(db)
 
@@ -57,7 +57,7 @@ def get_appointments_dashboard(
 def get_appointment_by_id(
     appointment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.view"])),
 ) -> AppointmentRead:
     return get_appointment(db, appointment_id)
 
@@ -69,7 +69,7 @@ def get_appointment_by_id(
 def post_appointment(
     payload: AppointmentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.manage"])),
 ) -> AppointmentRead:
     return create_appointment(db, payload, current_user_id=current_user.id)
 
@@ -82,7 +82,7 @@ def put_appointment(
     appointment_id: int,
     payload: AppointmentUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.manage"])),
 ) -> AppointmentRead:
     return update_appointment(db, appointment_id, payload, current_user_id=current_user.id)
 
@@ -95,7 +95,7 @@ def post_appointment_status(
     appointment_id: int,
     payload: AppointmentStatusUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.manage"])),
 ) -> AppointmentRead:
     return update_appointment_status(db, appointment_id, payload, current_user_id=current_user.id)
 
@@ -107,7 +107,7 @@ def post_appointment_status(
 def post_appointment_reopen(
     appointment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.manage"])),
 ) -> AppointmentRead:
     return reopen_appointment(db, appointment_id, current_user_id=current_user.id)
 
@@ -119,7 +119,7 @@ def post_appointment_reopen(
 def post_appointment_google_sync(
     appointment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.manage", "integrations.manage"])),
 ) -> GoogleCalendarAppointmentSyncRead:
     return GoogleCalendarAppointmentSyncRead(
         **sync_appointment_with_google_or_request_oauth(db, appointment_id, current_user.id)

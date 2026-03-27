@@ -37,9 +37,9 @@ NAV_ITEMS = [
     {"view": "financeiro-relatorios", "label": "Relatorios", "icon": "fas fa-chart-bar", "classes": "finance-only"},
     {"kind": "header", "label": "Configuracoes", "classes": "admin-only hidden"},
     {"view": "configuracoes", "label": "Config. do sistema", "icon": "fas fa-sliders-h", "classes": "admin-only hidden"},
-    {"kind": "header", "label": "Administracao", "classes": "master-only hidden"},
+    {"kind": "header", "label": "Administracao", "classes": "admin-only hidden"},
     {"view": "empresas", "label": "Empresas", "icon": "fas fa-building", "classes": "master-only hidden"},
-    {"view": "usuarios", "label": "Usuarios", "icon": "fas fa-users", "classes": "master-only hidden"},
+    {"view": "usuarios", "label": "Usuarios", "icon": "fas fa-users", "classes": "admin-only hidden"},
     {"view": "licencas", "label": "Licencas", "icon": "fas fa-id-card-alt", "classes": "master-only hidden"},
 ]
 

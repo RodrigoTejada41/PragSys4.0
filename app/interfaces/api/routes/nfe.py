@@ -15,7 +15,7 @@ from app.application.nfe_integration_service import (
 )
 from app.application.schemas import NfeCancelRequest, NfeInvoiceCreate, NfeInvoiceRead, NfeInvoiceUpdate, NfeWebhookEvent
 from app.infrastructure.db import get_db
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/nfe", tags=["nfe"])
 
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/nfe", tags=["nfe"])
 @router.get(
     "",
     response_model=List[NfeInvoiceRead],
-    dependencies=[Depends(require_roles(["master", "admin"]))],
+    dependencies=[Depends(require_access(["master", "admin"], ["fiscal.view"]))],
 )
 def get_nfe_invoices(
     cliente_id: Optional[int] = None,
@@ -47,7 +47,7 @@ def get_nfe_invoices(
     "",
     response_model=NfeInvoiceRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_roles(["master", "admin"]))],
+    dependencies=[Depends(require_access(["master", "admin"], ["fiscal.manage"]))],
 )
 def post_nfe_invoice(payload: NfeInvoiceCreate, db: Session = Depends(get_db)) -> NfeInvoiceRead:
     return issue_nfe(db, payload)
@@ -56,7 +56,7 @@ def post_nfe_invoice(payload: NfeInvoiceCreate, db: Session = Depends(get_db)) -
 @router.get(
     "/{nfe_id}",
     response_model=NfeInvoiceRead,
-    dependencies=[Depends(require_roles(["master", "admin"]))],
+    dependencies=[Depends(require_access(["master", "admin"], ["fiscal.view"]))],
 )
 def get_nfe_invoice(nfe_id: int, sync: bool = True, db: Session = Depends(get_db)) -> NfeInvoiceRead:
     return get_nfe_status(db, nfe_id, sync_with_provider=sync)
@@ -65,7 +65,7 @@ def get_nfe_invoice(nfe_id: int, sync: bool = True, db: Session = Depends(get_db
 @router.put(
     "/{nfe_id}",
     response_model=NfeInvoiceRead,
-    dependencies=[Depends(require_roles(["master", "admin"]))],
+    dependencies=[Depends(require_access(["master", "admin"], ["fiscal.manage"]))],
 )
 def put_nfe_invoice(nfe_id: int, payload: NfeInvoiceUpdate, db: Session = Depends(get_db)) -> NfeInvoiceRead:
     return update_nfe_local(db, nfe_id, payload)
@@ -74,7 +74,7 @@ def put_nfe_invoice(nfe_id: int, payload: NfeInvoiceUpdate, db: Session = Depend
 @router.delete(
     "/{nfe_id}",
     response_model=NfeInvoiceRead,
-    dependencies=[Depends(require_roles(["master", "admin"]))],
+    dependencies=[Depends(require_access(["master", "admin"], ["fiscal.manage"]))],
 )
 def remove_nfe_invoice(
     nfe_id: int,
@@ -87,7 +87,7 @@ def remove_nfe_invoice(
 @router.delete(
     "/{nfe_id}/hard-delete",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_roles(["master", "admin"]))],
+    dependencies=[Depends(require_access(["master", "admin"], ["fiscal.manage", "records.delete"]))],
 )
 def hard_remove_nfe_invoice(nfe_id: int, db: Session = Depends(get_db)) -> Response:
     delete_nfe_invoice(db, nfe_id)

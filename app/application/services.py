@@ -42,6 +42,8 @@ from app.application.schemas import (
     ProviderCompanyUpdate,
     ProductCreate,
     ProductCsvImportResult,
+    StockMovementCreate,
+    StockPositionRead,
     ProductXmlImportResult,
     ProductUpdate,
     TechnicianCreate,
@@ -53,6 +55,7 @@ from app.application.schemas import (
 )
 from app.application.settings_service import get_boolean_setting
 from app.core.exceptions import BusinessRuleViolation
+from app.core.permissions import dump_permissions_json, load_permissions_json
 from app.core.security import create_access_token, get_password_hash, verify_password
 from app.domain.enums import FinanceStatus, WorkOrderType
 from app.infrastructure.models import (
@@ -64,6 +67,7 @@ from app.infrastructure.models import (
     Pest,
     ProviderCompany,
     Product,
+    StockMovement,
     Technician,
     User,
     WorkOrder,
@@ -209,11 +213,35 @@ def _get_provider_company_or_fail(db: Session, provider_company_id: int) -> Prov
     return provider_company
 
 
+def _ensure_provider_company_can_be_linked(db: Session, provider_company_id: int) -> ProviderCompany:
+    provider_company = _get_provider_company_or_fail(db, provider_company_id)
+    if not provider_company.is_active:
+        raise BusinessRuleViolation("A empresa prestadora selecionada esta inativa.")
+    if not provider_company.is_provider:
+        raise BusinessRuleViolation("A empresa selecionada nao esta habilitada como prestadora.")
+    return provider_company
+
+
+def _ensure_current_user_can_manage_company(
+    current_user: Optional[User],
+    provider_company_id: Optional[int],
+) -> Optional[int]:
+    if provider_company_id is None:
+        return None
+    if current_user is None or _is_master_user(current_user):
+        return provider_company_id
+    user_company_id = _require_company_scope(current_user)
+    if provider_company_id != user_company_id:
+        raise BusinessRuleViolation("Voce so pode gerenciar usuarios da sua propria empresa.")
+    return provider_company_id
+
+
 def _serialize_user(user: User) -> User:
     if user.empresa_prestadora:
         user.empresa_prestadora_nome = user.empresa_prestadora.nome_fantasia or user.empresa_prestadora.razao_social
     else:
         user.empresa_prestadora_nome = None
+    user.permissions = load_permissions_json(user.role, user.permissions_json)
     return user
 
 
@@ -230,10 +258,71 @@ def _serialize_license(license_entry: License) -> License:
 def _serialize_provider_company(provider_company: ProviderCompany) -> ProviderCompany:
     provider_company.usuarios_vinculados_ids = [user.id for user in provider_company.usuarios]
     provider_company.usuarios_vinculados_nomes = [user.nome for user in provider_company.usuarios]
+    provider_company.empresa_pai_nome = (
+        provider_company.empresa_pai.nome_fantasia or provider_company.empresa_pai.razao_social
+        if provider_company.empresa_pai
+        else None
+    )
+    provider_company.filiais_ids = [company.id for company in provider_company.filiais]
+    provider_company.filiais_nomes = [
+        company.nome_fantasia or company.razao_social
+        for company in sorted(provider_company.filiais, key=lambda item: item.razao_social.lower())
+    ]
     provider_company.google_connected = bool(
         provider_company.google_refresh_token or provider_company.google_access_token
     )
     return provider_company
+
+
+def _serialize_product(product: Product) -> Product:
+    company = getattr(product, "empresa_prestadora", None)
+    product.empresa_prestadora_nome = company.nome_fantasia or company.razao_social if company else None
+    return product
+
+
+def _serialize_stock_movement(item: StockMovement) -> StockMovement:
+    item.produto_nome = item.produto.nome if item.produto else None
+    item.empresa_prestadora_nome = (
+        item.empresa_prestadora.nome_fantasia or item.empresa_prestadora.razao_social
+        if item.empresa_prestadora
+        else None
+    )
+    item.empresa_relacionada_nome = (
+        item.empresa_relacionada.nome_fantasia or item.empresa_relacionada.razao_social
+        if item.empresa_relacionada
+        else None
+    )
+    item.usuario_nome = item.usuario.nome if item.usuario else None
+    return item
+
+
+def _get_current_company(current_user: Optional[User]) -> Optional[ProviderCompany]:
+    if current_user is None or current_user.empresa_prestadora is None:
+        return None
+    return current_user.empresa_prestadora
+
+
+def _get_stock_accessible_company_ids(current_user: Optional[User]) -> set[int]:
+    if current_user is None or _is_master_user(current_user):
+        return set()
+    company = _get_current_company(current_user)
+    if company is None:
+        raise BusinessRuleViolation("Usuario sem empresa prestadora vinculada.")
+    company_ids = {company.id}
+    if not company.compartilha_visualizacao_estoque:
+        return company_ids
+
+    if company.empresa_pai and company.empresa_pai.is_active:
+        company_ids.add(company.empresa_pai.id)
+        if company.empresa_pai.compartilha_visualizacao_estoque:
+            for sibling in company.empresa_pai.filiais:
+                if sibling.is_active and sibling.compartilha_visualizacao_estoque:
+                    company_ids.add(sibling.id)
+
+    for child in company.filiais:
+        if child.is_active and child.compartilha_visualizacao_estoque:
+            company_ids.add(child.id)
+    return company_ids
 
 
 def _get_current_license_for_company(db: Session, provider_company_id: Optional[int]) -> Optional[License]:
@@ -413,6 +502,8 @@ def license_is_valid(license_entry: Optional[License]) -> bool:
 
 
 def ensure_license_allows_access(db: Session, user: User) -> None:
+    if user.empresa_prestadora_id is None:
+        raise BusinessRuleViolation("Usuario sem empresa prestadora vinculada.")
     if user.role == "master":
         return
     license_entry = _get_current_license_for_company(db, user.empresa_prestadora_id)
@@ -649,14 +740,28 @@ def _clean_optional_text(value: Optional[str]) -> Optional[str]:
 
 
 def list_provider_companies(db: Session) -> List[ProviderCompany]:
-    companies = db.query(ProviderCompany).options(joinedload(ProviderCompany.usuarios)).order_by(ProviderCompany.razao_social.asc()).all()
+    companies = (
+        db.query(ProviderCompany)
+        .options(
+            joinedload(ProviderCompany.usuarios),
+            joinedload(ProviderCompany.empresa_pai),
+            joinedload(ProviderCompany.filiais),
+        )
+        .order_by(ProviderCompany.razao_social.asc())
+        .all()
+    )
     return [_serialize_provider_company(item) for item in companies]
 
 
 def get_provider_company(db: Session, provider_company_id: int) -> ProviderCompany:
     company = (
         db.query(ProviderCompany)
-        .options(joinedload(ProviderCompany.usuarios), joinedload(ProviderCompany.licencas))
+        .options(
+            joinedload(ProviderCompany.usuarios),
+            joinedload(ProviderCompany.licencas),
+            joinedload(ProviderCompany.empresa_pai),
+            joinedload(ProviderCompany.filiais),
+        )
         .filter(ProviderCompany.id == provider_company_id)
         .first()
     )
@@ -667,11 +772,6 @@ def get_provider_company(db: Session, provider_company_id: int) -> ProviderCompa
 
 def _sync_provider_company_users(db: Session, provider_company: ProviderCompany, user_ids: List[int]) -> None:
     selected_user_ids = set(int(user_id) for user_id in user_ids)
-    current_users = db.query(User).filter(User.empresa_prestadora_id == provider_company.id).all()
-    for user in current_users:
-        if user.id not in selected_user_ids:
-            user.empresa_prestadora_id = None
-
     if not selected_user_ids:
         return
 
@@ -682,6 +782,8 @@ def _sync_provider_company_users(db: Session, provider_company: ProviderCompany,
         raise BusinessRuleViolation("Um ou mais usuarios selecionados nao foram encontrados para vinculo.")
 
     for user in selected_users:
+        if user.role == "master":
+            raise BusinessRuleViolation("Usuario master deve ser gerenciado diretamente no cadastro do usuario.")
         user.empresa_prestadora_id = provider_company.id
 
 
@@ -692,6 +794,8 @@ def create_provider_company(db: Session, payload: ProviderCompanyCreate) -> Prov
     duplicate = db.query(ProviderCompany).filter(ProviderCompany.cnpj == data["cnpj"]).first()
     if duplicate:
         raise BusinessRuleViolation("Ja existe empresa prestadora cadastrada com este CNPJ.")
+    if data.get("empresa_pai_id"):
+        _get_provider_company_or_fail(db, data["empresa_pai_id"])
     user_ids = data.pop("usuarios_vinculados_ids", [])
     provider_company = ProviderCompany(**data)
     db.add(provider_company)
@@ -710,6 +814,10 @@ def update_provider_company(db: Session, provider_company_id: int, payload: Prov
     )
     if duplicate:
         raise BusinessRuleViolation("Ja existe empresa prestadora cadastrada com este CNPJ.")
+    if data.get("empresa_pai_id") == provider_company_id:
+        raise BusinessRuleViolation("Uma empresa nao pode ser vinculada como filial dela mesma.")
+    if data.get("empresa_pai_id"):
+        _get_provider_company_or_fail(db, data["empresa_pai_id"])
 
     user_ids = data.pop("usuarios_vinculados_ids", [])
     for field, value in data.items():
@@ -789,13 +897,17 @@ def list_users(db: Session, current_user: Optional[User] = None) -> List[User]:
     return [_serialize_user(item) for item in query.order_by(User.created_at.desc(), User.nome.asc()).all()]
 
 
-def create_user(db: Session, payload: UserCreate) -> User:
+def create_user(db: Session, payload: UserCreate, current_user: Optional[User] = None) -> User:
     existing = db.query(User).filter(User.username == payload.username).first()
     if existing:
         raise BusinessRuleViolation("Ja existe usuario com este login.")
 
     provider_company_id = payload.empresa_prestadora_id
+    if current_user and not _is_master_user(current_user) and payload.role == "master":
+        raise BusinessRuleViolation("Apenas o admin global pode criar usuarios master.")
     if payload.nova_empresa_prestadora:
+        if current_user and not _is_master_user(current_user):
+            raise BusinessRuleViolation("Apenas o admin global pode criar uma nova empresa durante o cadastro de usuario.")
         provider_company = create_provider_company(db, payload.nova_empresa_prestadora)
         provider_company_id = provider_company.id
         if payload.licenca_inicial:
@@ -808,11 +920,14 @@ def create_user(db: Session, payload: UserCreate) -> User:
                 ),
             )
 
-    if payload.role != "master" and not provider_company_id:
-        raise BusinessRuleViolation("Usuarios nao master devem estar vinculados a uma empresa prestadora.")
+    if provider_company_id is None:
+        existing_companies = db.query(ProviderCompany.id).count()
+        if existing_companies == 0:
+            raise BusinessRuleViolation("Cadastre uma empresa prestadora antes de criar usuarios.")
+        raise BusinessRuleViolation("Todo usuario deve estar vinculado a uma empresa prestadora.")
 
-    if provider_company_id:
-        _get_provider_company_or_fail(db, provider_company_id)
+    provider_company_id = _ensure_current_user_can_manage_company(current_user, provider_company_id)
+    _ensure_provider_company_can_be_linked(db, provider_company_id)
 
     active_users_count = db.query(User).filter(
         User.is_active.is_(True),
@@ -828,6 +943,7 @@ def create_user(db: Session, payload: UserCreate) -> User:
         username=payload.username,
         password_hash=get_password_hash(payload.password),
         role=payload.role.value,
+        permissions_json=dump_permissions_json(payload.role.value, payload.permissions),
         is_active=payload.is_active,
         empresa_prestadora_id=provider_company_id,
     )
@@ -837,17 +953,23 @@ def create_user(db: Session, payload: UserCreate) -> User:
     return _serialize_user(user)
 
 
-def update_user(db: Session, user_id: int, payload: UserUpdate) -> User:
+def update_user(db: Session, user_id: int, payload: UserUpdate, current_user: Optional[User] = None) -> User:
     user = _get_user_record_or_fail(db, user_id)
+    if current_user and not _is_master_user(current_user):
+        current_company_id = _require_company_scope(current_user)
+        if user.empresa_prestadora_id != current_company_id:
+            raise BusinessRuleViolation("Voce so pode editar usuarios da sua propria empresa.")
+        if payload.role == "master":
+            raise BusinessRuleViolation("Apenas o admin global pode promover usuarios para master.")
     duplicate = db.query(User).filter(User.username == payload.username, User.id != user_id).first()
     if duplicate:
         raise BusinessRuleViolation("Ja existe usuario com este login.")
 
     provider_company_id = payload.empresa_prestadora_id
-    if payload.role != "master" and not provider_company_id:
-        raise BusinessRuleViolation("Usuarios nao master devem estar vinculados a uma empresa prestadora.")
-    if provider_company_id:
-        _get_provider_company_or_fail(db, provider_company_id)
+    if provider_company_id is None:
+        raise BusinessRuleViolation("Todo usuario deve estar vinculado a uma empresa prestadora.")
+    provider_company_id = _ensure_current_user_can_manage_company(current_user, provider_company_id)
+    _ensure_provider_company_can_be_linked(db, provider_company_id)
 
     active_users_count = db.query(User).filter(
         User.is_active.is_(True),
@@ -862,6 +984,7 @@ def update_user(db: Session, user_id: int, payload: UserUpdate) -> User:
     user.nome = payload.nome
     user.username = payload.username
     user.role = payload.role.value
+    user.permissions_json = dump_permissions_json(payload.role.value, payload.permissions)
     user.is_active = payload.is_active
     user.empresa_prestadora_id = provider_company_id
     if payload.password:
@@ -871,8 +994,13 @@ def update_user(db: Session, user_id: int, payload: UserUpdate) -> User:
     return _serialize_user(user)
 
 
-def delete_user(db: Session, user_id: int) -> None:
+def delete_user(db: Session, user_id: int, current_user: Optional[User] = None) -> None:
     user = _get_user_record_or_fail(db, user_id)
+    if current_user and not _is_master_user(current_user):
+        if user.empresa_prestadora_id != _require_company_scope(current_user):
+            raise BusinessRuleViolation("Voce so pode excluir usuarios da sua propria empresa.")
+        if user.role == "master":
+            raise BusinessRuleViolation("Apenas o admin global pode excluir usuarios master.")
     if user.role == "master":
         masters = db.query(User).filter(User.role == "master", User.is_active.is_(True)).count()
         if masters <= 1:
@@ -949,10 +1077,174 @@ def delete_customer(db: Session, customer_id: int, current_user: Optional[User] 
     db.commit()
 
 
+def _resolve_stock_company_id(
+    db: Session,
+    current_user: Optional[User],
+    provider_company_id: Optional[int] = None,
+) -> int:
+    if provider_company_id is not None:
+        if current_user and not _is_master_user(current_user):
+            accessible_company_ids = _get_stock_accessible_company_ids(current_user)
+            own_company_id = _require_company_scope(current_user)
+            if provider_company_id not in accessible_company_ids or provider_company_id != own_company_id:
+                raise BusinessRuleViolation("Voce nao pode lancar estoque em outra empresa.")
+        _ensure_provider_company_can_be_linked(db, provider_company_id)
+        return provider_company_id
+    resolved_company_id = _get_new_record_company_id(current_user)
+    if resolved_company_id is None:
+        raise BusinessRuleViolation("Contexto de empresa nao disponivel para movimentacao de estoque.")
+    _ensure_provider_company_can_be_linked(db, resolved_company_id)
+    return resolved_company_id
+
+
+def _create_stock_movement_entry(
+    db: Session,
+    product: Product,
+    movement_type: str,
+    quantity: Decimal,
+    reason: str,
+    current_user: Optional[User] = None,
+    *,
+    origin: str = "manual",
+    reference: Optional[str] = None,
+    notes: Optional[str] = None,
+    target_company_id: Optional[int] = None,
+    related_company_id: Optional[int] = None,
+) -> StockMovement:
+    normalized_quantity = _money(abs(Decimal(quantity)))
+    if normalized_quantity <= Decimal("0.00"):
+        raise BusinessRuleViolation("A quantidade movimentada deve ser maior que zero.")
+
+    company_id = _resolve_stock_company_id(db, current_user, target_company_id or product.empresa_prestadora_id)
+    if product.empresa_prestadora_id != company_id:
+        raise BusinessRuleViolation("O produto selecionado nao pertence a empresa informada para o estoque.")
+
+    previous_balance = _money(Decimal(product.estoque_atual))
+    if movement_type == "entrada":
+        next_balance = _money(previous_balance + normalized_quantity)
+    elif movement_type == "saida":
+        next_balance = _money(previous_balance - normalized_quantity)
+        if next_balance < Decimal("0.00"):
+            raise BusinessRuleViolation(f"Estoque insuficiente para o produto '{product.nome}'.")
+    else:
+        raise BusinessRuleViolation("Tipo de movimentacao de estoque invalido.")
+
+    product.estoque_atual = next_balance
+    movement = StockMovement(
+        produto_id=product.id,
+        empresa_prestadora_id=company_id,
+        empresa_relacionada_id=related_company_id,
+        usuario_id=current_user.id if current_user else None,
+        tipo_movimento=movement_type,
+        origem=origin,
+        motivo=reason,
+        quantidade=normalized_quantity,
+        saldo_anterior=previous_balance,
+        saldo_posterior=next_balance,
+        referencia=reference,
+        observacoes=notes,
+    )
+    db.add(movement)
+    return movement
+
+
+def list_stock_positions(
+    db: Session,
+    current_user: Optional[User] = None,
+    company_id: Optional[int] = None,
+) -> List[StockPositionRead]:
+    query = db.query(Product).options(joinedload(Product.empresa_prestadora))
+    if current_user is None or _is_master_user(current_user):
+        if company_id is not None:
+            query = query.filter(Product.empresa_prestadora_id == company_id)
+    else:
+        accessible_company_ids = _get_stock_accessible_company_ids(current_user)
+        query = query.filter(Product.empresa_prestadora_id.in_(accessible_company_ids))
+        if company_id is not None:
+            if company_id not in accessible_company_ids:
+                raise BusinessRuleViolation("Sem permissao para visualizar estoque desta empresa.")
+            query = query.filter(Product.empresa_prestadora_id == company_id)
+
+    products = query.order_by(Product.nome.asc()).all()
+    positions = []
+    for product in products:
+        company = getattr(product, "empresa_prestadora", None)
+        positions.append(
+            StockPositionRead(
+                produto_id=product.id,
+                produto_nome=product.nome,
+                empresa_prestadora_id=product.empresa_prestadora_id,
+                empresa_prestadora_nome=company.nome_fantasia or company.razao_social if company else "Sem empresa",
+                estoque_atual=_money(Decimal(product.estoque_atual)),
+                estoque_minimo=_money(Decimal(product.estoque_minimo)),
+                registro_ms=product.registro_ms,
+            )
+        )
+    return positions
+
+
+def list_stock_movements(
+    db: Session,
+    current_user: Optional[User] = None,
+    *,
+    company_id: Optional[int] = None,
+    product_id: Optional[int] = None,
+    movement_type: Optional[str] = None,
+) -> List[StockMovement]:
+    query = db.query(StockMovement).options(
+        joinedload(StockMovement.produto),
+        joinedload(StockMovement.usuario),
+        joinedload(StockMovement.empresa_prestadora),
+        joinedload(StockMovement.empresa_relacionada),
+    )
+    if current_user is None or _is_master_user(current_user):
+        if company_id is not None:
+            query = query.filter(StockMovement.empresa_prestadora_id == company_id)
+    else:
+        accessible_company_ids = _get_stock_accessible_company_ids(current_user)
+        query = query.filter(StockMovement.empresa_prestadora_id.in_(accessible_company_ids))
+        if company_id is not None:
+            if company_id not in accessible_company_ids:
+                raise BusinessRuleViolation("Sem permissao para visualizar movimentacoes desta empresa.")
+            query = query.filter(StockMovement.empresa_prestadora_id == company_id)
+    if product_id is not None:
+        query = query.filter(StockMovement.produto_id == product_id)
+    if movement_type:
+        query = query.filter(StockMovement.tipo_movimento == movement_type)
+    return [_serialize_stock_movement(item) for item in query.order_by(StockMovement.created_at.desc(), StockMovement.id.desc()).all()]
+
+
+def create_stock_movement(
+    db: Session,
+    payload: StockMovementCreate,
+    current_user: Optional[User] = None,
+) -> StockMovement:
+    product = _get_product_or_fail(db, payload.produto_id, current_user=current_user)
+    movement = _create_stock_movement_entry(
+        db,
+        product,
+        movement_type=payload.tipo_movimento,
+        quantity=payload.quantidade,
+        reason=payload.motivo,
+        current_user=current_user,
+        origin="manual",
+        reference=payload.referencia,
+        notes=payload.observacoes,
+        target_company_id=payload.empresa_prestadora_id,
+        related_company_id=payload.empresa_relacionada_id,
+    )
+    db.commit()
+    db.refresh(movement)
+    return _serialize_stock_movement(movement)
+
+
 def create_product(db: Session, payload: ProductCreate, current_user: Optional[User] = None) -> Product:
     from app.application.fiscal_services import apply_tax_profile_to_product
 
-    product = Product(**payload.model_dump(), empresa_prestadora_id=_get_new_record_company_id(current_user))
+    product_data = payload.model_dump()
+    initial_stock = Decimal(product_data.get("estoque_atual") or "0")
+    product_data["estoque_atual"] = Decimal("0.00")
+    product = Product(**product_data, empresa_prestadora_id=_get_new_record_company_id(current_user))
     apply_tax_profile_to_product(
         db,
         product,
@@ -961,19 +1253,37 @@ def create_product(db: Session, payload: ProductCreate, current_user: Optional[U
         manual_rates=payload.model_dump(),
     )
     db.add(product)
+    db.flush()
+    if initial_stock > Decimal("0.00"):
+        _create_stock_movement_entry(
+            db,
+            product,
+            movement_type="entrada",
+            quantity=initial_stock,
+            reason="Saldo inicial do produto",
+            current_user=current_user,
+            origin="saldo_inicial",
+            notes="Registro automatico de saldo inicial no cadastro do produto.",
+        )
     db.commit()
     db.refresh(product)
-    return product
+    return _serialize_product(product)
 
 
 def list_products(db: Session, current_user: Optional[User] = None) -> List[Product]:
-    return _apply_company_scope(db.query(Product), Product, current_user).order_by(Product.nome.asc()).all()
+    products = (
+        _apply_company_scope(db.query(Product).options(joinedload(Product.empresa_prestadora)), Product, current_user)
+        .order_by(Product.nome.asc())
+        .all()
+    )
+    return [_serialize_product(item) for item in products]
 
 
 def update_product(db: Session, product_id: int, payload: ProductUpdate, current_user: Optional[User] = None) -> Product:
     from app.application.fiscal_services import apply_tax_profile_to_product
 
     product = _get_product_or_fail(db, product_id, current_user=current_user)
+    previous_stock = _money(Decimal(product.estoque_atual))
     for field, value in payload.model_dump().items():
         setattr(product, field, value)
     apply_tax_profile_to_product(
@@ -983,14 +1293,28 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate, current
         manual_override=payload.override_tributacao,
         manual_rates=payload.model_dump(),
     )
+    new_stock = _money(Decimal(payload.estoque_atual))
+    stock_diff = _money(new_stock - previous_stock)
+    if stock_diff != Decimal("0.00"):
+        product.estoque_atual = previous_stock
+        _create_stock_movement_entry(
+            db,
+            product,
+            movement_type="entrada" if stock_diff > 0 else "saida",
+            quantity=abs(stock_diff),
+            reason="Ajuste manual de estoque no cadastro do produto",
+            current_user=current_user,
+            origin="ajuste_manual",
+            notes="Ajuste automatico gerado pela edicao do produto.",
+        )
     db.commit()
     db.refresh(product)
-    return product
+    return _serialize_product(product)
 
 
 def delete_product(db: Session, product_id: int, current_user: Optional[User] = None) -> None:
     product = _get_product_or_fail(db, product_id, current_user=current_user)
-    if product.itens_ordem_servico:
+    if product.itens_ordem_servico or product.estoque_movimentacoes:
         raise BusinessRuleViolation("Nao e possivel excluir produto ja utilizado em OS.")
     db.delete(product)
     db.commit()
@@ -1049,7 +1373,17 @@ def import_products_from_invoice_xml(
             except BusinessRuleViolation:
                 product.ncm = item["ncm"]
 
-        product.estoque_atual = _money(Decimal(product.estoque_atual) + Decimal(item["quantidade"]))
+        _create_stock_movement_entry(
+            db,
+            product,
+            movement_type="entrada",
+            quantity=Decimal(item["quantidade"]),
+            reason=f"Entrada por importacao de XML NF {invoice_data['nota_numero']}",
+            current_user=current_user,
+            origin="xml_nfe",
+            reference=reference,
+            notes=f"Fornecedor: {invoice_data['fornecedor_nome']}",
+        )
 
         processed_items.append(
             {
@@ -1172,7 +1506,17 @@ def import_products_from_csv(
             except BusinessRuleViolation:
                 product.ncm = row.get("ncm")
 
-        product.estoque_atual = _money(Decimal(product.estoque_atual) + quantidade_entrada)
+        _create_stock_movement_entry(
+            db,
+            product,
+            movement_type="entrada",
+            quantity=quantidade_entrada,
+            reason="Entrada por importacao CSV de estoque",
+            current_user=current_user,
+            origin="csv_import",
+            reference=referencia,
+            notes=observacoes,
+        )
 
         finance_entry_id = None
         if registrar_financeiro_linha and custo_total > Decimal("0.00"):
@@ -1555,9 +1899,18 @@ def _generate_work_order_number(db: Session, reference_date: Optional[date] = No
     return candidate
 
 
-def _restore_stock(work_order: WorkOrder) -> None:
+def _restore_stock(db: Session, work_order: WorkOrder, current_user: Optional[User] = None) -> None:
     for item in work_order.produtos:
-        item.produto.estoque_atual = Decimal(item.produto.estoque_atual) + Decimal(item.quantidade)
+        _create_stock_movement_entry(
+            db,
+            item.produto,
+            movement_type="entrada",
+            quantity=Decimal(item.quantidade),
+            reason=f"Estorno de estoque da OS {work_order.numero}",
+            current_user=current_user,
+            origin="ordem_servico_estorno",
+            reference=work_order.numero,
+        )
 
 
 def _apply_work_order_products(
@@ -1568,9 +1921,16 @@ def _apply_work_order_products(
 ) -> None:
     for item in product_items:
         product = _get_product_or_fail(db, item.produto_id, current_user=current_user)
-        if Decimal(product.estoque_atual) < item.quantidade:
-            raise BusinessRuleViolation(f"Estoque insuficiente para o produto '{product.nome}'.")
-        product.estoque_atual = Decimal(product.estoque_atual) - item.quantidade
+        _create_stock_movement_entry(
+            db,
+            product,
+            movement_type="saida",
+            quantity=item.quantidade,
+            reason=f"Consumo de estoque na OS {work_order.numero}",
+            current_user=current_user,
+            origin="ordem_servico",
+            reference=work_order.numero,
+        )
         db.add(
             WorkOrderProduct(
                 os_id=work_order.id,
@@ -1710,7 +2070,7 @@ def update_work_order(
     work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
     customer, normalized = _validate_work_order_payload(db, payload, current_user=current_user, current_work_order_id=work_order_id)
 
-    _restore_stock(work_order)
+    _restore_stock(db, work_order, current_user=current_user)
     for item in list(work_order.produtos):
         db.delete(item)
     db.flush()
@@ -1766,7 +2126,7 @@ def update_work_order(
 
 def delete_work_order(db: Session, work_order_id: int, current_user: Optional[User] = None) -> None:
     work_order = _get_work_order_or_fail(db, work_order_id, current_user=current_user)
-    _restore_stock(work_order)
+    _restore_stock(db, work_order, current_user=current_user)
     for entry in list(work_order.financeiros):
         if Decimal(entry.valor_pago) > 0:
             raise BusinessRuleViolation("Nao e possivel excluir OS com recebimento financeiro ja registrado.")

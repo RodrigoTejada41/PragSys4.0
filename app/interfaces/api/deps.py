@@ -5,6 +5,7 @@ from jwt import InvalidTokenError
 from sqlalchemy.orm import Session
 
 from app.application.services import ensure_license_allows_access, get_user_by_id
+from app.core.permissions import has_permission
 from app.core.exceptions import BusinessRuleViolation
 from app.core.security import decode_access_token
 from app.infrastructure.db import get_db
@@ -53,6 +54,30 @@ def require_roles(allowed_roles: Iterable[str]) -> Callable:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Perfil sem permissao para esta operacao.",
             )
+        return current_user
+
+    return dependency
+
+
+def require_access(
+    allowed_roles: Iterable[str],
+    required_permissions: Optional[Iterable[str]] = None,
+) -> Callable:
+    allowed = set(allowed_roles)
+    required = list(required_permissions or [])
+
+    def dependency(current_user: User = Depends(get_current_user)) -> User:
+        if current_user.role not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Perfil sem permissao para esta operacao.",
+            )
+        for permission_key in required:
+            if not has_permission(current_user.role, getattr(current_user, "permissions", None), permission_key):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Usuario sem permissao para esta operacao.",
+                )
         return current_user
 
     return dependency

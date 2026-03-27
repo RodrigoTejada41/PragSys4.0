@@ -12,7 +12,7 @@ from app.application.services import (
 )
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/tecnicos", tags=["tecnicos"])
 
@@ -20,11 +20,11 @@ router = APIRouter(prefix="/tecnicos", tags=["tecnicos"])
 @router.get(
     "",
     response_model=List[TechnicianRead],
-    dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
+    dependencies=[Depends(require_access(["master", "admin", "operador"], ["work_orders.view"]))],
 )
 def get_technicians(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["work_orders.view"])),
 ) -> List[TechnicianRead]:
     return list_technicians(db, current_user=current_user)
 
@@ -37,7 +37,7 @@ def get_technicians(
 def post_technician(
     payload: TechnicianCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["work_orders.manage"])),
 ) -> TechnicianRead:
     return create_technician(db, payload, current_user=current_user)
 
@@ -50,7 +50,7 @@ def put_technician(
     technician_id: int,
     payload: TechnicianUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["work_orders.manage"])),
 ) -> TechnicianRead:
     return update_technician(db, technician_id, payload, current_user=current_user)
 
@@ -62,7 +62,7 @@ def put_technician(
 def remove_technician(
     technician_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["work_orders.manage", "records.delete"])),
 ) -> Response:
     delete_technician(db, technician_id, current_user=current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

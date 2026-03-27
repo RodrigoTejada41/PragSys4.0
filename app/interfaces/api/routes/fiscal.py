@@ -22,7 +22,7 @@ from app.application.schemas import (
 )
 from app.core.exceptions import BusinessRuleViolation
 from app.infrastructure.db import get_db
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/fiscal", tags=["fiscal"])
 
@@ -30,7 +30,7 @@ router = APIRouter(prefix="/fiscal", tags=["fiscal"])
 @router.get(
     "/ncm",
     response_model=List[NcmTaxProfileRead],
-    dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
+    dependencies=[Depends(require_access(["master", "admin", "operador"], ["fiscal.view"]))],
 )
 def get_ncm_profiles(
     query: Optional[str] = None,
@@ -43,7 +43,7 @@ def get_ncm_profiles(
 @router.get(
     "/ncm/{codigo}",
     response_model=NcmTaxProfileRead,
-    dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
+    dependencies=[Depends(require_access(["master", "admin", "operador"], ["fiscal.view"]))],
 )
 def get_ncm_profile(codigo: str, db: Session = Depends(get_db)) -> NcmTaxProfileRead:
     profile = get_or_refresh_ncm_profile(db, codigo)
@@ -55,7 +55,7 @@ def get_ncm_profile(codigo: str, db: Session = Depends(get_db)) -> NcmTaxProfile
 @router.get(
     "/simples",
     response_model=List[SimplesNationalConfigRead],
-    dependencies=[Depends(require_roles(["master", "admin"]))],
+    dependencies=[Depends(require_access(["master", "admin"], ["fiscal.view"]))],
 )
 def get_simples_configs(db: Session = Depends(get_db)) -> List[SimplesNationalConfigRead]:
     return list_simples_configs(db)
@@ -64,7 +64,7 @@ def get_simples_configs(db: Session = Depends(get_db)) -> List[SimplesNationalCo
 @router.post(
     "/simples",
     response_model=SimplesNationalConfigRead,
-    dependencies=[Depends(require_roles(["master", "admin"]))],
+    dependencies=[Depends(require_access(["master", "admin"], ["fiscal.manage"]))],
 )
 def post_simples_config(payload: SimplesNationalConfigCreate, db: Session = Depends(get_db)) -> SimplesNationalConfigRead:
     return create_simples_config(db, payload)
@@ -73,7 +73,7 @@ def post_simples_config(payload: SimplesNationalConfigCreate, db: Session = Depe
 @router.put(
     "/simples/{config_id}",
     response_model=SimplesNationalConfigRead,
-    dependencies=[Depends(require_roles(["master", "admin"]))],
+    dependencies=[Depends(require_access(["master", "admin"], ["fiscal.manage"]))],
 )
 def put_simples_config(
     config_id: int,
@@ -86,7 +86,7 @@ def put_simples_config(
 @router.get(
     "/simples/resumo/{year}/{month}",
     response_model=SimplesNationalMonthlySummaryRead,
-    dependencies=[Depends(require_roles(["master", "admin"]))],
+    dependencies=[Depends(require_access(["master", "admin"], ["fiscal.view"]))],
 )
 def get_simples_summary(year: int, month: int, db: Session = Depends(get_db)) -> SimplesNationalMonthlySummaryRead:
     return get_simples_nacional_monthly_summary(db, year, month)
@@ -95,7 +95,7 @@ def get_simples_summary(year: int, month: int, db: Session = Depends(get_db)) ->
 @router.get(
     "/fluxo-caixa/resumo",
     response_model=FinanceCashFlowSummaryRead,
-    dependencies=[Depends(require_roles(["master", "admin"]))],
+    dependencies=[Depends(require_access(["master", "admin"], ["finance.view"]))],
 )
 def get_cash_flow_summary_view(period: str = "monthly", db: Session = Depends(get_db)) -> FinanceCashFlowSummaryRead:
     return get_cash_flow_summary(db, period=period)

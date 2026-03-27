@@ -1,11 +1,11 @@
-<aside class="main-sidebar sidebar-dark-success elevation-4">
-    <a href="#" class="brand-link">
+<aside class="main-sidebar sidebar-dark-success elevation-4 app-sidebar">
+    <a href="#" class="brand-link app-sidebar-brand">
         <i class="fas fa-bug brand-icon"></i>
         <span class="brand-text font-weight-light">SysPragas</span>
     </a>
 
     <div class="sidebar">
-        <div class="user-panel mt-3 pb-3 mb-3 d-flex align-items-center">
+        <div class="user-panel mt-3 pb-3 mb-3 d-flex align-items-center app-sidebar-user-panel">
             <div class="image d-flex align-items-center justify-content-center">
                 <span class="user-avatar"><i class="fas fa-user-shield"></i></span>
             </div>
@@ -17,7 +17,7 @@
             </div>
         </div>
 
-        <nav class="mt-2">
+        <nav class="mt-2 app-sidebar-nav">
             <ul class="nav nav-pills nav-sidebar flex-column" id="nav-list" data-widget="treeview" role="menu" data-accordion="false">
                 {% for item in nav_items %}
                 {% if item.kind == "header" %}

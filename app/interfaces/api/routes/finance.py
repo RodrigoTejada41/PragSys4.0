@@ -23,7 +23,7 @@ from app.application.services import (
 )
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/financeiro", tags=["financeiro"])
 
@@ -40,7 +40,7 @@ def get_finance_entries(
     tipo: Optional[str] = None,
     search: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.view"])),
 ) -> List[FinanceEntryRead]:
     return list_finance_entries(
         db,
@@ -60,7 +60,7 @@ def get_finance_entries(
 )
 def get_finance_dashboard_view(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.view"])),
 ) -> FinanceDashboardRead:
     return get_finance_dashboard(db, current_user=current_user)
 
@@ -71,7 +71,7 @@ def get_finance_dashboard_view(
 )
 def get_cash_ledger_entries(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.view"])),
 ) -> List[CashLedgerEntryRead]:
     return list_cash_ledger_entries(db, current_user=current_user)
 
@@ -84,7 +84,7 @@ def get_cash_ledger_entries(
 def post_finance_entry(
     payload: FinanceEntryCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.manage"])),
 ) -> FinanceEntryRead:
     return create_finance_entry(db, payload, current_user=current_user)
 
@@ -97,7 +97,7 @@ def put_finance_entry(
     finance_entry_id: int,
     payload: FinanceEntryUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.manage"])),
 ) -> FinanceEntryRead:
     return update_finance_entry(db, finance_entry_id, payload, current_user=current_user)
 
@@ -110,7 +110,7 @@ def pay_finance_entry(
     finance_entry_id: int,
     payload: Optional[FinancePaymentRequest] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.manage"])),
 ) -> FinanceEntryRead:
     return mark_finance_entry_as_paid(db, finance_entry_id, payload, current_user=current_user)
 
@@ -122,7 +122,7 @@ def pay_finance_entry(
 def remove_finance_entry(
     finance_entry_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["finance.manage", "records.delete"])),
 ) -> Response:
     delete_finance_entry(db, finance_entry_id, current_user=current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

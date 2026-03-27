@@ -29,7 +29,7 @@ from app.application.schemas import (
 )
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 
 router = APIRouter(tags=["contratos"])
 
@@ -85,7 +85,7 @@ def _contract_update_from_form(
 def get_customer_contracts(
     customer_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["contracts.view"])),
 ) -> List[ContractRead]:
     return list_customer_contracts(db, customer_id, current_user=current_user)
 
@@ -99,7 +99,7 @@ def post_customer_contract(
     payload: ContractCreate = Depends(_contract_create_from_form),
     arquivo: UploadFile | None = File(default=None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["contracts.manage"])),
 ) -> ContractRead:
     file_payload = None
     if arquivo is not None:
@@ -113,7 +113,7 @@ def post_customer_contract(
 )
 def get_contracts(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["contracts.view"])),
 ) -> List[ContractRead]:
     return list_contracts(db, current_user=current_user)
 
@@ -131,7 +131,7 @@ def get_contracts_report(
     data_vencimento_ate: Optional[date] = None,
     cobranca_ativa: Optional[bool] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["contracts.view"])),
 ) -> ContractReportRead:
     return get_contract_report(
         db,
@@ -156,7 +156,7 @@ def download_contracts_report_xlsx(
     data_vencimento_ate: Optional[date] = None,
     cobranca_ativa: Optional[bool] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["contracts.view"])),
 ) -> Response:
     filename, content = export_contract_report_xlsx(
         db,
@@ -186,7 +186,7 @@ def download_contracts_report_pdf(
     data_vencimento_ate: Optional[date] = None,
     cobranca_ativa: Optional[bool] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["contracts.view"])),
 ) -> Response:
     filename, content = export_contract_report_pdf(
         db,
@@ -212,7 +212,7 @@ def download_contracts_report_pdf(
 )
 def get_contracts_dashboard(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["contracts.view"])),
 ) -> ContractDashboardRead:
     return get_contract_dashboard(db, current_user=current_user)
 
@@ -224,7 +224,7 @@ def get_contracts_dashboard(
 def get_contract_by_id(
     contract_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["contracts.view"])),
 ) -> ContractRead:
     return get_contract(db, contract_id, current_user=current_user)
 
@@ -238,7 +238,7 @@ def put_contract(
     payload: ContractUpdate = Depends(_contract_update_from_form),
     arquivo: UploadFile | None = File(default=None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["contracts.manage"])),
 ) -> ContractRead:
     file_payload = None
     if arquivo is not None and arquivo.filename:
@@ -253,7 +253,7 @@ def put_contract(
 def remove_contract(
     contract_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["contracts.manage", "records.delete"])),
 ) -> Response:
     delete_contract(db, contract_id, current_user=current_user)
     return Response(status_code=204)
@@ -264,7 +264,7 @@ def get_contract_file(
     contract_id: int,
     download: bool = Query(default=False),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["contracts.view"])),
 ) -> Response:
     filename, content_type, content = get_contract_file_content(db, contract_id, current_user=current_user)
     disposition = "attachment" if download else "inline"
@@ -281,6 +281,6 @@ def get_contract_file(
 )
 def post_contract_maintenance(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin"])),
+    current_user: User = Depends(require_access(["master", "admin"], ["contracts.manage"])),
 ) -> ContractMaintenanceRead:
     return run_contract_maintenance(db, current_user=current_user)

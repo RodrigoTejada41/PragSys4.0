@@ -45,6 +45,7 @@ class UserRead(BaseModel):
     is_active: bool
     empresa_prestadora_id: Optional[int] = None
     empresa_prestadora_nome: Optional[str] = None
+    permissions: dict[str, bool] = Field(default_factory=dict)
 
 
 class ProviderCompanyBase(BaseModel):
@@ -58,6 +59,10 @@ class ProviderCompanyBase(BaseModel):
     bairro: Optional[str] = None
     cidade: Optional[str] = None
     estado: Optional[str] = Field(default=None, min_length=2, max_length=2)
+    is_active: bool = True
+    is_provider: bool = True
+    empresa_pai_id: Optional[int] = None
+    compartilha_visualizacao_estoque: bool = False
 
 
 class ProviderCompanyCreate(ProviderCompanyBase):
@@ -77,6 +82,9 @@ class ProviderCompanyRead(ProviderCompanyBase):
     google_calendar_id: Optional[str] = None
     google_account_email: Optional[str] = None
     google_connected: bool = False
+    empresa_pai_nome: Optional[str] = None
+    filiais_ids: List[int] = Field(default_factory=list)
+    filiais_nomes: List[str] = Field(default_factory=list)
 
 
 class UserCreate(BaseModel):
@@ -86,6 +94,7 @@ class UserCreate(BaseModel):
     role: UserRole
     is_active: bool = True
     empresa_prestadora_id: Optional[int] = None
+    permissions: dict[str, bool] = Field(default_factory=dict)
     nova_empresa_prestadora: Optional[ProviderCompanyCreate] = None
     licenca_inicial: Optional["LicenseCreate"] = None
 
@@ -97,6 +106,7 @@ class UserUpdate(BaseModel):
     is_active: bool = True
     password: Optional[str] = Field(default=None, min_length=6)
     empresa_prestadora_id: Optional[int] = None
+    permissions: dict[str, bool] = Field(default_factory=dict)
 
 
 class LicenseBase(BaseModel):
@@ -206,6 +216,52 @@ class ProductRead(ProductBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    empresa_prestadora_id: Optional[int] = None
+    empresa_prestadora_nome: Optional[str] = None
+
+
+class StockMovementCreate(BaseModel):
+    produto_id: int
+    tipo_movimento: str = Field(min_length=1, max_length=30)
+    quantidade: Decimal = Field(gt=0)
+    motivo: str = Field(min_length=3, max_length=255)
+    observacoes: Optional[str] = None
+    referencia: Optional[str] = Field(default=None, max_length=120)
+    empresa_prestadora_id: Optional[int] = None
+    empresa_relacionada_id: Optional[int] = None
+
+
+class StockMovementRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    produto_id: int
+    produto_nome: str
+    empresa_prestadora_id: int
+    empresa_prestadora_nome: Optional[str] = None
+    empresa_relacionada_id: Optional[int] = None
+    empresa_relacionada_nome: Optional[str] = None
+    usuario_id: Optional[int] = None
+    usuario_nome: Optional[str] = None
+    tipo_movimento: str
+    origem: str
+    motivo: str
+    quantidade: Decimal
+    saldo_anterior: Decimal
+    saldo_posterior: Decimal
+    referencia: Optional[str] = None
+    observacoes: Optional[str] = None
+    created_at: datetime
+
+
+class StockPositionRead(BaseModel):
+    produto_id: int
+    produto_nome: str
+    empresa_prestadora_id: int
+    empresa_prestadora_nome: str
+    estoque_atual: Decimal
+    estoque_minimo: Decimal
+    registro_ms: str
 
 
 class NcmTaxProfileRead(BaseModel):

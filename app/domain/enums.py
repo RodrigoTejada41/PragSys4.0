@@ -5,6 +5,7 @@ class UserRole(str, Enum):
     MASTER = "master"
     ADMIN = "admin"
     OPERADOR = "operador"
+    GESTOR_ESTOQUE = "gestor_estoque"
 
 
 class FinanceType(str, Enum):

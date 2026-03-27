@@ -21,7 +21,7 @@ from app.application.schemas import (
 from app.core.exceptions import BusinessRuleViolation
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/google-calendar", tags=["google-calendar"])
 
@@ -34,7 +34,7 @@ def post_google_oauth_start(
     appointment_id: Optional[int] = None,
     provider_company_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.manage", "integrations.manage"])),
 ) -> GoogleCalendarOAuthStartRead:
     return GoogleCalendarOAuthStartRead(
         authorization_url=build_google_oauth_authorization_url(
@@ -55,7 +55,7 @@ def post_google_login(
     appointment_id: Optional[int] = None,
     provider_company_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.manage", "integrations.manage"])),
 ) -> GoogleCalendarOAuthStartRead:
     return post_google_oauth_start(
         appointment_id=appointment_id,
@@ -72,7 +72,7 @@ def post_google_login(
 def get_google_status(
     provider_company_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.view"])),
 ) -> GoogleCalendarConnectionStatusRead:
     return GoogleCalendarConnectionStatusRead(
         **get_google_connection_status(
@@ -90,7 +90,7 @@ def get_google_status(
 def post_google_logout(
     provider_company_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.manage", "integrations.manage"])),
 ) -> GoogleCalendarConnectionStatusRead:
     return GoogleCalendarConnectionStatusRead(
         **logout_google_calendar(
@@ -108,7 +108,7 @@ def post_google_logout(
 def post_google_sync_or_connect(
     appointment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["appointments.manage", "integrations.manage"])),
 ) -> GoogleCalendarAppointmentSyncRead:
     return GoogleCalendarAppointmentSyncRead(
         **sync_appointment_with_google_or_request_oauth(db, appointment_id, current_user.id)

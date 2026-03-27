@@ -14,7 +14,7 @@ from app.application.services import (
 )
 from app.infrastructure.db import get_db
 from app.infrastructure.models import User
-from app.interfaces.api.deps import require_roles
+from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/clientes", tags=["clientes"])
 
@@ -22,11 +22,11 @@ router = APIRouter(prefix="/clientes", tags=["clientes"])
 @router.get(
     "",
     response_model=List[CustomerRead],
-    dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
+    dependencies=[Depends(require_access(["master", "admin", "operador"], ["customers.view"]))],
 )
 def get_customers(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["customers.view"])),
 ) -> List[CustomerRead]:
     return list_customers(db, current_user=current_user)
 
@@ -34,7 +34,7 @@ def get_customers(
 @router.get(
     "/consultar-cnpj/{cnpj}",
     response_model=CustomerCnpjLookupRead,
-    dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
+    dependencies=[Depends(require_access(["master", "admin", "operador"], ["customers.view"]))],
 )
 def get_customer_data_by_cnpj(cnpj: str) -> CustomerCnpjLookupRead:
     return lookup_company_by_cnpj(cnpj)
@@ -43,7 +43,7 @@ def get_customer_data_by_cnpj(cnpj: str) -> CustomerCnpjLookupRead:
 @router.get(
     "/consultar-cep/{cep}",
     response_model=AddressLookupRead,
-    dependencies=[Depends(require_roles(["master", "admin", "operador"]))],
+    dependencies=[Depends(require_access(["master", "admin", "operador"], ["customers.view"]))],
 )
 def get_customer_address_by_cep(cep: str) -> AddressLookupRead:
     return lookup_address_by_cep(cep)
@@ -57,7 +57,7 @@ def get_customer_address_by_cep(cep: str) -> AddressLookupRead:
 def post_customer(
     payload: CustomerCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["customers.edit"])),
 ) -> CustomerRead:
     return create_customer(db, payload, current_user=current_user)
 
@@ -70,7 +70,7 @@ def put_customer(
     customer_id: int,
     payload: CustomerUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["customers.edit"])),
 ) -> CustomerRead:
     return update_customer(db, customer_id, payload, current_user=current_user)
 
@@ -82,7 +82,7 @@ def put_customer(
 def remove_customer(
     customer_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(["master", "admin", "operador"])),
+    current_user: User = Depends(require_access(["master", "admin", "operador"], ["customers.edit", "records.delete"])),
 ) -> Response:
     delete_customer(db, customer_id, current_user=current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
