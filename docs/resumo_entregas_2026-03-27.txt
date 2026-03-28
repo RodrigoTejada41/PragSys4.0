@@ -1,0 +1,102 @@
+﻿Resumo das Entregas - SysPragas
+Data: 2026-03-27
+
+1. Multiempresa e isolamento por empresa
+- Estrutura multiempresa implantada com separacao por empresa_id.
+- Usuario passou a exigir empresa vinculada.
+- Isolamento de dados aplicado para operacoes por empresa.
+- Base preparada para matriz e filial com visao controlada de estoque.
+
+2. Controle de acesso (RBAC)
+- Nivel MASTER com acesso total.
+- Nivel ADMIN com acesso amplo, mas sem cadastro de empresa prestadora e sem licencas.
+- Nivel OPERADOR com acesso restrito.
+- Permissoes granulares por usuario com checkboxes.
+- Validacao de permissao aplicada no backend e refletida no frontend.
+
+3. Modulo de empresas prestadoras
+- Cadastro e gestao de empresas prestadoras implementado.
+- Relacao com usuarios e escopo multiempresa preparada.
+
+4. Estoque por empresa/unidade
+- Entrada, saida, saldo e historico por empresa.
+- Movimentacoes com motivo, usuario e data/hora.
+- Estrutura preparada para cenarios matriz/filial sem somar estoques.
+
+5. Design System e padronizacao visual
+- Tokens visuais centralizados.
+- Inputs, formularios, botoes, tabelas, badges, toasts, navbar e sidebar padronizados.
+- Dashboard e telas operacionais refinadas.
+- Navegacao ajustada para exibir apenas a tela ativa.
+
+6. Ordem de Servico e Relatorio Tecnico
+- OS reestruturada em secoes profissionais.
+- Relatorio Tecnico alinhado ao mesmo padrao da OS.
+- Validacoes regulatorias bloqueiam emissao se faltar dado obrigatorio.
+- Produtos aplicados em tabela organizada.
+- Assinaturas e dados legais padronizados.
+
+7. Configuracao institucional por empresa
+- Criado cadastro tecnico institucional por empresa para documentos.
+- Campos principais:
+  - responsavel tecnico
+  - conselho / registro profissional
+  - endereco da empresa
+  - licenca sanitaria
+  - licenca ambiental
+  - centro de informacao toxicologica
+  - CIT
+- Upload de licencas e assinatura.
+- Assinatura por upload e assinatura desenhada em canvas.
+
+8. Certificados e documentos
+- Padronizacao do CIT nos documentos.
+- Assinatura ajustada para nao estourar layout.
+- Certificados, OS e relatorios usando base institucional da empresa.
+
+9. Extracao automatica a partir de PDFs
+- Sistema passou a tentar extrair automaticamente do PDF:
+  - responsavel tecnico
+  - registro profissional
+  - endereco
+  - numero da licenca
+  - validade da licenca
+  - dados institucionais quando presentes no texto
+- Parser melhorado para:
+  - acentos
+  - variacoes de rotulo
+  - formatos reais como "Numero da Licenca" e "Registro: CRBio ..."
+  - validade em dd/mm/aaaa, mm/aaaa ou so ano
+- Limitacao mantida:
+  - se o dado nao existir no PDF, ele nao pode ser preenchido automaticamente
+  - CIT continua manual quando nao estiver escrito no PDF
+
+10. Ajustes recentes de UX nas configuracoes
+- Tela agora explica claramente que CIT nao e arquivo de upload.
+- Campos de CIT ficaram destacados visualmente.
+- Depois do upload, a tela de configuracoes e renderizada novamente para refletir os dados atualizados.
+
+11. Validacoes locais executadas ao longo da entrega
+- Testes automatizados com pytest.
+- Validacoes de lint com flake8.
+- Builds locais com Docker.
+- Health check local validado em http://127.0.0.1:8000/health.
+
+12. Commits principais realizados
+- 625467a - fix: refine navigation and button consistency
+- 369dc8f - feat: redesign work order document layout
+- 87fc02e - feat: align technical report with work order document
+- 8883ffa - feat: add institutional technical document settings
+- 08fb6dd - fix: standardize cit and document signature layout
+- fbec1ef - feat: extract technical data from uploaded license pdfs
+- d872e52 - fix: improve pdf regulatory data extraction
+- ee79e31 - fix: support realistic license pdf extraction
+- eaa1126 - fix: clarify cit manual configuration in settings
+- b8ab681 - fix: extract license expiry dates from pdfs
+- 49f8f69 - fix: refresh settings after uploads and parse license dates
+
+13. Situacao atual
+- Ambiente local em Docker esta funcional.
+- Fluxo de upload tecnico, documentos e configuracoes esta ativo.
+- O que depende do conteudo do PDF so sera preenchido automaticamente se o texto realmente existir no arquivo.
+- Quando algum campo especifico do PDF nao entra, o proximo ajuste e sempre no padrao exato desse documento.
