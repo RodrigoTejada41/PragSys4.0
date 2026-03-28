@@ -44,6 +44,57 @@
         {% include "components/footer.html" %}
     </div>
 
+    <div class="assistant-widget hidden" id="assistant-widget" aria-live="polite">
+        <button
+            type="button"
+            class="assistant-fab"
+            id="assistant-toggle"
+            aria-controls="assistant-panel"
+            aria-expanded="false"
+            aria-label="Abrir assistente virtual do sistema"
+        >
+            <span class="assistant-fab-icon" aria-hidden="true">?</span>
+            <span class="assistant-fab-label">Assistente</span>
+        </button>
+
+        <aside class="assistant-panel hidden" id="assistant-panel" aria-hidden="true">
+            <div class="assistant-panel-header">
+                <div>
+                    <p class="eyebrow">Assistente virtual</p>
+                    <h3>Treinador do sistema</h3>
+                    <p class="assistant-context" id="assistant-context-label">Ajuda contextual do modulo atual.</p>
+                </div>
+                <button
+                    type="button"
+                    class="btn btn-default ghost-button btn-sm assistant-minimize"
+                    id="assistant-minimize"
+                    aria-label="Minimizar assistente"
+                >
+                    Minimizar
+                </button>
+            </div>
+
+            <div class="assistant-messages" id="assistant-messages"></div>
+            <div class="assistant-suggestions" id="assistant-suggestions"></div>
+
+            <form class="assistant-form" id="assistant-form">
+                <label class="assistant-input-group" for="assistant-input">
+                    <span>Pergunte sobre esta tela ou fluxo</span>
+                    <textarea
+                        id="assistant-input"
+                        rows="2"
+                        maxlength="1200"
+                        placeholder="Ex.: Como criar uma OS? Como dar baixa no estoque?"
+                    ></textarea>
+                </label>
+                <div class="assistant-form-actions">
+                    <button type="button" class="btn btn-default ghost-button" id="assistant-context-help">Ajuda desta tela</button>
+                    <button type="submit" class="btn btn-primary" id="assistant-send">Enviar</button>
+                </div>
+            </form>
+        </aside>
+    </div>
+
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
 
     <script src="/static/vendor/jquery/jquery.min.js"></script>

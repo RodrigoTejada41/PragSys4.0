@@ -21,6 +21,15 @@ const state = {
     appointments: [],
     appointmentDashboard: null,
     settings: null,
+    assistant: {
+        currentView: "dashboard",
+        isOpen: false,
+        isLoading: false,
+        initialized: false,
+        messages: [],
+        suggestions: [],
+        contextLabel: "Dashboard",
+    },
     integrations: {
         whatsapp: null,
         whatsappConfig: null,
@@ -295,6 +304,7 @@ document.addEventListener("DOMContentLoaded", () => {
     buildForms();
     window.SysPragasUI?.enhanceAllForms();
     bindNavigation();
+    bindAssistant();
     bindWorkOrderModuleNavigation();
     bindFinanceModuleNavigation();
     bindNfeTabNavigation();
@@ -319,6 +329,261 @@ function bindNavigation() {
             switchView(button.dataset.view);
         });
     });
+}
+
+function bindAssistant() {
+    const toggle = document.getElementById("assistant-toggle");
+    const minimize = document.getElementById("assistant-minimize");
+    const form = document.getElementById("assistant-form");
+    const contextButton = document.getElementById("assistant-context-help");
+    const suggestions = document.getElementById("assistant-suggestions");
+    if (!toggle || !form || !suggestions) {
+        return;
+    }
+
+    toggle.addEventListener("click", async () => {
+        if (state.assistant.isOpen) {
+            closeAssistant();
+            return;
+        }
+        await openAssistant();
+    });
+
+    minimize?.addEventListener("click", () => {
+        closeAssistant();
+    });
+
+    contextButton?.addEventListener("click", async () => {
+        await sendAssistantPrompt("", { contextual: true });
+    });
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const input = document.getElementById("assistant-input");
+        if (!(input instanceof HTMLTextAreaElement)) {
+            return;
+        }
+        const value = input.value.trim();
+        if (!value || state.assistant.isLoading) {
+            return;
+        }
+        input.value = "";
+        await sendAssistantPrompt(value);
+    });
+
+    suggestions.addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-assistant-suggestion]");
+        if (!(button instanceof HTMLButtonElement) || state.assistant.isLoading) {
+            return;
+        }
+        await sendAssistantPrompt(button.dataset.assistantSuggestion || "");
+    });
+
+    renderAssistant();
+}
+
+function getAssistantStorageKey() {
+    if (!state.user?.id) {
+        return null;
+    }
+    return `syspragas_assistant_history_${state.user.id}`;
+}
+
+function loadAssistantHistory() {
+    const storageKey = getAssistantStorageKey();
+    if (!storageKey) {
+        state.assistant.messages = [];
+        return;
+    }
+    try {
+        const raw = localStorage.getItem(storageKey);
+        const parsed = raw ? JSON.parse(raw) : [];
+        state.assistant.messages = Array.isArray(parsed) ? parsed.slice(-20) : [];
+    } catch {
+        state.assistant.messages = [];
+    }
+}
+
+function persistAssistantHistory() {
+    const storageKey = getAssistantStorageKey();
+    if (!storageKey) {
+        return;
+    }
+    localStorage.setItem(storageKey, JSON.stringify(state.assistant.messages.slice(-20)));
+}
+
+function initializeAssistantForCurrentUser() {
+    state.assistant.initialized = true;
+    state.assistant.contextLabel = viewTitles[state.assistant.currentView] || viewTitles.dashboard;
+    loadAssistantHistory();
+    renderAssistant();
+}
+
+function syncAssistantVisibility() {
+    const widget = document.getElementById("assistant-widget");
+    if (!widget) {
+        return;
+    }
+    const shouldShow = Boolean(state.user && state.token);
+    widget.classList.toggle("hidden", !shouldShow);
+    if (!shouldShow) {
+        closeAssistant({ preserveHistory: false, forceHideWidget: false });
+    }
+}
+
+async function openAssistant() {
+    state.assistant.isOpen = true;
+    renderAssistant();
+    const input = document.getElementById("assistant-input");
+    if (input instanceof HTMLTextAreaElement) {
+        input.focus();
+    }
+    if (!state.assistant.messages.length) {
+        await sendAssistantPrompt("", { contextual: true, skipUserMessage: true });
+    }
+}
+
+function closeAssistant({ preserveHistory = true, forceHideWidget = false } = {}) {
+    state.assistant.isOpen = false;
+    state.assistant.isLoading = false;
+    if (!preserveHistory) {
+        state.assistant.messages = [];
+        state.assistant.suggestions = [];
+    }
+    if (forceHideWidget) {
+        document.getElementById("assistant-widget")?.classList.add("hidden");
+    }
+    renderAssistant();
+}
+
+function updateAssistantContext(view) {
+    state.assistant.currentView = view || "dashboard";
+    state.assistant.contextLabel = viewTitles[view] || viewTitles[resolveAppView(view)] || viewTitles.dashboard;
+    renderAssistantHeader();
+}
+
+function renderAssistantHeader() {
+    const contextLabel = document.getElementById("assistant-context-label");
+    if (!contextLabel) {
+        return;
+    }
+    const moduleName = state.assistant.contextLabel || "Dashboard";
+    const profile = state.user?.role ? String(state.user.role).toUpperCase() : "";
+    contextLabel.textContent = profile
+        ? `Tela atual: ${moduleName}. Perfil ${profile}.`
+        : `Tela atual: ${moduleName}.`;
+}
+
+function renderAssistant() {
+    const widget = document.getElementById("assistant-widget");
+    const panel = document.getElementById("assistant-panel");
+    const toggle = document.getElementById("assistant-toggle");
+    const messages = document.getElementById("assistant-messages");
+    const suggestions = document.getElementById("assistant-suggestions");
+    const sendButton = document.getElementById("assistant-send");
+    const input = document.getElementById("assistant-input");
+    if (!widget || !panel || !toggle || !messages || !suggestions) {
+        return;
+    }
+
+    renderAssistantHeader();
+    toggle.setAttribute("aria-expanded", state.assistant.isOpen ? "true" : "false");
+    panel.classList.toggle("hidden", !state.assistant.isOpen);
+    panel.setAttribute("aria-hidden", state.assistant.isOpen ? "false" : "true");
+
+    if (!state.assistant.messages.length) {
+        messages.innerHTML = `
+            <div class="assistant-empty-state">
+                Pergunte sobre a tela atual, fluxo operacional, permissao ou melhor pratica do sistema.
+            </div>
+        `;
+    } else {
+        messages.innerHTML = state.assistant.messages
+            .map((entry) => `
+                <div class="assistant-bubble ${entry.role === "user" ? "assistant-user" : "assistant-bot"}">
+                    ${escapeHtml(entry.content)}
+                </div>
+            `)
+            .join("");
+    }
+
+    if (state.assistant.isLoading) {
+        messages.insertAdjacentHTML(
+            "beforeend",
+            `<div class="assistant-bubble assistant-bot assistant-loading">Pensando na melhor orientacao para esta tela...</div>`,
+        );
+    }
+
+    messages.scrollTop = messages.scrollHeight;
+    suggestions.innerHTML = state.assistant.suggestions
+        .slice(0, 3)
+        .map((suggestion) =>
+            buildButtonHtml({
+                label: suggestion,
+                variant: "secondary",
+                type: "button",
+                classes: "assistant-suggestion",
+                dataAttributes: `data-assistant-suggestion="${escapeHtml(suggestion)}"`,
+            }),
+        )
+        .join("");
+
+    if (sendButton instanceof HTMLButtonElement) {
+        sendButton.disabled = state.assistant.isLoading;
+        sendButton.textContent = state.assistant.isLoading ? "Respondendo..." : "Enviar";
+    }
+    if (input instanceof HTMLTextAreaElement) {
+        input.disabled = state.assistant.isLoading;
+        input.placeholder = `Ex.: Como operar ${state.assistant.contextLabel || "esta tela"}?`;
+    }
+}
+
+async function sendAssistantPrompt(message, { contextual = false, skipUserMessage = false } = {}) {
+    if (!state.user || state.assistant.isLoading) {
+        return;
+    }
+
+    const cleanedMessage = String(message || "").trim();
+    if (cleanedMessage && !skipUserMessage) {
+        state.assistant.messages.push({ role: "user", content: cleanedMessage });
+    }
+
+    state.assistant.isLoading = true;
+    renderAssistant();
+
+    try {
+        const response = await apiFetch("/api/v1/assistente/chat", {
+            method: "POST",
+            body: JSON.stringify({
+                message: cleanedMessage,
+                current_view: state.assistant.currentView,
+                current_title: state.assistant.contextLabel,
+            }),
+        });
+        state.assistant.messages.push({ role: "assistant", content: response.answer });
+        state.assistant.suggestions = Array.isArray(response.suggestions) ? response.suggestions : [];
+        state.assistant.contextLabel = response.current_module || state.assistant.contextLabel;
+        persistAssistantHistory();
+    } catch (error) {
+        if (cleanedMessage && skipUserMessage) {
+            state.assistant.messages = state.assistant.messages.filter((entry) => entry.content !== cleanedMessage);
+        }
+        state.assistant.messages.push({
+            role: "assistant",
+            content: contextual
+                ? "Nao consegui carregar a ajuda contextual agora. Tente novamente em alguns segundos."
+                : `Nao consegui responder agora: ${error.message || "erro inesperado."}`,
+        });
+        state.assistant.suggestions = [
+            "O que posso fazer nesta tela?",
+            "Quais dados sao obrigatorios aqui?",
+            "Como evitar erros comuns?",
+        ];
+        persistAssistantHistory();
+    } finally {
+        state.assistant.isLoading = false;
+        renderAssistant();
+    }
 }
 
 function bindGoogleCalendarOAuth() {
@@ -716,8 +981,10 @@ async function bootstrapApp() {
     await loadAllData();
     document.getElementById("current-user-name").textContent = `${state.user.nome} - ${state.user.role}`;
     toggleMasterSections();
+    initializeAssistantForCurrentUser();
     document.getElementById("login-screen").classList.add("hidden");
     document.getElementById("app-shell").classList.remove("hidden");
+    syncAssistantVisibility();
     switchView("dashboard");
 }
 
@@ -732,6 +999,8 @@ function showLogin() {
         loginForm.querySelector('[name="password"]').value = "";
         loginForm.querySelector('[name="username"]')?.focus();
     }
+    closeAssistant({ preserveHistory: false });
+    syncAssistantVisibility();
     setSyncStatus("Sessao local");
 }
 
@@ -1102,6 +1371,7 @@ function switchView(view) {
         setAppointmentWorkspaceView(appointmentScreen || "operational");
     }
     document.getElementById("view-title").textContent = viewTitles[view] || viewTitles[appView] || viewTitles.dashboard;
+    updateAssistantContext(view);
     window.scrollTo({ top: 0, behavior: "smooth" });
 }
 

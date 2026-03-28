@@ -17,6 +17,7 @@ from app.application.contract_scheduler import contract_scheduler
 from app.infrastructure.db import get_db, init_db
 from app.infrastructure.models import User
 from app.interfaces.api.routes import (
+    assistant,
     appointments,
     auth,
     contracts,
@@ -133,6 +134,7 @@ def swagger_docs(_: User = Depends(_get_docs_master_user)):
 
 
 app.include_router(auth.router, prefix=settings.api_v1_prefix)
+app.include_router(assistant.router, prefix=settings.api_v1_prefix)
 app.include_router(contracts.router, prefix=settings.api_v1_prefix)
 app.include_router(customers.router, prefix=settings.api_v1_prefix)
 app.include_router(products.router, prefix=settings.api_v1_prefix)

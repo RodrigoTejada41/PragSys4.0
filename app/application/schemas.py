@@ -35,6 +35,19 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class AssistantChatRequest(BaseModel):
+    message: str = Field(default="", max_length=1200)
+    current_view: Optional[str] = Field(default=None, max_length=120)
+    current_title: Optional[str] = Field(default=None, max_length=160)
+
+
+class AssistantChatResponse(BaseModel):
+    answer: str
+    current_module: str
+    current_view: Optional[str] = None
+    suggestions: list[str] = Field(default_factory=list)
+
+
 class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
