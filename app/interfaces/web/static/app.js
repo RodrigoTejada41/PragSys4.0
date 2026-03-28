@@ -48,6 +48,7 @@ const state = {
     },
     workOrderScreen: "new",
     financeScreen: "lancamentos",
+    stockScreen: "operations",
     nfeTab: "issue",
     appointmentScreen: "operational",
     appointmentCalendarView: "month",
@@ -221,6 +222,8 @@ const viewTitles = {
     clientes: "Clientes",
     produtos: "Produtos",
     estoque: "Estoque",
+    "estoque-balanco": "Balanco de estoque",
+    "estoque-transferencias": "Transferencias de estoque",
     pragas: "Pragas",
     tecnicos: "Tecnicos",
     ordens: "Ordens de servico",
@@ -296,7 +299,7 @@ document.addEventListener("DOMContentLoaded", () => {
     bindAuth();
     bindDashboardFilters();
     bindStockFilters();
-    bindStockFocusActions();
+    bindStockViewButtons();
 
     if (state.token) {
         bootstrapApp().catch(() => showLogin());
@@ -576,6 +579,9 @@ function resolveAppView(view) {
     const rawView = String(view || "");
     if (rawView.startsWith("financeiro-")) {
         return "financeiro";
+    }
+    if (rawView.startsWith("estoque-")) {
+        return "estoque";
     }
     if (rawView.startsWith("ordens-")) {
         return "ordens";
@@ -1065,6 +1071,7 @@ function triggerBlobDownload(blob, fileName) {
 function switchView(view) {
     const appView = resolveAppView(view);
     const financeScreen = resolveFinanceScreenFromView(view);
+    const stockScreen = resolveStockScreenFromView(view);
     const workOrderScreen = resolveWorkOrderScreenFromView(view);
     const appointmentScreen = resolveAppointmentScreenFromView(view);
     document.querySelectorAll(".nav-link[data-view]").forEach((button) => {
@@ -1083,6 +1090,9 @@ function switchView(view) {
     }
     if (appView === "financeiro") {
         setFinanceWorkspaceView(financeScreen || "lancamentos");
+    }
+    if (appView === "estoque") {
+        setStockWorkspaceView(stockScreen || "operations");
     }
     if (appView === "agenda") {
         setAppointmentWorkspaceView(appointmentScreen || "operational");
@@ -1850,6 +1860,7 @@ function renderAll() {
     renderNfeEmissionFeedback();
     setWorkOrderWorkspaceView(state.workOrderScreen || "new");
     setFinanceWorkspaceView(state.financeScreen || "lancamentos");
+    setStockWorkspaceView(state.stockScreen || "operations");
     setNfeTabView(state.nfeTab || "issue");
     setAppointmentWorkspaceView(state.appointmentScreen || "operational");
     switchProviderCompanyTab(state.providerCompanyTab || "dados");
@@ -2073,6 +2084,8 @@ function buildForms() {
     `;
 
     const stockActionsPanel = document.getElementById("stock-actions-panel");
+    const stockBalancePanel = document.getElementById("stock-balance-panel");
+    const stockTransferPanel = document.getElementById("stock-transfer-panel");
     if (stockActionsPanel) {
         stockActionsPanel.innerHTML = `
             <section class="stock-section-block" id="stock-section-import">
@@ -2154,66 +2167,6 @@ function buildForms() {
                     </div>
                 </form>
             </section>
-            <section class="stock-section-block" id="stock-section-balance">
-                <div class="section-heading">
-                    <h3>Balanco e inventario</h3>
-                    <p>Informe o saldo contado ou abra um inventario por leitura continua para gerar ajuste com rastreabilidade.</p>
-                </div>
-                <form id="stock-balance-form" class="form-grid data-form">
-                    <label class="full-width"><span>Leitura rapida</span><div class="scanner-inline"><input name="codigo_lido" placeholder="Leia QR Code, codigo de barras ou digite o codigo interno"><button type="button" class="btn btn-default ghost-button" data-stock-scan="balance">Ler codigo</button></div></label>
-                    <label><span>Produto</span><select name="produto_id" required><option value="">Selecione um produto</option></select></label>
-                    <label><span>Armazem</span><select name="armazem_id"><option value="">Armazem padrao</option></select></label>
-                    <label><span>Local fisico</span><select name="local_id"><option value="">Local padrao</option></select></label>
-                    <label><span>Saldo contado</span><input name="saldo_contado" type="number" min="0" step="0.01" required></label>
-                    <label><span>Unidade</span>
-                        <select name="unidade_medida">
-                            <option value="UN">UN</option>
-                            <option value="ML">ML</option>
-                            <option value="L">L</option>
-                            <option value="G">G</option>
-                            <option value="KG">KG</option>
-                        </select>
-                    </label>
-                    <label><span>Justificativa</span><input name="motivo" required placeholder="Ex.: Inventario mensal"></label>
-                    <label><span>Referencia</span><input name="referencia" placeholder="BAL-..."></label>
-                    <label class="full-width"><span>Observacoes</span><textarea name="observacoes" rows="2"></textarea></label>
-                    <div class="inline-actions ui-form-actions">
-                        <button type="submit" class="btn btn-secondary">Registrar balanco</button>
-                    </div>
-                </form>
-                <div id="stock-inventory-panel" class="inline-details-panel"></div>
-            </section>
-            <section class="stock-section-block" id="stock-section-transfer">
-                <div class="section-heading">
-                    <h3>Transferencia entre unidades</h3>
-                    <p>Move saldo entre matriz e filiais vinculadas mantendo cada estoque separado.</p>
-                </div>
-                <form id="stock-transfer-form" class="form-grid data-form">
-                    <label class="full-width"><span>Leitura rapida</span><div class="scanner-inline"><input name="codigo_lido" placeholder="Leia QR Code, codigo de barras ou digite o codigo interno"><button type="button" class="btn btn-default ghost-button" data-stock-scan="transfer">Ler codigo</button></div></label>
-                    <label><span>Produto de origem</span><select name="produto_id" required><option value="">Selecione um produto</option></select></label>
-                    <label><span>Empresa destino</span><select name="empresa_destino_id" required><option value="">Selecione a empresa destino</option></select></label>
-                    <label><span>Armazem origem</span><select name="armazem_origem_id"><option value="">Armazem padrao</option></select></label>
-                    <label><span>Local origem</span><select name="local_origem_id"><option value="">Local padrao</option></select></label>
-                    <label><span>Armazem destino</span><select name="armazem_destino_id"><option value="">Armazem padrao</option></select></label>
-                    <label><span>Local destino</span><select name="local_destino_id"><option value="">Local padrao</option></select></label>
-                    <label><span>Quantidade</span><input name="quantidade" type="number" min="0.01" step="0.01" required></label>
-                    <label><span>Unidade</span>
-                        <select name="unidade_medida">
-                            <option value="UN">UN</option>
-                            <option value="ML">ML</option>
-                            <option value="L">L</option>
-                            <option value="G">G</option>
-                            <option value="KG">KG</option>
-                        </select>
-                    </label>
-                    <label><span>Motivo</span><input name="motivo" required placeholder="Ex.: Reposicao da filial"></label>
-                    <label><span>Referencia</span><input name="referencia" placeholder="TRF-..."></label>
-                    <label class="full-width"><span>Observacoes</span><textarea name="observacoes" rows="2"></textarea></label>
-                    <div class="inline-actions ui-form-actions">
-                        <button type="submit" class="btn btn-secondary">Transferir estoque</button>
-                    </div>
-                </form>
-            </section>
             <section class="stock-section-block" id="stock-section-structure">
                 <div class="section-heading">
                     <h3>Armazens, locais e etiquetas</h3>
@@ -2241,6 +2194,74 @@ function buildForms() {
                     <button type="button" class="btn btn-default ghost-button" id="stock-generate-labels-button">Gerar etiquetas PDF</button>
                 </div>
                 <div id="stock-structure-panel" class="inline-details-panel"></div>
+            </section>
+        `;
+    }
+    if (stockBalancePanel) {
+        stockBalancePanel.innerHTML = `
+            <section class="stock-section-block" id="stock-section-balance">
+                <div class="section-heading">
+                    <h3>Balanco e inventario</h3>
+                    <p>Use esta tela somente para saldo contado, conferencias, leituras continuas e ajuste de inventario.</p>
+                </div>
+                <form id="stock-balance-form" class="form-grid data-form">
+                    <label class="full-width"><span>Leitura rapida</span><div class="scanner-inline"><input name="codigo_lido" placeholder="Leia QR Code, codigo de barras ou digite o codigo interno"><button type="button" class="btn btn-default ghost-button" data-stock-scan="balance">Ler codigo</button></div></label>
+                    <label><span>Produto</span><select name="produto_id" required><option value="">Selecione um produto</option></select></label>
+                    <label><span>Armazem</span><select name="armazem_id"><option value="">Armazem padrao</option></select></label>
+                    <label><span>Local fisico</span><select name="local_id"><option value="">Local padrao</option></select></label>
+                    <label><span>Saldo contado</span><input name="saldo_contado" type="number" min="0" step="0.01" required></label>
+                    <label><span>Unidade</span>
+                        <select name="unidade_medida">
+                            <option value="UN">UN</option>
+                            <option value="ML">ML</option>
+                            <option value="L">L</option>
+                            <option value="G">G</option>
+                            <option value="KG">KG</option>
+                        </select>
+                    </label>
+                    <label><span>Justificativa</span><input name="motivo" required placeholder="Ex.: Inventario mensal"></label>
+                    <label><span>Referencia</span><input name="referencia" placeholder="BAL-..."></label>
+                    <label class="full-width"><span>Observacoes</span><textarea name="observacoes" rows="2"></textarea></label>
+                    <div class="inline-actions ui-form-actions">
+                        <button type="submit" class="btn btn-secondary">Registrar balanco</button>
+                    </div>
+                </form>
+                <div id="stock-inventory-panel" class="inline-details-panel"></div>
+            </section>
+        `;
+    }
+    if (stockTransferPanel) {
+        stockTransferPanel.innerHTML = `
+            <section class="stock-section-block" id="stock-section-transfer">
+                <div class="section-heading">
+                    <h3>Transferencia entre unidades</h3>
+                    <p>Use esta tela somente para transferencias entre matriz, filial, veiculo ou equipe, mantendo cada saldo separado.</p>
+                </div>
+                <form id="stock-transfer-form" class="form-grid data-form">
+                    <label class="full-width"><span>Leitura rapida</span><div class="scanner-inline"><input name="codigo_lido" placeholder="Leia QR Code, codigo de barras ou digite o codigo interno"><button type="button" class="btn btn-default ghost-button" data-stock-scan="transfer">Ler codigo</button></div></label>
+                    <label><span>Produto de origem</span><select name="produto_id" required><option value="">Selecione um produto</option></select></label>
+                    <label><span>Empresa destino</span><select name="empresa_destino_id" required><option value="">Selecione a empresa destino</option></select></label>
+                    <label><span>Armazem origem</span><select name="armazem_origem_id"><option value="">Armazem padrao</option></select></label>
+                    <label><span>Local origem</span><select name="local_origem_id"><option value="">Local padrao</option></select></label>
+                    <label><span>Armazem destino</span><select name="armazem_destino_id"><option value="">Armazem padrao</option></select></label>
+                    <label><span>Local destino</span><select name="local_destino_id"><option value="">Local padrao</option></select></label>
+                    <label><span>Quantidade</span><input name="quantidade" type="number" min="0.01" step="0.01" required></label>
+                    <label><span>Unidade</span>
+                        <select name="unidade_medida">
+                            <option value="UN">UN</option>
+                            <option value="ML">ML</option>
+                            <option value="L">L</option>
+                            <option value="G">G</option>
+                            <option value="KG">KG</option>
+                        </select>
+                    </label>
+                    <label><span>Motivo</span><input name="motivo" required placeholder="Ex.: Reposicao da filial"></label>
+                    <label><span>Referencia</span><input name="referencia" placeholder="TRF-..."></label>
+                    <label class="full-width"><span>Observacoes</span><textarea name="observacoes" rows="2"></textarea></label>
+                    <div class="inline-actions ui-form-actions">
+                        <button type="submit" class="btn btn-secondary">Transferir estoque</button>
+                    </div>
+                </form>
             </section>
         `;
     }
@@ -2805,6 +2826,7 @@ document.getElementById("pest-form").innerHTML = `
     bindStockTransferForm();
     bindStockStructureForms();
     bindStockCodeHelpers();
+    bindStockViewButtons();
     bindCustomerAutoLookup();
     bindNfeFormHelpers();
     bindProductFiscalControls();
@@ -2813,7 +2835,6 @@ document.getElementById("pest-form").innerHTML = `
     bindAppointmentWorkspace();
     bindFinancialModuleWorkspace();
     bindStockFilters();
-    bindStockFocusActions();
     clearWorkOrderForm();
     clearAppointmentForm();
     clearReceiptForm();
@@ -6859,6 +6880,68 @@ function bindStockTransferForm() {
     });
 }
 
+function setStockWorkspaceView(view) {
+    const allowedViews = new Set(["operations", "balance", "transfer"]);
+    state.stockScreen = allowedViews.has(view) ? view : "operations";
+    document.querySelectorAll("[data-stock-view]").forEach((button) => {
+        const mapped = button.dataset.stockView === "estoque-balanco"
+            ? "balance"
+            : button.dataset.stockView === "estoque-transferencias"
+                ? "transfer"
+                : "operations";
+        const isActive = mapped === state.stockScreen;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+    document.querySelectorAll("[data-stock-screen-panel]").forEach((panel) => {
+        const isActive = panel.dataset.stockScreenPanel === state.stockScreen;
+        panel.classList.toggle("is-active", isActive);
+        panel.hidden = !isActive;
+    });
+    const heading = document.getElementById("stock-view-heading");
+    if (heading) {
+        const copy = {
+            operations: {
+                title: "Operacao atual do estoque",
+                description: "Visualize saldo atual, importacoes, estrutura e historico operacional.",
+            },
+            balance: {
+                title: "Balanco e inventario",
+                description: "Use esta tela apenas para contagem, conferencias e ajustes de inventario.",
+            },
+            transfer: {
+                title: "Transferencias entre unidades",
+                description: "Use esta tela apenas para movimentacoes entre matriz, filial, veiculo ou equipe.",
+            },
+        };
+        heading.innerHTML = `<h3>${escapeHtml(copy[state.stockScreen].title)}</h3><p>${escapeHtml(copy[state.stockScreen].description)}</p>`;
+    }
+}
+
+function resolveStockScreenFromView(view) {
+    const rawView = String(view || "");
+    if (!rawView.startsWith("estoque-")) {
+        return rawView === "estoque" ? state.stockScreen || "operations" : null;
+    }
+    const mapped = rawView.replace("estoque-", "");
+    if (mapped === "balanco") {
+        return "balance";
+    }
+    if (mapped === "transferencias") {
+        return "transfer";
+    }
+    return "operations";
+}
+
+function openStockView(screen = "operations") {
+    const mapped = {
+        operations: "estoque",
+        balance: "estoque-balanco",
+        transfer: "estoque-transferencias",
+    };
+    switchView(mapped[screen] || "estoque");
+}
+
 function normalizeOptionalNumber(value) {
     const raw = String(value || "").trim();
     return raw ? Number(raw) : null;
@@ -7325,7 +7408,11 @@ function bindStockActionButtons() {
 }
 
 function openStockAction(action, productId = 0) {
-    switchView("estoque");
+    if (action === "balanco") {
+        switchView("estoque-balanco");
+    } else {
+        switchView("estoque");
+    }
     const product = state.products.find((item) => item.id === productId) || state.stockPositions.find((item) => item.produto_id === productId) || null;
     if (action === "entrada" || action === "saida") {
         const form = document.getElementById("stock-movement-form");
@@ -7366,22 +7453,14 @@ function openStockAction(action, productId = 0) {
     }
 }
 
-function bindStockFocusActions() {
-    document.querySelectorAll("[data-stock-focus]").forEach((button) => {
+function bindStockViewButtons() {
+    document.querySelectorAll("[data-stock-view]").forEach((button) => {
         if (button.dataset.bound === "true") {
             return;
         }
         button.dataset.bound = "true";
         button.addEventListener("click", () => {
-            const targetMap = {
-                movement: "stock-section-movement",
-                balance: "stock-section-balance",
-                transfer: "stock-section-transfer",
-                import: "stock-section-import",
-                history: "stock-movement-history",
-            };
-            const targetId = targetMap[button.dataset.stockFocus];
-            document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+            switchView(button.dataset.stockView || "estoque");
         });
     });
 }
@@ -7391,15 +7470,35 @@ function renderStockMovementHistory() {
     if (!target) {
         return;
     }
-    const recentItems = state.stockMovements.slice(0, 12);
+    const filteredMovements = state.stockScreen === "balance"
+        ? state.stockMovements.filter((item) => item.origem === "inventario_balanco" || item.origem === "inventario_leitura")
+        : state.stockScreen === "transfer"
+            ? state.stockMovements.filter((item) => item.origem === "transferencia")
+            : state.stockMovements;
+    const recentItems = filteredMovements.slice(0, 12);
     if (!recentItems.length) {
-        target.innerHTML = `<div class="empty-state">Nenhuma movimentacao de estoque registrada ainda.</div>`;
+        const emptyCopy = state.stockScreen === "balance"
+            ? "Nenhum balanco ou inventario registrado ainda."
+            : state.stockScreen === "transfer"
+                ? "Nenhuma transferencia registrada ainda."
+                : "Nenhuma movimentacao de estoque registrada ainda.";
+        target.innerHTML = `<div class="empty-state">${emptyCopy}</div>`;
         return;
     }
+    const title = state.stockScreen === "balance"
+        ? "Historico de balancos e inventarios"
+        : state.stockScreen === "transfer"
+            ? "Historico de transferencias"
+            : "Historico recente de estoque";
+    const description = state.stockScreen === "balance"
+        ? "Conferencias, leituras e ajustes aplicados no inventario."
+        : state.stockScreen === "transfer"
+            ? "Saidas e entradas entre matriz, filial, veiculo ou equipe."
+            : "Entradas, saidas, ajustes, balancos e transferencias por empresa/unidade.";
     target.innerHTML = `
         <div class="section-heading compact">
-            <h4>Historico recente de estoque</h4>
-            <p>Entradas, saidas, ajustes, balancos e transferencias por empresa/unidade.</p>
+            <h4>${escapeHtml(title)}</h4>
+            <p>${escapeHtml(description)}</p>
         </div>
         <div class="stack-list">
             ${recentItems
@@ -7430,6 +7529,12 @@ function renderStockImportHistory() {
     if (!target) {
         return;
     }
+    if (state.stockScreen !== "operations") {
+        target.innerHTML = "";
+        target.hidden = true;
+        return;
+    }
+    target.hidden = false;
     const recentItems = state.stockImportLogs.slice(0, 8);
     if (!recentItems.length) {
         target.innerHTML = `<div class="empty-state">Nenhuma importacao registrada ainda.</div>`;
@@ -7463,6 +7568,11 @@ function renderStockImportHistory() {
 function renderStockStructureSummary() {
     const target = document.getElementById("stock-structure-panel");
     if (!target) {
+        return;
+    }
+    target.hidden = state.stockScreen !== "operations";
+    if (state.stockScreen !== "operations") {
+        target.innerHTML = "";
         return;
     }
     target.innerHTML = `

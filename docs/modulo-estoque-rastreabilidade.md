@@ -69,3 +69,9 @@
 - node --check app/interfaces/web/static/app.js
 - docker compose up --build -d
 - health check em /health
+
+## Navegacao por paginas
+- Estoque: operacao geral, importacoes, estrutura e etiquetas
+- Balanco: contagem, conferencias e inventario
+- Transferencias: movimentacoes entre unidades vinculadas
+- cada tela mostra apenas o contexto operacional correspondente
