@@ -8,7 +8,10 @@ Foi adicionado um assistente virtual contextual para funcionar como "treinador d
 
 - botao flutuante fixo no canto inferior direito
 - painel retangular centralizado, com visual de central de ajuda
+- trilhas de primeiros passos logo na abertura
 - grade de cards clicaveis por modulo
+- atalhos do modulo atual, com foco na tela onde o usuario esta
+- favoritos e recentes por usuario, persistidos localmente
 - modo de ensino guiado dentro do proprio painel
 - chat textual como apoio secundario
 - base local de conhecimento, sem dependencia de API externa paga
@@ -33,6 +36,10 @@ Foi adicionado um assistente virtual contextual para funcionar como "treinador d
   - configuracoes
   - usuarios
   - empresas prestadoras
+  - responsavel tecnico
+  - certificados
+  - molduras
+  - backup e restauracao
   - licencas
 - se o usuario perguntar sobre um modulo sem permissao, o assistente responde com orientacao segura e avisa a restricao
 
@@ -40,6 +47,12 @@ Foi adicionado um assistente virtual contextual para funcionar como "treinador d
 
 - o primeiro clique abre a central de ajuda no centro da interface
 - o usuario pode aprender sem digitar, apenas clicando nos cards de modulo
+- a home do assistente agora mostra:
+  - primeiros passos
+  - atalhos do modulo atual
+  - modulos acessiveis
+  - favoritos
+  - topicos recentes
 - cada modulo abre um conteudo didatico com:
   - o que e
   - para que serve
@@ -50,6 +63,7 @@ Foi adicionado um assistente virtual contextual para funcionar como "treinador d
   - proxima acao sugerida
 - o chat textual continua disponivel como suporte complementar
 - o painel pode ser minimizado ou fechado sem perder o historico da conversa
+- os favoritos e os temas recentes ficam separados por usuario no navegador
 
 ## Arquitetura
 

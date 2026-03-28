@@ -31,6 +31,8 @@ const state = {
         chatOpen: false,
         messages: [],
         suggestions: [],
+        favorites: [],
+        recentTopics: [],
         contextLabel: "Dashboard",
     },
     integrations: {
@@ -600,6 +602,159 @@ const assistantModuleCards = {
             },
         },
     },
+    empresa_prestadora: {
+        icon: "fas fa-building",
+        title: "Empresa Prestadora",
+        description: "Cadastro institucional da empresa prestadora e seus dados-base.",
+        permission: "provider_companies.manage",
+        views: ["empresas"],
+        lessons: {
+            overview: {
+                title: "Empresa prestadora - como funciona",
+                sections: [
+                    ["O que e", "Cadastro principal da empresa prestadora que opera dentro do sistema."],
+                    ["Para que serve", "Organizar dados institucionais, multiempresa, matriz e filial, sem misturar escopos."],
+                    ["Onde fica", "Menu lateral > Cadastrar empresas."],
+                    ["Passo a passo", ["Abra Cadastrar empresas.", "Clique em Nova empresa.", "Preencha dados basicos, marque se e empresa prestadora e defina o relacionamento matriz/filial quando existir.", "Salve e valide se os usuarios da empresa serao vinculados corretamente."]],
+                    ["Exemplo pratico", "Cadastro da matriz Alpha Controle e da filial Alpha Zona Sul, com empresa pai vinculada."],
+                    ["Dica tecnica", "Evite criar empresa duplicada. Revise CNPJ, nome e status antes de salvar."],
+                    ["Proximo passo", "Depois vincule usuarios e revise as permissoes da empresa criada."],
+                ],
+            },
+            usuarios: {
+                title: "Vincular usuarios a empresa",
+                sections: [
+                    ["O que e", "Etapa de associar o usuario a empresa prestadora correta."],
+                    ["Para que serve", "Garantir isolamento por empresa e funcionamento do RBAC."],
+                    ["Onde fica", "Menu Usuarios > Novo usuario."],
+                    ["Passo a passo", ["Abra Usuarios.", "Clique em Novo usuario.", "Escolha a empresa prestadora correta.", "Defina o nivel de acesso e as permissoes.", "Salve e teste o menu do usuario."]],
+                    ["Exemplo pratico", "Admin da empresa Alpha acessando apenas os dados da propria empresa."],
+                    ["Dica tecnica", "Nunca deixe usuario sem empresa vinculada; isso quebra o escopo correto do sistema."],
+                    ["Proximo passo", "Revise depois o modulo Usuarios para validar as permissoes."],
+                ],
+            },
+        },
+    },
+    responsavel_tecnico: {
+        icon: "fas fa-user-doctor",
+        title: "Responsavel Tecnico",
+        description: "Dados do RT, registro profissional, assinatura e licencas.",
+        permission: "settings.view",
+        views: ["configuracoes"],
+        lessons: {
+            overview: {
+                title: "Responsavel tecnico - como configurar",
+                sections: [
+                    ["O que e", "Cadastro institucional do responsavel tecnico e dos dados obrigatorios para documentos."],
+                    ["Para que serve", "Liberar emissao de OS, relatorio tecnico, certificados e molduras com validade regulatoria."],
+                    ["Onde fica", "Menu Configuracoes > Dados tecnicos / Empresa."],
+                    ["Passo a passo", ["Preencha nome do responsavel tecnico.", "Informe conselho, numero e UF do registro.", "Suba ou desenhe a assinatura.", "Anexe licenca sanitaria e licenca ambiental.", "Revise CIT, endereco da empresa e salve."]],
+                    ["Exemplo pratico", "RT com CRBio ativo, assinatura cadastrada e licencas atualizadas."],
+                    ["Dica tecnica", "Sempre revise validade e dados extraidos dos PDFs antes de emitir documentos."],
+                    ["Proximo passo", "Depois gere um certificado ou relatorio para validar o resultado final."],
+                ],
+            },
+            licencas: {
+                title: "Anexar licencas e assinatura",
+                sections: [
+                    ["O que e", "Fluxo de carga dos arquivos tecnicos e assinatura institucional."],
+                    ["Para que serve", "Padronizar a base documental usada pelo sistema."],
+                    ["Onde fica", "Configuracoes > Dados tecnicos / Empresa."],
+                    ["Passo a passo", ["Envie a licenca sanitaria.", "Envie a licenca ambiental.", "Revise os campos preenchidos automaticamente pelo PDF.", "Suba a assinatura ou use o desenho no canvas.", "Salve a configuracao."]],
+                    ["Exemplo pratico", "Licenca ambiental em PDF preenchendo numero e validade automaticamente."],
+                    ["Dica tecnica", "Se o PDF nao trouxer algum dado, complemente manualmente antes de salvar."],
+                    ["Proximo passo", "Teste a emissao da OS ou do certificado."],
+                ],
+            },
+        },
+    },
+    certificados: {
+        icon: "fas fa-certificate",
+        title: "Certificados",
+        description: "Emissao de certificado tecnico, sanitario e documentos vinculados a OS.",
+        permission: "work_orders.view",
+        views: ["ordens", "ordens-nova", "ordens-cadastradas"],
+        lessons: {
+            overview: {
+                title: "Certificados - como gerar",
+                sections: [
+                    ["O que e", "Documento emitido a partir da ordem de servico e da configuracao tecnica da empresa."],
+                    ["Para que serve", "Formalizar a execucao do servico com base nos dados institucionais e tecnicos."],
+                    ["Onde fica", "Ordens de servico > OS cadastrada > Certificado."],
+                    ["Passo a passo", ["Salve a OS.", "Abra a ordem cadastrada.", "Clique em Certificado.", "Revise assinatura, CIT, licencas e dados da empresa.", "Imprima ou compartilhe o documento."]],
+                    ["Exemplo pratico", "Certificado emitido apos desinsetizacao com assinatura e licencas visiveis."],
+                    ["Dica tecnica", "Se houver bloqueio, revise primeiro Configuracoes > Dados tecnicos / Empresa."],
+                    ["Proximo passo", "Se precisar do layout decorado, abra Molduras."],
+                ],
+            },
+            validacao: {
+                title: "Validar antes de emitir",
+                sections: [
+                    ["O que e", "Checklist rapido para evitar bloqueio documental."],
+                    ["Para que serve", "Garantir que o documento saia completo e sem dados faltantes."],
+                    ["Onde fica", "Antes da emissao, dentro da OS e de Configuracoes."],
+                    ["Passo a passo", ["Confirme responsavel tecnico.", "Valide registro profissional e endereco da empresa.", "Revise CIT e centro de informacao toxicologica.", "Verifique licenca sanitaria e ambiental.", "Confirme a assinatura cadastrada."]],
+                    ["Exemplo pratico", "OS pronta para emissao, sem campos pendentes nas configuracoes tecnicas."],
+                    ["Dica tecnica", "Documentos tecnicos bloqueiam mesmo se a OS estiver salva. O problema geralmente esta na configuracao institucional."],
+                    ["Proximo passo", "Depois da emissao, valide tambem o relatorio tecnico correspondente."],
+                ],
+            },
+        },
+    },
+    molduras: {
+        icon: "fas fa-frame",
+        title: "Molduras",
+        description: "Documentos com moldura e acabamento visual vinculados a atendimentos.",
+        permission: "work_orders.view",
+        views: ["ordens", "ordens-nova", "ordens-cadastradas"],
+        lessons: {
+            overview: {
+                title: "Molduras - como emitir",
+                sections: [
+                    ["O que e", "Documento visual com moldura, assinatura e dados tecnicos posicionados no layout oficial."],
+                    ["Para que serve", "Entregar um documento final com apresentacao mais institucional."],
+                    ["Onde fica", "Ordens de servico > OS cadastrada > Moldura."],
+                    ["Passo a passo", ["Salve a OS.", "Abra a ordem cadastrada.", "Clique em Moldura.", "Revise dados tecnicos, assinatura e posicionamento visual.", "Exporte ou imprima."]],
+                    ["Exemplo pratico", "Moldura emitida para cliente comercial com assinatura centralizada e CIT no rodape."],
+                    ["Dica tecnica", "Se a assinatura parecer fora da margem, revise o arquivo de assinatura em Configuracoes."],
+                    ["Proximo passo", "Depois compare com o certificado tecnico para validar consistencia dos dados."],
+                ],
+            },
+        },
+    },
+    backup_restauracao: {
+        icon: "fas fa-database",
+        title: "Backup e Restauracao",
+        description: "Copias de seguranca e recuperacao controlada da base.",
+        permission: "settings.manage",
+        views: ["configuracoes"],
+        lessons: {
+            overview: {
+                title: "Backup e restauracao - como usar",
+                sections: [
+                    ["O que e", "Area de manutencao para gerar copia de seguranca e restaurar base quando necessario."],
+                    ["Para que serve", "Proteger dados antes de alteracoes importantes ou recuperar um estado valido."],
+                    ["Onde fica", "Menu Configuracoes > Manutencao do banco."],
+                    ["Passo a passo", ["Abra Configuracoes.", "Gere um backup antes de alteracoes criticas.", "Guarde o arquivo em local seguro.", "Se precisar restaurar, selecione o arquivo correto e confirme a operacao."]],
+                    ["Exemplo pratico", "Backup feito antes de deploy ou restauracao de homologacao."],
+                    ["Dica tecnica", "Nunca restaure sem gerar um backup atual do estado que sera substituido."],
+                    ["Proximo passo", "Depois da restauracao, valide login, health e os modulos principais."],
+                ],
+            },
+            restaurar: {
+                title: "Como restaurar com seguranca",
+                sections: [
+                    ["O que e", "Fluxo controlado para recuperar um snapshot valido do sistema."],
+                    ["Para que serve", "Reduzir risco de perda de dados durante recuperacao."],
+                    ["Onde fica", "Configuracoes > Manutencao do banco > Restaurar."],
+                    ["Passo a passo", ["Confirme qual arquivo sera restaurado.", "Gere um backup do estado atual.", "Selecione o arquivo de restauracao.", "Digite a confirmacao exigida.", "Aguarde o termino e valide o sistema."]],
+                    ["Exemplo pratico", "Restauracao do ambiente de desenvolvimento para retornar a uma base homologada."],
+                    ["Dica tecnica", "Sempre valide modulos-chave logo apos a restauracao: login, clientes, OS, financeiro e estoque."],
+                    ["Proximo passo", "Se quiser, depois gere um backup novo para registrar o estado restaurado."],
+                ],
+            },
+        },
+    },
     relatorios: {
         icon: "fas fa-chart-column",
         title: "Relatorios",
@@ -621,6 +776,27 @@ const assistantModuleCards = {
             },
         },
     },
+};
+
+const assistantStarterTopicsByRole = {
+    master: [
+        ["usuarios", "perfis"],
+        ["empresa_prestadora", "overview"],
+        ["responsavel_tecnico", "overview"],
+        ["backup_restauracao", "overview"],
+    ],
+    admin: [
+        ["ordens", "criar"],
+        ["estoque", "entrada"],
+        ["configuracoes", "documentos"],
+        ["usuarios", "perfis"],
+    ],
+    operador: [
+        ["ordens", "criar"],
+        ["estoque", "saida"],
+        ["clientes", "cadastrar"],
+        ["relatorios", "overview"],
+    ],
 };
 
 const dashboardCharts = {
@@ -772,6 +948,36 @@ function bindAssistant() {
     });
 
     panel.addEventListener("click", (event) => {
+        const favoriteToggle = event.target.closest("[data-assistant-favorite]");
+        if (favoriteToggle instanceof HTMLButtonElement) {
+            const moduleKey = favoriteToggle.dataset.assistantModule;
+            const lessonKey = favoriteToggle.dataset.assistantTopic;
+            if (moduleKey && lessonKey) {
+                toggleAssistantFavorite(moduleKey, lessonKey);
+            }
+            return;
+        }
+
+        const recentTopic = event.target.closest("[data-assistant-recent-topic]");
+        if (recentTopic instanceof HTMLButtonElement) {
+            const moduleKey = recentTopic.dataset.assistantModule;
+            const lessonKey = recentTopic.dataset.assistantTopic;
+            if (moduleKey && lessonKey) {
+                openAssistantLesson(moduleKey, lessonKey);
+            }
+            return;
+        }
+
+        const starterTopic = event.target.closest("[data-assistant-starter-topic]");
+        if (starterTopic instanceof HTMLButtonElement) {
+            const moduleKey = starterTopic.dataset.assistantModule;
+            const lessonKey = starterTopic.dataset.assistantTopic;
+            if (moduleKey && lessonKey) {
+                openAssistantLesson(moduleKey, lessonKey);
+            }
+            return;
+        }
+
         const button = event.target.closest("[data-assistant-module]");
         if (!(button instanceof HTMLButtonElement)) {
             return;
@@ -827,18 +1033,49 @@ function getAssistantStorageKey() {
     return `syspragas_assistant_history_${state.user.id}`;
 }
 
+function normalizeAssistantTopicRecord(record) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+    const moduleKey = String(record.moduleKey || "").trim();
+    const lessonKey = String(record.lessonKey || "").trim();
+    if (!moduleKey || !lessonKey || !assistantModuleCards[moduleKey]?.lessons?.[lessonKey]) {
+        return null;
+    }
+    return {
+        moduleKey,
+        lessonKey,
+    };
+}
+
 function loadAssistantHistory() {
     const storageKey = getAssistantStorageKey();
     if (!storageKey) {
         state.assistant.messages = [];
+        state.assistant.favorites = [];
+        state.assistant.recentTopics = [];
         return;
     }
     try {
         const raw = localStorage.getItem(storageKey);
-        const parsed = raw ? JSON.parse(raw) : [];
-        state.assistant.messages = Array.isArray(parsed) ? parsed.slice(-20) : [];
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (Array.isArray(parsed)) {
+            state.assistant.messages = parsed.slice(-20);
+            state.assistant.favorites = [];
+            state.assistant.recentTopics = [];
+            return;
+        }
+        state.assistant.messages = Array.isArray(parsed?.messages) ? parsed.messages.slice(-20) : [];
+        state.assistant.favorites = Array.isArray(parsed?.favorites)
+            ? parsed.favorites.map((record) => normalizeAssistantTopicRecord(record)).filter(Boolean)
+            : [];
+        state.assistant.recentTopics = Array.isArray(parsed?.recentTopics)
+            ? parsed.recentTopics.map((record) => normalizeAssistantTopicRecord(record)).filter(Boolean).slice(0, 8)
+            : [];
     } catch {
         state.assistant.messages = [];
+        state.assistant.favorites = [];
+        state.assistant.recentTopics = [];
     }
 }
 
@@ -847,7 +1084,103 @@ function persistAssistantHistory() {
     if (!storageKey) {
         return;
     }
-    localStorage.setItem(storageKey, JSON.stringify(state.assistant.messages.slice(-20)));
+    localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+            messages: state.assistant.messages.slice(-20),
+            favorites: state.assistant.favorites.slice(0, 8),
+            recentTopics: state.assistant.recentTopics.slice(0, 8),
+        }),
+    );
+}
+
+function getAssistantLessonEntry(moduleKey, lessonKey = "overview") {
+    const moduleConfig = assistantModuleCards[moduleKey];
+    if (!moduleConfig) {
+        return null;
+    }
+    const safeLessonKey = moduleConfig.lessons[lessonKey] ? lessonKey : "overview";
+    return {
+        moduleKey,
+        moduleConfig,
+        lessonKey: safeLessonKey,
+        lesson: moduleConfig.lessons[safeLessonKey],
+    };
+}
+
+function getAccessibleAssistantModules() {
+    return Object.entries(assistantModuleCards).filter(([moduleKey]) => canAccessAssistantModule(moduleKey));
+}
+
+function isAssistantTopicFavorite(moduleKey, lessonKey) {
+    return state.assistant.favorites.some((record) => record.moduleKey === moduleKey && record.lessonKey === lessonKey);
+}
+
+function toggleAssistantFavorite(moduleKey, lessonKey) {
+    const lessonEntry = getAssistantLessonEntry(moduleKey, lessonKey);
+    if (!lessonEntry) {
+        return;
+    }
+    const alreadyFavorite = isAssistantTopicFavorite(moduleKey, lessonEntry.lessonKey);
+    if (alreadyFavorite) {
+        state.assistant.favorites = state.assistant.favorites.filter(
+            (record) => !(record.moduleKey === moduleKey && record.lessonKey === lessonEntry.lessonKey),
+        );
+        toast("Tema removido dos favoritos do assistente.");
+    } else {
+        state.assistant.favorites = [
+            { moduleKey, lessonKey: lessonEntry.lessonKey },
+            ...state.assistant.favorites.filter(
+                (record) => !(record.moduleKey === moduleKey && record.lessonKey === lessonEntry.lessonKey),
+            ),
+        ].slice(0, 8);
+        toast("Tema favoritado no assistente.");
+    }
+    persistAssistantHistory();
+    renderAssistant();
+}
+
+function pushAssistantRecentTopic(moduleKey, lessonKey) {
+    const lessonEntry = getAssistantLessonEntry(moduleKey, lessonKey);
+    if (!lessonEntry) {
+        return;
+    }
+    state.assistant.recentTopics = [
+        { moduleKey, lessonKey: lessonEntry.lessonKey },
+        ...state.assistant.recentTopics.filter(
+            (record) => !(record.moduleKey === moduleKey && record.lessonKey === lessonEntry.lessonKey),
+        ),
+    ].slice(0, 8);
+    persistAssistantHistory();
+}
+
+function getAssistantStarterTopics() {
+    const role = String(state.user?.role || "operador").toLowerCase();
+    const contextualModule = resolveAssistantCurrentModule();
+    const starterRecords = [];
+    if (contextualModule && assistantModuleCards[contextualModule]) {
+        starterRecords.push([contextualModule, "overview"]);
+    }
+    starterRecords.push(...(assistantStarterTopicsByRole[role] || assistantStarterTopicsByRole.operador));
+    return starterRecords
+        .map(([moduleKey, lessonKey]) => normalizeAssistantTopicRecord({ moduleKey, lessonKey }))
+        .filter(Boolean)
+        .filter((record) => canAccessAssistantModule(record.moduleKey))
+        .filter((record, index, collection) =>
+            collection.findIndex((entry) => entry.moduleKey === record.moduleKey && entry.lessonKey === record.lessonKey) === index,
+        )
+        .slice(0, 4);
+}
+
+function buildAssistantTopicChip(moduleKey, lessonKey, label, classes = "") {
+    return buildButtonHtml({
+        label,
+        variant: "secondary",
+        type: "button",
+        size: "btn-sm",
+        classes,
+        dataAttributes: `data-assistant-recent-topic="true" data-assistant-module="${escapeHtml(moduleKey)}" data-assistant-topic="${escapeHtml(lessonKey)}"`,
+    });
 }
 
 function initializeAssistantForCurrentUser() {
@@ -925,6 +1258,7 @@ function openAssistantLesson(moduleKey, lessonKey = "overview") {
     }
     state.assistant.activeModule = moduleKey;
     state.assistant.activeLesson = moduleConfig.lessons[lessonKey] ? lessonKey : "overview";
+    pushAssistantRecentTopic(moduleKey, state.assistant.activeLesson);
     renderAssistant();
 }
 
@@ -943,6 +1277,17 @@ function renderAssistantContextBanner() {
     }
 
     const moduleConfig = assistantModuleCards[currentModule];
+    const lessonButtons = Object.entries(moduleConfig.lessons)
+        .slice(0, 3)
+        .map(([lessonKey, lesson]) => buildButtonHtml({
+            label: lesson.title,
+            variant: lessonKey === "overview" ? "primary" : "secondary",
+            type: "button",
+            size: "btn-sm",
+            classes: "assistant-context-cta",
+            dataAttributes: `data-assistant-recent-topic="true" data-assistant-module="${escapeHtml(currentModule)}" data-assistant-topic="${escapeHtml(lessonKey)}"`,
+        }))
+        .join("");
     banner.innerHTML = `
         <h4>Atalho da tela atual: ${escapeHtml(moduleConfig.title)}</h4>
         <p>Voce esta em ${escapeHtml(state.assistant.contextLabel || moduleConfig.title)}. Posso te guiar neste fluxo agora mesmo.</p>
@@ -954,6 +1299,81 @@ function renderAssistantContextBanner() {
                 classes: "assistant-context-cta",
                 dataAttributes: `data-assistant-module="${escapeHtml(currentModule)}"`,
             })}
+            ${lessonButtons}
+        </div>
+    `;
+}
+
+function renderAssistantGuideStrip() {
+    const guideStrip = document.getElementById("assistant-guide-strip");
+    if (!guideStrip) {
+        return;
+    }
+    const starterTopics = getAssistantStarterTopics();
+    guideStrip.innerHTML = `
+        <div class="assistant-section-heading">
+            <div>
+                <p class="eyebrow">Primeiros passos</p>
+                <h4>Rotas guiadas para aprender o sistema sem digitar</h4>
+            </div>
+            <span class="assistant-section-badge">${starterTopics.length} trilhas</span>
+        </div>
+        <div class="assistant-guide-grid">
+            ${starterTopics.map((record) => {
+                const lessonEntry = getAssistantLessonEntry(record.moduleKey, record.lessonKey);
+                if (!lessonEntry) {
+                    return "";
+                }
+                return `
+                    <button
+                        type="button"
+                        class="assistant-guide-card"
+                        data-assistant-starter-topic="true"
+                        data-assistant-module="${escapeHtml(record.moduleKey)}"
+                        data-assistant-topic="${escapeHtml(record.lessonKey)}"
+                    >
+                        <strong>${escapeHtml(lessonEntry.lesson.title)}</strong>
+                        <span>${escapeHtml(lessonEntry.moduleConfig.title)}</span>
+                        <small>Aprender este fluxo</small>
+                    </button>
+                `;
+            }).join("")}
+        </div>
+    `;
+}
+
+function renderAssistantShortcutsCard() {
+    const shortcutCard = document.getElementById("assistant-shortcuts-card");
+    if (!shortcutCard) {
+        return;
+    }
+    const contextualModule = resolveAssistantCurrentModule();
+    const moduleKey = contextualModule && canAccessAssistantModule(contextualModule) ? contextualModule : getAccessibleAssistantModules()[0]?.[0];
+    const moduleConfig = moduleKey ? assistantModuleCards[moduleKey] : null;
+    if (!moduleConfig) {
+        shortcutCard.innerHTML = "";
+        return;
+    }
+    shortcutCard.innerHTML = `
+        <div class="assistant-section-heading">
+            <div>
+                <p class="eyebrow">Atalhos do modulo</p>
+                <h4>${escapeHtml(moduleConfig.title)}</h4>
+            </div>
+            <span class="assistant-section-badge">${Object.keys(moduleConfig.lessons).length} topicos</span>
+        </div>
+        <p class="assistant-home-copy">Escolha um subtema para abrir explicacao, exemplo real e proximo passo dentro do mesmo painel.</p>
+        <div class="assistant-topic-chip-row">
+            ${Object.entries(moduleConfig.lessons)
+                .map(([lessonKey, lesson]) => buildButtonHtml({
+                    label: lesson.title,
+                    variant: lessonKey === "overview" ? "primary" : "secondary",
+                    type: "button",
+                    size: "btn-sm",
+                    classes: "assistant-topic-chip",
+                    dataAttributes: `data-assistant-recent-topic="true" data-assistant-module="${escapeHtml(moduleKey)}" data-assistant-topic="${escapeHtml(lessonKey)}"`,
+                }))
+                .join("")}
         </div>
     `;
 }
@@ -965,8 +1385,16 @@ function renderAssistantModuleGrid() {
     }
 
     const contextualModule = resolveAssistantCurrentModule();
-    moduleGrid.innerHTML = Object.entries(assistantModuleCards)
-        .filter(([moduleKey]) => canAccessAssistantModule(moduleKey))
+    const accessibleModules = getAccessibleAssistantModules();
+    moduleGrid.innerHTML = `
+        <div class="assistant-section-heading assistant-section-heading-full">
+            <div>
+                <p class="eyebrow">Modulos do sistema</p>
+                <h4>Escolha um assunto para aprender por clique</h4>
+            </div>
+            <span class="assistant-section-badge">${accessibleModules.length} modulos</span>
+        </div>
+        ${accessibleModules
         .map(([moduleKey, moduleConfig]) => `
             <button
                 type="button"
@@ -976,10 +1404,77 @@ function renderAssistantModuleGrid() {
                 <i class="${escapeHtml(moduleConfig.icon)}" aria-hidden="true"></i>
                 <strong>${escapeHtml(moduleConfig.title)}</strong>
                 <span>${escapeHtml(moduleConfig.description)}</span>
-                <small>Clique para aprender</small>
+                <small>${Object.keys(moduleConfig.lessons).length} topicos guiados</small>
             </button>
         `)
-        .join("");
+        .join("")}
+    `;
+}
+
+function renderAssistantFavoritesPanel() {
+    const panel = document.getElementById("assistant-favorites-panel");
+    if (!panel) {
+        return;
+    }
+    const favoriteTopics = state.assistant.favorites
+        .map((record) => getAssistantLessonEntry(record.moduleKey, record.lessonKey))
+        .filter(Boolean)
+        .filter((entry) => canAccessAssistantModule(entry.moduleKey))
+        .slice(0, 6);
+    panel.innerHTML = `
+        <div class="assistant-section-heading">
+            <div>
+                <p class="eyebrow">Favoritos</p>
+                <h4>Seus temas salvos</h4>
+            </div>
+            <span class="assistant-section-badge">${favoriteTopics.length}</span>
+        </div>
+        ${
+            favoriteTopics.length
+                ? `<div class="assistant-topic-chip-row">${favoriteTopics
+                    .map((entry) => buildAssistantTopicChip(
+                        entry.moduleKey,
+                        entry.lessonKey,
+                        `${entry.moduleConfig.title}: ${entry.lesson.title}`,
+                        "assistant-topic-chip",
+                    ))
+                    .join("")}</div>`
+                : '<p class="assistant-home-copy">Abra um tema e clique em Favoritar para montar sua trilha de apoio.</p>'
+        }
+    `;
+}
+
+function renderAssistantRecentPanel() {
+    const panel = document.getElementById("assistant-recent-panel");
+    if (!panel) {
+        return;
+    }
+    const recentTopics = state.assistant.recentTopics
+        .map((record) => getAssistantLessonEntry(record.moduleKey, record.lessonKey))
+        .filter(Boolean)
+        .filter((entry) => canAccessAssistantModule(entry.moduleKey))
+        .slice(0, 6);
+    panel.innerHTML = `
+        <div class="assistant-section-heading">
+            <div>
+                <p class="eyebrow">Recentes</p>
+                <h4>Ultimos temas consultados</h4>
+            </div>
+            <span class="assistant-section-badge">${recentTopics.length}</span>
+        </div>
+        ${
+            recentTopics.length
+                ? `<div class="assistant-topic-chip-row">${recentTopics
+                    .map((entry) => buildAssistantTopicChip(
+                        entry.moduleKey,
+                        entry.lessonKey,
+                        `${entry.moduleConfig.title}: ${entry.lesson.title}`,
+                        "assistant-topic-chip",
+                    ))
+                    .join("")}</div>`
+                : '<p class="assistant-home-copy">Assim que voce abrir topicos, eles aparecem aqui para retomar rapidamente.</p>'
+        }
+    `;
 }
 
 function renderAssistantLessonDetail() {
@@ -1007,7 +1502,21 @@ function renderAssistantLessonDetail() {
     detail.classList.remove("hidden");
 
     detailCopy.innerHTML = `
-        <h4>${escapeHtml(lesson.title)}</h4>
+        <div class="assistant-detail-header">
+            <div>
+                <p class="eyebrow">${escapeHtml(moduleConfig.title)}</p>
+                <h4>${escapeHtml(lesson.title)}</h4>
+                <p class="assistant-home-copy">Guia pratico para ${escapeHtml(moduleConfig.title.toLowerCase())}, com passo a passo real e proxima acao recomendada.</p>
+            </div>
+            ${buildButtonHtml({
+                label: isAssistantTopicFavorite(moduleKey, lessonKey) ? "Favorito salvo" : "Favoritar tema",
+                variant: isAssistantTopicFavorite(moduleKey, lessonKey) ? "primary" : "secondary",
+                type: "button",
+                size: "btn-sm",
+                classes: "assistant-favorite-button",
+                dataAttributes: `data-assistant-favorite="true" data-assistant-module="${escapeHtml(moduleKey)}" data-assistant-topic="${escapeHtml(lessonKey)}"`,
+            })}
+        </div>
         ${lesson.sections.map(([heading, content]) => {
             const body = Array.isArray(content)
                 ? `<ol>${content.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>`
@@ -1049,7 +1558,11 @@ function renderAssistant() {
 
     renderAssistantHeader();
     renderAssistantContextBanner();
+    renderAssistantGuideStrip();
+    renderAssistantShortcutsCard();
     renderAssistantModuleGrid();
+    renderAssistantFavoritesPanel();
+    renderAssistantRecentPanel();
     renderAssistantLessonDetail();
     toggle.setAttribute("aria-expanded", state.assistant.isOpen ? "true" : "false");
     overlay.classList.toggle("hidden", !state.assistant.isOpen);

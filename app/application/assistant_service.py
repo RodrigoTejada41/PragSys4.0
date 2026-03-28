@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import re
 import unicodedata
 from typing import Iterable
 
@@ -10,6 +11,10 @@ from app.infrastructure.models import User
 def _normalize_text(value: str | None) -> str:
     normalized = unicodedata.normalize("NFKD", value or "")
     return "".join(char for char in normalized if not unicodedata.combining(char)).strip().lower()
+
+
+def _tokenize(value: str | None) -> list[str]:
+    return re.findall(r"[a-z0-9_]+", _normalize_text(value))
 
 
 def _dedupe_preserve_order(values: Iterable[str]) -> list[str]:
@@ -181,6 +186,26 @@ ANSWER_BANK = {
         ["Como cadastrar usuario", "Como cadastrar empresa prestadora", "Como usar configuracoes"],
         "Usuarios",
     ),
+    "empresa prestadora": (
+        "Como cadastrar empresa prestadora. Esse fluxo cria a base institucional da empresa dentro do sistema multiempresa. Onde fica: Menu Cadastrar empresas. Passo a passo: 1. Abra Cadastrar empresas. 2. Clique em Nova empresa. 3. Preencha dados basicos, marque a empresa como prestadora e configure relacao matriz/filial se existir. 4. Salve o cadastro. Exemplo: Alpha Controle matriz com filial Alpha Zona Sul vinculada. Dica: revise CNPJ e status antes de salvar para evitar duplicidade. Proximo passo recomendado: vincular usuarios a empresa criada.",
+        ["Como cadastrar usuario", "Como controlar permissoes de usuario", "Como usar configuracoes"],
+        "Empresas prestadoras",
+    ),
+    "moldura": (
+        "Como gerar moldura. A moldura usa a OS salva e os dados tecnicos da empresa para montar um documento com acabamento visual institucional. Onde fica: na OS cadastrada, apos salvar a ordem. Passo a passo: 1. Salve a OS. 2. Abra a ordem cadastrada. 3. Clique em Moldura. 4. Revise assinatura, CIT e licencas. 5. Imprima ou compartilhe. Exemplo: moldura emitida com assinatura ajustada e CIT no rodape. Dica: se a assinatura sair da margem, revise o arquivo em Configuracoes > Dados tecnicos / Empresa. Proximo passo recomendado: comparar o documento com o certificado tecnico.",
+        ["Como gerar certificado", "Como configurar responsavel tecnico", "Como anexar licencas"],
+        "Ordens de servico",
+    ),
+    "backup": (
+        "Como gerar backup. O backup cria uma copia de seguranca da base antes de qualquer mudanca importante. Onde fica: Configuracoes > Manutencao do banco. Passo a passo: 1. Abra Configuracoes. 2. Acesse a manutencao do banco. 3. Clique em gerar backup. 4. Guarde o arquivo em local seguro. Exemplo: backup feito antes de deploy ou restauracao. Dica: gere sempre um backup novo antes de restaurar qualquer base. Proximo passo recomendado: se precisar recuperar dados, siga para restauracao controlada.",
+        ["Como restaurar backup", "Como usar configuracoes", "Como controlar permissoes de usuario"],
+        "Configuracoes",
+    ),
+    "restauracao": (
+        "Como restaurar backup. A restauracao substitui o estado atual por uma copia valida do banco. Onde fica: Configuracoes > Manutencao do banco. Passo a passo: 1. Gere um backup atual antes de tudo. 2. Selecione o arquivo correto. 3. Digite a confirmacao exigida. 4. Aguarde a conclusao. 5. Valide login, health e os modulos principais. Exemplo: restauracao do ambiente homologado apos teste indevido. Dica: nunca restaure sem ter um backup atual do estado que esta sendo trocado. Proximo passo recomendado: validar clientes, OS, financeiro e estoque.",
+        ["Como gerar backup", "Como usar configuracoes", "Como gerar certificado"],
+        "Configuracoes",
+    ),
 }
 
 
@@ -191,6 +216,7 @@ def _resolve_module(current_view: str | None) -> str:
 
 def build_assistant_reply(current_user: User, message: str | None, current_view: str | None, current_title: str | None = None) -> AssistantChatResponse:
     normalized_message = _normalize_text(message)
+    normalized_tokens = _tokenize(message)
     module_key = _resolve_module(current_view)
     current_module = MODULE_TITLES.get(module_key, "Ajuda do sistema")
     context_overview, context_suggestions = CONTEXT_GUIDES.get(
@@ -227,7 +253,7 @@ def build_assistant_reply(current_user: User, message: str | None, current_view:
     best_key = None
     best_score = 0
     for key in ANSWER_BANK:
-        score = sum(1 for token in normalized_message.split() if token in key)
+        score = sum(1 for token in normalized_tokens if token and token in key)
         if score > best_score:
             best_key = key
             best_score = score

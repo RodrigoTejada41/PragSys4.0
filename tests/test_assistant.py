@@ -74,3 +74,20 @@ def test_assistant_can_open_with_context_only(client, auth_headers):
     payload = response.json()
     assert payload["current_module"] == "Ordens de servico"
     assert "Estou olhando a tela Ordens de servico" in payload["answer"]
+
+
+def test_assistant_answers_backup_flow(client, auth_headers):
+    response = client.post(
+        "/api/v1/assistente/chat",
+        json={
+            "message": "Como gerar backup?",
+            "current_view": "configuracoes",
+            "current_title": "Configuracoes",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["current_module"] == "Configuracoes"
+    assert "Manutencao do banco" in payload["answer"]
