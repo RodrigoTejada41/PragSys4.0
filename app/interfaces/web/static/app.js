@@ -225,6 +225,7 @@ const viewTitles = {
     "estoque-importacoes": "Importacoes de estoque",
     "estoque-balanco": "Balanco de estoque",
     "estoque-inventario": "Inventario de estoque",
+    "estoque-etiquetas": "Etiquetas de estoque",
     "estoque-transferencias": "Transferencias de estoque",
     pragas: "Pragas",
     tecnicos: "Tecnicos",
@@ -2089,6 +2090,7 @@ function buildForms() {
     const stockImportPanel = document.getElementById("stock-import-panel");
     const stockBalancePanel = document.getElementById("stock-balance-panel");
     const stockInventoryWorkspacePanel = document.getElementById("stock-inventory-workspace-panel");
+    const stockLabelsPanel = document.getElementById("stock-labels-panel");
     const stockTransferPanel = document.getElementById("stock-transfer-panel");
     if (stockActionsPanel) {
         stockActionsPanel.innerHTML = `
@@ -2149,9 +2151,6 @@ function buildForms() {
                     <label class="full-width"><span>Descricao</span><input name="descricao" placeholder="Contexto do local"></label>
                     <div class="inline-actions ui-form-actions"><button type="submit" class="btn btn-default">Salvar local</button></div>
                 </form>
-                <div class="inline-actions ui-form-actions">
-                    <button type="button" class="btn btn-default ghost-button" id="stock-generate-labels-button">Gerar etiquetas PDF</button>
-                </div>
                 <div id="stock-structure-panel" class="inline-details-panel"></div>
             </section>
         `;
@@ -2245,6 +2244,20 @@ function buildForms() {
                     <p>Abra uma sessao de inventario, leia os produtos em sequencia e finalize com ajuste automatico quando necessario.</p>
                 </div>
                 <div id="stock-inventory-panel" class="inline-details-panel"></div>
+            </section>
+        `;
+    }
+    if (stockLabelsPanel) {
+        stockLabelsPanel.innerHTML = `
+            <section class="stock-section-block" id="stock-section-labels">
+                <div class="section-heading">
+                    <h3>Etiquetas e identificacao</h3>
+                    <p>Gere etiquetas em PDF, revise codigos de barras e QR Codes e prepare a leitura no campo.</p>
+                </div>
+                <div class="inline-actions ui-form-actions">
+                    <button type="button" class="btn btn-default ghost-button" id="stock-generate-labels-button">Gerar etiquetas PDF</button>
+                </div>
+                <div id="stock-labels-summary" class="inline-details-panel"></div>
             </section>
         `;
     }
@@ -6899,7 +6912,7 @@ function bindStockTransferForm() {
 }
 
 function setStockWorkspaceView(view) {
-    const allowedViews = new Set(["operations", "imports", "balance", "inventory", "transfer"]);
+    const allowedViews = new Set(["operations", "imports", "balance", "inventory", "labels", "transfer"]);
     state.stockScreen = allowedViews.has(view) ? view : "operations";
     document.querySelectorAll("[data-stock-view]").forEach((button) => {
         const mapped = button.dataset.stockView === "estoque-importacoes"
@@ -6908,6 +6921,8 @@ function setStockWorkspaceView(view) {
             ? "balance"
             : button.dataset.stockView === "estoque-inventario"
                 ? "inventory"
+            : button.dataset.stockView === "estoque-etiquetas"
+                ? "labels"
             : button.dataset.stockView === "estoque-transferencias"
                 ? "transfer"
                 : "operations";
@@ -6939,6 +6954,10 @@ function setStockWorkspaceView(view) {
                 title: "Inventario por leitura",
                 description: "Use esta tela apenas para abrir inventarios, registrar leituras continuas e fechar divergencias.",
             },
+            labels: {
+                title: "Etiquetas e identificacao",
+                description: "Use esta tela apenas para gerar etiquetas PDF e revisar codigos de identificacao dos produtos.",
+            },
             transfer: {
                 title: "Transferencias entre unidades",
                 description: "Use esta tela apenas para movimentacoes entre matriz, filial, veiculo ou equipe.",
@@ -6963,6 +6982,9 @@ function resolveStockScreenFromView(view) {
     if (mapped === "inventario") {
         return "inventory";
     }
+    if (mapped === "etiquetas") {
+        return "labels";
+    }
     if (mapped === "transferencias") {
         return "transfer";
     }
@@ -6975,6 +6997,7 @@ function openStockView(screen = "operations") {
         imports: "estoque-importacoes",
         balance: "estoque-balanco",
         inventory: "estoque-inventario",
+        labels: "estoque-etiquetas",
         transfer: "estoque-transferencias",
     };
     switchView(mapped[screen] || "estoque");
@@ -7430,6 +7453,7 @@ function renderStockModule() {
     renderStockImportHistory();
     renderStockStructureSummary();
     renderStockInventoryPanel();
+    renderStockLabelsSummary();
     bindStockActionButtons();
 }
 
@@ -7641,6 +7665,34 @@ function renderStockStructureSummary() {
                     <div class="origin-note">${escapeHtml(item.codigo)} | ${escapeHtml(item.empresa_prestadora_nome || "-")} | ${escapeHtml(item.tipo || "armazem")}</div>
                 </article>
             `).join("") || '<div class="empty-state">Nenhum armazem cadastrado ainda.</div>'}
+        </div>
+    `;
+}
+
+function renderStockLabelsSummary() {
+    const target = document.getElementById("stock-labels-summary");
+    if (!target) {
+        return;
+    }
+    target.hidden = state.stockScreen !== "labels";
+    if (state.stockScreen !== "labels") {
+        target.innerHTML = "";
+        return;
+    }
+    const visibleProducts = getFilteredStockPositions();
+    target.innerHTML = `
+        <div class="section-heading compact">
+            <h4>Resumo para etiquetas</h4>
+            <p>${escapeHtml(String(visibleProducts.length))} produto(s) no filtro atual prontos para gerar PDF.</p>
+        </div>
+        <div class="stack-list">
+            ${visibleProducts.slice(0, 12).map((item) => `
+                <article class="list-card">
+                    <strong>${escapeHtml(item.produto_nome)}</strong>
+                    <div class="origin-note">${escapeHtml(item.codigo_barras || "-")} | ${escapeHtml(item.qr_code_value || "-")}</div>
+                    <div>${escapeHtml(item.armazem_nome || "Armazem padrao")} | ${escapeHtml(item.local_nome || "Local padrao")}</div>
+                </article>
+            `).join("") || '<div class="empty-state">Nenhum produto disponivel para gerar etiquetas.</div>'}
         </div>
     `;
 }

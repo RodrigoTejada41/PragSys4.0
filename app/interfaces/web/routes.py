@@ -26,6 +26,7 @@ NAV_ITEMS = [
     {"view": "estoque-importacoes", "label": "Importacoes", "icon": "fas fa-file-import", "classes": "stock-only"},
     {"view": "estoque-balanco", "label": "Balanco", "icon": "fas fa-clipboard-check", "classes": "stock-only"},
     {"view": "estoque-inventario", "label": "Inventario", "icon": "fas fa-qrcode", "classes": "stock-only"},
+    {"view": "estoque-etiquetas", "label": "Etiquetas", "icon": "fas fa-tags", "classes": "stock-only"},
     {"view": "estoque-transferencias", "label": "Transferencias", "icon": "fas fa-exchange-alt", "classes": "stock-only"},
     {"view": "pragas", "label": "Pragas", "icon": "fas fa-bug", "classes": ""},
     {"view": "tecnicos", "label": "Tecnicos", "icon": "fas fa-user-cog", "classes": ""},
