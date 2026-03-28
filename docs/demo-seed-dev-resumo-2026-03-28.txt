@@ -1,0 +1,70 @@
+Base demonstrativa DEV - SysPragas
+Data: 2026-03-28
+Commit implantado no DEV: cba681e
+
+URL DEV:
+http://172.233.183.241:8001/app
+
+Health:
+http://172.233.183.241:8001/health
+
+Credenciais base demonstrativa:
+- master.demo / Demo@123
+- admin.demo / Demo@123
+- operador.demo / Demo@123
+- admin.filial.demo / Demo@123
+
+Credencial administrativa existente:
+- admin / Dev25032015Lu@
+
+Empresa principal criada:
+- Dedetiza Prime Servicos Ambientais Ltda
+- CNPJ: 11222333000181
+
+Filial criada:
+- Dedetiza Prime Filial Centro Ltda
+- CNPJ: 11222333000199
+
+Cobertura da base:
+- empresas prestadoras e filial vinculada
+- usuarios com niveis e permissoes
+- dados tecnicos institucionais
+- assinatura mock e licencas mock
+- produtos com UN, ML e KG
+- armazens e locais fisicos
+- entrada, balanco, inventario e transferencia
+- importacao CSV e XML com log
+- clientes PF e PJ
+- contratos ativo, a vencer e vencido
+- ordens de servico aberta, em execucao e concluida
+- baixa automatica de estoque por OS
+- financeiro, cobranca mock e recibo
+- PDFs de OS, relatorio tecnico, certificado, moldura, garantia e recibo
+
+Arquivos gerados na VPS DEV:
+- /var/www/systempragas-dev/output/demo_seed_dev/dataset_blueprint.json
+- /var/www/systempragas-dev/output/demo_seed_dev/dataset_manifest.json
+- /var/www/systempragas-dev/output/demo_seed_dev/demo_seed_dump.sql
+- /var/www/systempragas-dev/output/demo_seed_dev/documents/ordem_servico_demo.pdf
+- /var/www/systempragas-dev/output/demo_seed_dev/documents/relatorio_tecnico_demo.pdf
+- /var/www/systempragas-dev/output/demo_seed_dev/documents/certificado_sanitario_demo.pdf
+- /var/www/systempragas-dev/output/demo_seed_dev/documents/certificado_moldura_demo.pdf
+- /var/www/systempragas-dev/output/demo_seed_dev/documents/garantia_demo.pdf
+- /var/www/systempragas-dev/output/demo_seed_dev/documents/recibo_demo.pdf
+
+Quantidades geradas no DEV:
+- empresas: 2
+- usuarios demo: 4
+- produtos empresa principal: 7
+- produtos filial: 1
+- clientes: 4
+- contratos: 3
+- ordens de servico: 4
+- lancamentos financeiros: 19
+- movimentacoes de estoque: 21
+
+Observacoes:
+- a aplicacao DEV esta saudavel
+- a seed foi executada com sucesso no servidor
+- os arquivos PDF de demonstracao foram gerados
+- o sistema atual nao possui campo nativo ativo/inativo em produto; a base respeita o schema real existente
