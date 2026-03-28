@@ -2,6 +2,7 @@ import csv
 import json
 import logging
 import re
+import zipfile
 from calendar import monthrange
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -40,11 +41,15 @@ from app.application.schemas import (
     PestCreate,
     PestUpdate,
     ProviderCompanyCreate,
+    ProviderCompanyRead,
     ProviderCompanyUpdate,
     ProductCreate,
     ProductCsvImportResult,
+    StockBalanceCreate,
+    StockImportLogRead,
     StockMovementCreate,
     StockPositionRead,
+    StockTransferCreate,
     ProductXmlImportResult,
     ProductUpdate,
     TechnicianCreate,
@@ -69,6 +74,7 @@ from app.infrastructure.models import (
     Pest,
     ProviderCompany,
     Product,
+    StockImportLog,
     StockMovement,
     Technician,
     User,
@@ -79,6 +85,14 @@ from app.infrastructure.models import (
 )
 
 MONEY_QUANTIZER = Decimal("0.01")
+SUPPORTED_STOCK_UNITS = {"UN", "ML", "L", "G", "KG"}
+UNIT_DIMENSIONS = {
+    "UN": ("unit", Decimal("1")),
+    "ML": ("volume", Decimal("1")),
+    "L": ("volume", Decimal("1000")),
+    "G": ("mass", Decimal("1")),
+    "KG": ("mass", Decimal("1000")),
+}
 MAX_WORK_ORDER_PHOTO_BYTES = 5 * 1024 * 1024
 MAX_WORK_ORDER_PHOTO_ITEMS = 8
 ALLOWED_WORK_ORDER_PHOTO_TYPES = {
@@ -94,6 +108,29 @@ def _money(value: Decimal) -> Decimal:
     if value is None:
         return Decimal("0.00")
     return Decimal(value).quantize(MONEY_QUANTIZER)
+
+
+def _normalize_stock_unit(value: Optional[str], *, field_label: str = "unidade de medida") -> str:
+    normalized = str(value or "UN").strip().upper()
+    if normalized not in SUPPORTED_STOCK_UNITS:
+        raise BusinessRuleViolation(
+            f"{field_label.capitalize()} invalida. Use apenas: {', '.join(sorted(SUPPORTED_STOCK_UNITS))}."
+        )
+    return normalized
+
+
+def _convert_stock_quantity(quantity: Decimal, source_unit: str, target_unit: str) -> Decimal:
+    source = _normalize_stock_unit(source_unit)
+    target = _normalize_stock_unit(target_unit)
+    if source == target:
+        return _money(Decimal(quantity))
+    source_dimension, source_factor = UNIT_DIMENSIONS[source]
+    target_dimension, target_factor = UNIT_DIMENSIONS[target]
+    if source_dimension != target_dimension:
+        raise BusinessRuleViolation("Nao e possivel converter entre unidades de medida incompativeis.")
+    base_quantity = Decimal(quantity) * source_factor
+    converted = base_quantity / target_factor
+    return _money(converted)
 
 
 def _run_document_generation(document_kind: str, work_order_id: int, builder) -> bytes:
@@ -279,6 +316,7 @@ def _serialize_provider_company(provider_company: ProviderCompany) -> ProviderCo
 def _serialize_product(product: Product) -> Product:
     company = getattr(product, "empresa_prestadora", None)
     product.empresa_prestadora_nome = company.nome_fantasia or company.razao_social if company else None
+    product.unidade_medida = _normalize_stock_unit(getattr(product, "unidade_medida", "UN"))
     return product
 
 
@@ -295,6 +333,21 @@ def _serialize_stock_movement(item: StockMovement) -> StockMovement:
         else None
     )
     item.usuario_nome = item.usuario.nome if item.usuario else None
+    item.unidade_medida = _normalize_stock_unit(getattr(item, "unidade_medida", "UN"))
+    return item
+
+
+def _serialize_stock_import_log(item: StockImportLog) -> StockImportLog:
+    item.empresa_prestadora_nome = (
+        item.empresa_prestadora.nome_fantasia or item.empresa_prestadora.razao_social
+        if getattr(item, "empresa_prestadora", None)
+        else None
+    )
+    item.usuario_nome = item.usuario.nome if getattr(item, "usuario", None) else None
+    try:
+        item.errors = json.loads(item.errors_json or "[]")
+    except json.JSONDecodeError:
+        item.errors = []
     return item
 
 
@@ -692,11 +745,131 @@ def _parse_products_csv(csv_content: bytes) -> dict:
     }
 
 
+def _parse_products_xlsx(xlsx_content: bytes) -> dict:
+    try:
+        with zipfile.ZipFile(BytesIO(xlsx_content)) as archive:
+            shared_strings = _read_xlsx_shared_strings(archive)
+            sheet_xml = archive.read("xl/worksheets/sheet1.xml")
+    except Exception as exc:
+        raise BusinessRuleViolation("Nao foi possivel ler a planilha XLSX informada.") from exc
+
+    namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    try:
+        root = ET.fromstring(sheet_xml)
+    except ET.ParseError as exc:
+        raise BusinessRuleViolation("A planilha XLSX esta invalida.") from exc
+
+    rows: list[tuple[int, dict[str, str]]] = []
+    header: list[str] = []
+    for row_index, row_node in enumerate(root.findall(".//s:sheetData/s:row", namespace), start=1):
+        row_values = _read_xlsx_row_values(row_node, namespace, shared_strings)
+        if row_index == 1:
+            header = [str(value or "").strip() for value in row_values]
+            continue
+        if not header:
+            raise BusinessRuleViolation("A planilha XLSX esta sem cabecalho.")
+        normalized_row = {
+            header[index]: str(row_values[index]).strip() if index < len(row_values) and row_values[index] is not None else ""
+            for index in range(len(header))
+            if header[index]
+        }
+        if not any(normalized_row.values()):
+            continue
+        rows.append((row_index, normalized_row))
+
+    required_columns = {"nome", "registro_ms", "quantidade_entrada"}
+    missing = required_columns - {field.strip() for field in header if field}
+    if missing:
+        raise BusinessRuleViolation(f"Planilha sem as colunas obrigatorias: {', '.join(sorted(missing))}.")
+    if not rows:
+        raise BusinessRuleViolation("Nenhuma linha valida foi encontrada na planilha.")
+
+    return {
+        "rows": rows,
+        "referencia_lote": f"XLSX-{date.today().isoformat()}",
+        "data_importacao": date.today(),
+    }
+
+
+def _read_xlsx_shared_strings(archive: zipfile.ZipFile) -> list[str]:
+    try:
+        payload = archive.read("xl/sharedStrings.xml")
+    except KeyError:
+        return []
+    namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    root = ET.fromstring(payload)
+    return ["".join(node.itertext()) for node in root.findall(".//s:si", namespace)]
+
+
+def _read_xlsx_row_values(row_node: ET.Element, namespace: dict[str, str], shared_strings: list[str]) -> list[str]:
+    values: list[str] = []
+    next_index = 0
+    for cell in row_node.findall("s:c", namespace):
+        reference = cell.attrib.get("r", "")
+        column_letters = "".join(char for char in reference if char.isalpha())
+        current_index = _xlsx_column_to_index(column_letters)
+        while next_index < current_index:
+            values.append("")
+            next_index += 1
+
+        cell_type = cell.attrib.get("t")
+        raw_value = cell.findtext("s:v", default="", namespaces=namespace)
+        if cell_type == "s" and raw_value.isdigit():
+            resolved = shared_strings[int(raw_value)] if int(raw_value) < len(shared_strings) else ""
+        else:
+            resolved = raw_value
+        values.append(resolved)
+        next_index = current_index + 1
+    return values
+
+
+def _xlsx_column_to_index(column_letters: str) -> int:
+    index = 0
+    for char in column_letters.upper():
+        if not ("A" <= char <= "Z"):
+            continue
+        index = index * 26 + (ord(char) - ord("A") + 1)
+    return max(index - 1, 0)
+
+
 def _find_product_for_import(db: Session, registro_ms: str, nome: str) -> Optional[Product]:
     product = db.query(Product).filter(Product.registro_ms == registro_ms).first()
     if product is None:
         product = db.query(Product).filter(Product.nome == nome).first()
     return product
+
+
+def _log_stock_import(
+    db: Session,
+    *,
+    current_user: Optional[User],
+    tipo_arquivo: str,
+    origem: str,
+    referencia: str,
+    nome_arquivo: Optional[str],
+    produtos_processados: int,
+    produtos_criados: int,
+    produtos_atualizados: int,
+    total_movimentado: Decimal,
+    errors: Optional[list[str]] = None,
+) -> None:
+    company_id = _get_new_record_company_id(current_user)
+    if company_id is None:
+        return
+    entry = StockImportLog(
+        empresa_prestadora_id=company_id,
+        usuario_id=current_user.id if current_user else None,
+        tipo_arquivo=tipo_arquivo,
+        origem=origem,
+        referencia=referencia,
+        nome_arquivo=nome_arquivo,
+        produtos_processados=produtos_processados,
+        produtos_criados=produtos_criados,
+        produtos_atualizados=produtos_atualizados,
+        total_movimentado=_money(total_movimentado),
+        errors_json=json.dumps(errors or [], ensure_ascii=False),
+    )
+    db.add(entry)
 
 
 def _get_pest_or_fail(db: Session, pest_id: int, current_user: Optional[User] = None) -> Pest:
@@ -752,6 +925,28 @@ def list_provider_companies(db: Session) -> List[ProviderCompany]:
         .order_by(ProviderCompany.razao_social.asc())
         .all()
     )
+    return [_serialize_provider_company(item) for item in companies]
+
+
+def list_stock_companies(db: Session, current_user: Optional[User] = None) -> List[ProviderCompanyRead]:
+    query = db.query(ProviderCompany).options(
+        joinedload(ProviderCompany.usuarios),
+        joinedload(ProviderCompany.empresa_pai),
+        joinedload(ProviderCompany.filiais),
+    )
+    if current_user is None or _is_master_user(current_user):
+        companies = query.filter(ProviderCompany.is_active.is_(True)).order_by(ProviderCompany.razao_social.asc()).all()
+    else:
+        accessible_company_ids = _get_stock_accessible_company_ids(current_user)
+        companies = (
+            query.filter(
+                ProviderCompany.id.in_(accessible_company_ids),
+                ProviderCompany.is_active.is_(True),
+                ProviderCompany.is_provider.is_(True),
+            )
+            .order_by(ProviderCompany.razao_social.asc())
+            .all()
+        )
     return [_serialize_provider_company(item) for item in companies]
 
 
@@ -1083,9 +1278,11 @@ def _resolve_stock_company_id(
     db: Session,
     current_user: Optional[User],
     provider_company_id: Optional[int] = None,
+    *,
+    enforce_user_company_scope: bool = True,
 ) -> int:
     if provider_company_id is not None:
-        if current_user and not _is_master_user(current_user):
+        if enforce_user_company_scope and current_user and not _is_master_user(current_user):
             accessible_company_ids = _get_stock_accessible_company_ids(current_user)
             own_company_id = _require_company_scope(current_user)
             if provider_company_id not in accessible_company_ids or provider_company_id != own_company_id:
@@ -1112,12 +1309,19 @@ def _create_stock_movement_entry(
     notes: Optional[str] = None,
     target_company_id: Optional[int] = None,
     related_company_id: Optional[int] = None,
+    unit_of_measure: Optional[str] = None,
+    enforce_user_company_scope: bool = True,
 ) -> StockMovement:
     normalized_quantity = _money(abs(Decimal(quantity)))
     if normalized_quantity <= Decimal("0.00"):
         raise BusinessRuleViolation("A quantidade movimentada deve ser maior que zero.")
 
-    company_id = _resolve_stock_company_id(db, current_user, target_company_id or product.empresa_prestadora_id)
+    company_id = _resolve_stock_company_id(
+        db,
+        current_user,
+        target_company_id or product.empresa_prestadora_id,
+        enforce_user_company_scope=enforce_user_company_scope,
+    )
     if product.empresa_prestadora_id != company_id:
         raise BusinessRuleViolation("O produto selecionado nao pertence a empresa informada para o estoque.")
 
@@ -1141,6 +1345,7 @@ def _create_stock_movement_entry(
         origem=origin,
         motivo=reason,
         quantidade=normalized_quantity,
+        unidade_medida=_normalize_stock_unit(unit_of_measure or product.unidade_medida),
         saldo_anterior=previous_balance,
         saldo_posterior=next_balance,
         referencia=reference,
@@ -1177,9 +1382,12 @@ def list_stock_positions(
                 produto_nome=product.nome,
                 empresa_prestadora_id=product.empresa_prestadora_id,
                 empresa_prestadora_nome=company.nome_fantasia or company.razao_social if company else "Sem empresa",
+                categoria=product.categoria,
+                unidade_medida=_normalize_stock_unit(product.unidade_medida),
                 estoque_atual=_money(Decimal(product.estoque_atual)),
                 estoque_minimo=_money(Decimal(product.estoque_minimo)),
                 registro_ms=product.registro_ms,
+                estoque_baixo=Decimal(product.estoque_atual) <= Decimal(product.estoque_minimo),
             )
         )
     return positions
@@ -1222,11 +1430,13 @@ def create_stock_movement(
     current_user: Optional[User] = None,
 ) -> StockMovement:
     product = _get_product_or_fail(db, payload.produto_id, current_user=current_user)
+    movement_unit = _normalize_stock_unit(payload.unidade_medida or product.unidade_medida)
+    normalized_quantity = _convert_stock_quantity(Decimal(payload.quantidade), movement_unit, product.unidade_medida)
     movement = _create_stock_movement_entry(
         db,
         product,
         movement_type=payload.tipo_movimento,
-        quantity=payload.quantidade,
+        quantity=normalized_quantity,
         reason=payload.motivo,
         current_user=current_user,
         origin="manual",
@@ -1234,16 +1444,161 @@ def create_stock_movement(
         notes=payload.observacoes,
         target_company_id=payload.empresa_prestadora_id,
         related_company_id=payload.empresa_relacionada_id,
+        unit_of_measure=product.unidade_medida,
     )
     db.commit()
     db.refresh(movement)
     return _serialize_stock_movement(movement)
 
 
+def create_stock_balance(
+    db: Session,
+    payload: StockBalanceCreate,
+    current_user: Optional[User] = None,
+) -> StockMovement:
+    product = _get_product_or_fail(db, payload.produto_id, current_user=current_user)
+    counted_unit = _normalize_stock_unit(payload.unidade_medida or product.unidade_medida)
+    counted_balance = _convert_stock_quantity(Decimal(payload.saldo_contado), counted_unit, product.unidade_medida)
+    current_balance = _money(Decimal(product.estoque_atual))
+    difference = _money(counted_balance - current_balance)
+    if difference == Decimal("0.00"):
+        raise BusinessRuleViolation("O saldo contado e igual ao saldo atual. Nenhum ajuste foi necessario.")
+
+    movement = _create_stock_movement_entry(
+        db,
+        product,
+        movement_type="entrada" if difference > 0 else "saida",
+        quantity=abs(difference),
+        reason=payload.motivo,
+        current_user=current_user,
+        origin="inventario_balanco",
+        reference=payload.referencia or f"BAL-{date.today().isoformat()}",
+        notes=payload.observacoes or f"Balanço de estoque. Saldo anterior: {current_balance} | saldo contado: {counted_balance}.",
+        unit_of_measure=product.unidade_medida,
+    )
+    db.commit()
+    db.refresh(movement)
+    return _serialize_stock_movement(movement)
+
+
+def _find_matching_product_in_company(db: Session, source_product: Product, company_id: int) -> Optional[Product]:
+    query = db.query(Product).filter(Product.empresa_prestadora_id == company_id)
+    product = query.filter(Product.registro_ms == source_product.registro_ms).first()
+    if product is None:
+        product = query.filter(Product.nome == source_product.nome).first()
+    return product
+
+
+def create_stock_transfer(
+    db: Session,
+    payload: StockTransferCreate,
+    current_user: Optional[User] = None,
+) -> list[StockMovement]:
+    source_product = _get_product_or_fail(db, payload.produto_id, current_user=current_user)
+    source_company_id = source_product.empresa_prestadora_id
+    if source_company_id is None:
+        raise BusinessRuleViolation("Produto sem empresa vinculada para transferencia.")
+    if payload.empresa_destino_id == source_company_id:
+        raise BusinessRuleViolation("Selecione uma empresa de destino diferente da origem.")
+
+    accessible_company_ids = _get_stock_accessible_company_ids(current_user)
+    own_company_id = _require_company_scope(current_user) if current_user and not _is_master_user(current_user) else source_company_id
+    if payload.empresa_destino_id not in accessible_company_ids:
+        raise BusinessRuleViolation("Transferencia permitida apenas entre empresas/unidades vinculadas com visao compartilhada.")
+    if current_user and not _is_master_user(current_user) and source_company_id != own_company_id:
+        raise BusinessRuleViolation("Voce so pode transferir estoque a partir da sua propria empresa.")
+
+    target_company = _ensure_provider_company_can_be_linked(db, payload.empresa_destino_id)
+    target_product = _find_matching_product_in_company(db, source_product, payload.empresa_destino_id)
+    if target_product is None:
+        target_product = Product(
+            nome=source_product.nome,
+            categoria=source_product.categoria,
+            unidade_medida=source_product.unidade_medida,
+            principio_ativo=source_product.principio_ativo,
+            grupo_quimico=source_product.grupo_quimico,
+            toxicidade=source_product.toxicidade,
+            concentracao=source_product.concentracao,
+            registro_ms=source_product.registro_ms,
+            ncm=source_product.ncm,
+            ncm_descricao=source_product.ncm_descricao,
+            aliquota_icms=source_product.aliquota_icms,
+            aliquota_ipi=source_product.aliquota_ipi,
+            aliquota_pis=source_product.aliquota_pis,
+            aliquota_cofins=source_product.aliquota_cofins,
+            override_tributacao=source_product.override_tributacao,
+            estoque_atual=Decimal("0.00"),
+            estoque_minimo=source_product.estoque_minimo,
+            empresa_prestadora_id=target_company.id,
+        )
+        db.add(target_product)
+        db.flush()
+
+    transfer_unit = _normalize_stock_unit(payload.unidade_medida or source_product.unidade_medida)
+    transfer_quantity = _convert_stock_quantity(Decimal(payload.quantidade), transfer_unit, source_product.unidade_medida)
+    reference = payload.referencia or f"TRF-{date.today().isoformat()}-{source_company_id}-{target_company.id}"
+
+    outbound = _create_stock_movement_entry(
+        db,
+        source_product,
+        movement_type="saida",
+        quantity=transfer_quantity,
+        reason=payload.motivo,
+        current_user=current_user,
+        origin="transferencia",
+        reference=reference,
+        notes=payload.observacoes or f"Transferencia para {target_company.nome_fantasia or target_company.razao_social}.",
+        related_company_id=target_company.id,
+        unit_of_measure=source_product.unidade_medida,
+        enforce_user_company_scope=False,
+    )
+    inbound = _create_stock_movement_entry(
+        db,
+        target_product,
+        movement_type="entrada",
+        quantity=transfer_quantity,
+        reason=payload.motivo,
+        current_user=current_user,
+        origin="transferencia",
+        reference=reference,
+        notes=payload.observacoes or f"Transferencia recebida de empresa {source_company_id}.",
+        related_company_id=source_company_id,
+        unit_of_measure=target_product.unidade_medida,
+        enforce_user_company_scope=False,
+    )
+    db.commit()
+    db.refresh(outbound)
+    db.refresh(inbound)
+    return [_serialize_stock_movement(outbound), _serialize_stock_movement(inbound)]
+
+
+def list_stock_import_logs(
+    db: Session,
+    current_user: Optional[User] = None,
+    company_id: Optional[int] = None,
+) -> List[StockImportLogRead]:
+    query = db.query(StockImportLog).options(
+        joinedload(StockImportLog.empresa_prestadora),
+        joinedload(StockImportLog.usuario),
+    )
+    if current_user is None or _is_master_user(current_user):
+        if company_id is not None:
+            query = query.filter(StockImportLog.empresa_prestadora_id == company_id)
+    else:
+        accessible_company_ids = _get_stock_accessible_company_ids(current_user)
+        query = query.filter(StockImportLog.empresa_prestadora_id.in_(accessible_company_ids))
+        if company_id is not None:
+            if company_id not in accessible_company_ids:
+                raise BusinessRuleViolation("Sem permissao para visualizar importacoes desta empresa.")
+            query = query.filter(StockImportLog.empresa_prestadora_id == company_id)
+    return [_serialize_stock_import_log(item) for item in query.order_by(StockImportLog.created_at.desc(), StockImportLog.id.desc()).all()]
+
+
 def create_product(db: Session, payload: ProductCreate, current_user: Optional[User] = None) -> Product:
     from app.application.fiscal_services import apply_tax_profile_to_product
 
     product_data = payload.model_dump()
+    product_data["unidade_medida"] = _normalize_stock_unit(product_data.get("unidade_medida"))
     initial_stock = Decimal(product_data.get("estoque_atual") or "0")
     product_data["estoque_atual"] = Decimal("0.00")
     product = Product(**product_data, empresa_prestadora_id=_get_new_record_company_id(current_user))
@@ -1286,7 +1641,9 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate, current
 
     product = _get_product_or_fail(db, product_id, current_user=current_user)
     previous_stock = _money(Decimal(product.estoque_atual))
-    for field, value in payload.model_dump().items():
+    payload_data = payload.model_dump()
+    payload_data["unidade_medida"] = _normalize_stock_unit(payload_data.get("unidade_medida"))
+    for field, value in payload_data.items():
         setattr(product, field, value)
     apply_tax_profile_to_product(
         db,
@@ -1308,6 +1665,7 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate, current
             current_user=current_user,
             origin="ajuste_manual",
             notes="Ajuste automatico gerado pela edicao do produto.",
+            unit_of_measure=product.unidade_medida,
         )
     db.commit()
     db.refresh(product)
@@ -1316,8 +1674,20 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate, current
 
 def delete_product(db: Session, product_id: int, current_user: Optional[User] = None) -> None:
     product = _get_product_or_fail(db, product_id, current_user=current_user)
-    if product.itens_ordem_servico or product.estoque_movimentacoes:
+    if product.itens_ordem_servico:
         raise BusinessRuleViolation("Nao e possivel excluir produto ja utilizado em OS.")
+
+    deletable_movement_origins = {"saldo_inicial", "ajuste_manual", "manual", "inventario_balanco"}
+    undeletable_movements = [
+        movement
+        for movement in product.estoque_movimentacoes
+        if movement.origem not in deletable_movement_origins or movement.empresa_relacionada_id is not None
+    ]
+    if undeletable_movements:
+        raise BusinessRuleViolation("Nao e possivel excluir produto com historico operacional de estoque vinculado.")
+
+    for movement in list(product.estoque_movimentacoes):
+        db.delete(movement)
     db.delete(product)
     db.commit()
 
@@ -1327,6 +1697,7 @@ def import_products_from_invoice_xml(
     xml_content: bytes,
     create_finance_entry: bool = True,
     current_user: Optional[User] = None,
+    original_filename: Optional[str] = None,
 ) -> ProductXmlImportResult:
     invoice_data = _parse_invoice_xml(xml_content)
     reference = invoice_data["chave_acesso"] or f"NFE-{invoice_data['nota_numero']}"
@@ -1350,6 +1721,8 @@ def import_products_from_invoice_xml(
         if product is None:
             product = Product(
                 nome=item["nome"],
+                categoria="Importado por XML",
+                unidade_medida=_normalize_stock_unit(item.get("unidade") or "UN"),
                 principio_ativo="Nao informado",
                 grupo_quimico="Nao informado",
                 toxicidade="Nao informado",
@@ -1366,6 +1739,8 @@ def import_products_from_invoice_xml(
             action = "criado"
         else:
             updated_count += 1
+            if item.get("unidade"):
+                product.unidade_medida = _normalize_stock_unit(item["unidade"])
 
         if item.get("ncm"):
             try:
@@ -1419,6 +1794,18 @@ def import_products_from_invoice_xml(
         db.flush()
         finance_entry_id = finance_entry.id
 
+    _log_stock_import(
+        db,
+        current_user=current_user,
+        tipo_arquivo="xml",
+        origem="xml_nfe",
+        referencia=reference,
+        nome_arquivo=original_filename,
+        produtos_processados=len(processed_items),
+        produtos_criados=created_count,
+        produtos_atualizados=updated_count,
+        total_movimentado=_money(sum((Decimal(item["quantidade"]) for item in processed_items), Decimal("0.00"))),
+    )
     db.commit()
 
     return ProductXmlImportResult(
@@ -1442,12 +1829,54 @@ def import_products_from_csv(
     csv_content: bytes,
     create_finance_entry: bool = True,
     current_user: Optional[User] = None,
+    original_filename: Optional[str] = None,
 ) -> ProductCsvImportResult:
     parsed = _parse_products_csv(csv_content)
+    return _import_products_from_tabular_rows(
+        db,
+        parsed=parsed,
+        create_finance_entry=create_finance_entry,
+        current_user=current_user,
+        origin="csv_import",
+        tipo_arquivo="csv",
+        original_filename=original_filename,
+    )
+
+
+def import_products_from_xlsx(
+    db: Session,
+    xlsx_content: bytes,
+    create_finance_entry: bool = True,
+    current_user: Optional[User] = None,
+    original_filename: Optional[str] = None,
+) -> ProductCsvImportResult:
+    parsed = _parse_products_xlsx(xlsx_content)
+    return _import_products_from_tabular_rows(
+        db,
+        parsed=parsed,
+        create_finance_entry=create_finance_entry,
+        current_user=current_user,
+        origin="xlsx_import",
+        tipo_arquivo="xlsx",
+        original_filename=original_filename,
+    )
+
+
+def _import_products_from_tabular_rows(
+    db: Session,
+    *,
+    parsed: dict,
+    create_finance_entry: bool,
+    current_user: Optional[User],
+    origin: str,
+    tipo_arquivo: str,
+    original_filename: Optional[str],
+) -> ProductCsvImportResult:
     created_count = 0
     updated_count = 0
     finance_count = 0
     finance_total = Decimal("0.00")
+    total_moved = Decimal("0.00")
     processed_items = []
 
     for line_number, row in parsed["rows"]:
@@ -1465,6 +1894,8 @@ def import_products_from_csv(
         referencia = row.get("referencia") or f"{parsed['referencia_lote']}-L{line_number}"
         categoria_financeira = row.get("categoria_financeira") or "Compra de estoque"
         observacoes = row.get("observacoes") or None
+        unidade_medida = _normalize_stock_unit(row.get("unidade_medida") or "UN")
+        categoria = _clean_optional_text(row.get("categoria"))
 
         product = _find_product_for_import(db, registro_ms, nome)
         if product and current_user and not _is_master_user(current_user):
@@ -1478,6 +1909,8 @@ def import_products_from_csv(
                 grupo_quimico=row.get("grupo_quimico") or "Nao informado",
                 toxicidade=row.get("toxicidade") or "Nao informado",
                 concentracao=row.get("concentracao") or "Nao informado",
+                categoria=categoria,
+                unidade_medida=unidade_medida,
                 registro_ms=registro_ms,
                 ncm=row.get("ncm") or None,
                 estoque_atual=Decimal("0.00"),
@@ -1498,6 +1931,9 @@ def import_products_from_csv(
                 product.toxicidade = row["toxicidade"]
             if row.get("concentracao"):
                 product.concentracao = row["concentracao"]
+            if categoria:
+                product.categoria = categoria
+            product.unidade_medida = unidade_medida
             product.estoque_minimo = estoque_minimo
 
         if row.get("ncm"):
@@ -1512,30 +1948,32 @@ def import_products_from_csv(
             db,
             product,
             movement_type="entrada",
-            quantity=quantidade_entrada,
-            reason="Entrada por importacao CSV de estoque",
+            quantity=_convert_stock_quantity(quantidade_entrada, unidade_medida, product.unidade_medida),
+            reason=f"Entrada por importacao {tipo_arquivo.upper()} de estoque",
             current_user=current_user,
-            origin="csv_import",
+            origin=origin,
             reference=referencia,
             notes=observacoes,
+            unit_of_measure=product.unidade_medida,
         )
+        total_moved = _money(total_moved + _convert_stock_quantity(quantidade_entrada, unidade_medida, product.unidade_medida))
 
         finance_entry_id = None
         if registrar_financeiro_linha and custo_total > Decimal("0.00"):
             finance_entry = FinanceEntry(
                 tipo="despesa",
-                descricao=f"Entrada CSV - {nome}",
+                descricao=f"Entrada {tipo_arquivo.upper()} - {nome}",
                 valor=custo_total,
                 valor_pago=Decimal("0.00"),
                 vencimento=data_entrada,
                 status=FinanceStatus.PENDENTE.value,
                 categoria=categoria_financeira,
                 fornecedor_nome=fornecedor_nome,
-                origem="csv_import",
+                origem=origin,
                 referencia=referencia,
                 total_parcelas=1,
                 parcela_atual=1,
-                observacoes=observacoes or f"Importado por CSV na linha {line_number}.",
+                observacoes=observacoes or f"Importado por {tipo_arquivo.upper()} na linha {line_number}.",
                 empresa_prestadora_id=_get_new_record_company_id(current_user),
             )
             db.add(finance_entry)
@@ -1548,6 +1986,7 @@ def import_products_from_csv(
             {
                 "nome": nome,
                 "registro_ms": registro_ms,
+                "unidade_medida": product.unidade_medida,
                 "quantidade_entrada": quantidade_entrada,
                 "custo_total": custo_total,
                 "produto_id": product.id,
@@ -1562,6 +2001,20 @@ def import_products_from_csv(
     if processed_items:
         supplier_values = [row.get("fornecedor_nome") for _, row in parsed["rows"] if row.get("fornecedor_nome")]
         fornecedor_padrao = supplier_values[0] if supplier_values else None
+
+    _log_stock_import(
+        db,
+        current_user=current_user,
+        tipo_arquivo=tipo_arquivo,
+        origem=origin,
+        referencia=parsed["referencia_lote"],
+        nome_arquivo=original_filename,
+        produtos_processados=len(processed_items),
+        produtos_criados=created_count,
+        produtos_atualizados=updated_count,
+        total_movimentado=total_moved,
+    )
+    db.commit()
 
     return ProductCsvImportResult(
         referencia_lote=parsed["referencia_lote"],

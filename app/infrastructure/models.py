@@ -210,6 +210,8 @@ class Product(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    categoria: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    unidade_medida: Mapped[str] = mapped_column(String(10), nullable=False, default="UN")
     principio_ativo: Mapped[str] = mapped_column(String(120), nullable=False)
     grupo_quimico: Mapped[str] = mapped_column(String(120), nullable=False)
     toxicidade: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -265,6 +267,7 @@ class StockMovement(Base):
     origem: Mapped[str] = mapped_column(String(50), nullable=False, default="manual", index=True)
     motivo: Mapped[str] = mapped_column(String(255), nullable=False)
     quantidade: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    unidade_medida: Mapped[str] = mapped_column(String(10), nullable=False, default="UN")
     saldo_anterior: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     saldo_posterior: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     referencia: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
@@ -278,6 +281,30 @@ class StockMovement(Base):
     )
     empresa_relacionada: Mapped[Optional["ProviderCompany"]] = relationship(foreign_keys=[empresa_relacionada_id])
     usuario: Mapped[Optional["User"]] = relationship(back_populates="estoque_movimentacoes")
+
+
+class StockImportLog(Base):
+    __tablename__ = "estoque_importacoes"
+    __table_args__ = (
+        Index("ix_estoque_importacoes_empresa_data", "empresa_prestadora_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_prestadora_id: Mapped[int] = mapped_column(ForeignKey("empresas_prestadoras.id"), nullable=False, index=True)
+    usuario_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    tipo_arquivo: Mapped[str] = mapped_column(String(20), nullable=False)
+    origem: Mapped[str] = mapped_column(String(30), nullable=False)
+    referencia: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    nome_arquivo: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    produtos_processados: Mapped[int] = mapped_column(nullable=False, default=0)
+    produtos_criados: Mapped[int] = mapped_column(nullable=False, default=0)
+    produtos_atualizados: Mapped[int] = mapped_column(nullable=False, default=0)
+    total_movimentado: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    errors_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
+
+    empresa_prestadora: Mapped["ProviderCompany"] = relationship()
+    usuario: Mapped[Optional["User"]] = relationship()
 
 
 class Pest(Base):

@@ -77,6 +77,7 @@ ROLE_DEFAULT_PERMISSIONS: dict[str, dict[str, bool]] = {
     ),
     UserRole.OPERADOR.value: _build_defaults(
         "customers.view",
+        "customers.edit",
         "contracts.view",
         "stock.view",
         "work_orders.view",

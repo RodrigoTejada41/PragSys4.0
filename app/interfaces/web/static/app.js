@@ -8,6 +8,8 @@ const state = {
     products: [],
     stockPositions: [],
     stockMovements: [],
+    stockImportLogs: [],
+    stockCompanies: [],
     nfeInvoices: [],
     simplesConfigs: [],
     pests: [],
@@ -77,6 +79,10 @@ const state = {
         dashboardStatus: "todos",
         dashboardStock: "alerta",
         dashboardFinance: "pendente",
+        stockSearch: "",
+        stockCompany: "",
+        stockCategory: "",
+        stockStatus: "todos",
         workOrderNumber: "",
         workOrderCustomer: "",
         workOrderDate: "",
@@ -206,6 +212,7 @@ const viewTitles = {
     dashboard: "Dashboard",
     clientes: "Clientes",
     produtos: "Produtos",
+    estoque: "Estoque",
     pragas: "Pragas",
     tecnicos: "Tecnicos",
     ordens: "Ordens de servico",
@@ -280,6 +287,8 @@ document.addEventListener("DOMContentLoaded", () => {
     bindSettingsActions();
     bindAuth();
     bindDashboardFilters();
+    bindStockFilters();
+    bindStockFocusActions();
 
     if (state.token) {
         bootstrapApp().catch(() => showLogin());
@@ -726,6 +735,8 @@ async function loadAllData() {
         apiFetch("/api/v1/produtos"),
         apiFetch("/api/v1/produtos/estoque"),
         apiFetch("/api/v1/produtos/estoque/movimentacoes"),
+        apiFetch("/api/v1/produtos/estoque/importacoes"),
+        apiFetch("/api/v1/produtos/estoque/empresas"),
         stockManagerOnly ? Promise.resolve([]) : apiFetch("/api/v1/pragas"),
         stockManagerOnly ? Promise.resolve([]) : apiFetch("/api/v1/tecnicos"),
         stockManagerOnly ? Promise.resolve([]) : apiFetch("/api/v1/os"),
@@ -779,19 +790,19 @@ async function loadAllData() {
         basePromises.push(apiFetch("/api/v1/whatsapp/configuracao"));
     }
     const results = await Promise.all(basePromises);
-    const [customers, contracts, contractDashboard, products, stockPositions, stockMovements, pests, technicians, workOrders, appointments, appointmentDashboard, whatsappStatus, googleStatus] = results;
-    const finance = canAccessFinance ? results[13] : [];
-    const cashLedger = canAccessFinance ? results[14] : [];
-    const financeDashboard = canAccessFinance ? results[15] : null;
-    const contractReport = canAccessFinance ? results[16] : null;
-    const receipts = canAccessFinance ? results[17] : [];
-    const nfeInvoices = canAccessFinance ? results[18] : [];
-    const sefazReadiness = canAccessFinance ? results[19] : null;
-    const simplesConfigs = canAccessFinance ? results[20] : [];
-    const cashFlowSummary = canAccessFinance ? results[21] : null;
-    const simplesSummary = canAccessFinance ? results[22] : null;
-    const settingsState = canAccessSettings ? results[23] : null;
-    const whatsappConfig = canAccessSettings ? results[24] : null;
+    const [customers, contracts, contractDashboard, products, stockPositions, stockMovements, stockImportLogs, stockCompanies, pests, technicians, workOrders, appointments, appointmentDashboard, whatsappStatus, googleStatus] = results;
+    const finance = canAccessFinance ? results[15] : [];
+    const cashLedger = canAccessFinance ? results[16] : [];
+    const financeDashboard = canAccessFinance ? results[17] : null;
+    const contractReport = canAccessFinance ? results[18] : null;
+    const receipts = canAccessFinance ? results[19] : [];
+    const nfeInvoices = canAccessFinance ? results[20] : [];
+    const sefazReadiness = canAccessFinance ? results[21] : null;
+    const simplesConfigs = canAccessFinance ? results[22] : [];
+    const cashFlowSummary = canAccessFinance ? results[23] : null;
+    const simplesSummary = canAccessFinance ? results[24] : null;
+    const settingsState = canAccessSettings ? results[25] : null;
+    const whatsappConfig = canAccessSettings ? results[26] : null;
 
     state.customers = customers;
     state.contracts = contracts;
@@ -799,6 +810,8 @@ async function loadAllData() {
     state.products = products;
     state.stockPositions = stockPositions;
     state.stockMovements = stockMovements;
+    state.stockImportLogs = stockImportLogs;
+    state.stockCompanies = stockCompanies;
     state.pests = pests;
     state.technicians = technicians;
     state.workOrders = workOrders;
@@ -1805,6 +1818,7 @@ function renderAll() {
     renderDashboard();
     renderCustomers();
     renderProducts();
+    renderStockModule();
     renderPests();
     renderTechnicians();
     renderWorkOrders();
@@ -1836,6 +1850,10 @@ function toggleMasterSections() {
     const canAccessFinance = hasPermission("finance.view");
     document.querySelectorAll(".finance-only").forEach((node) => {
         node.classList.toggle("hidden", !canAccessFinance);
+    });
+    const canAccessStock = hasPermission("stock.view") || hasPermission("stock.manage") || hasPermission("stock.move");
+    document.querySelectorAll(".stock-only").forEach((node) => {
+        node.classList.toggle("hidden", !canAccessStock);
     });
     document.querySelectorAll(".admin-only").forEach((node) => {
         node.classList.toggle("hidden", !canAccessAdminSettings);
@@ -1986,6 +2004,16 @@ function buildForms() {
     document.getElementById("product-form").innerHTML = `
         <div class="form-grid">
             <label><span>Nome</span><input name="nome" required></label>
+            <label><span>Categoria</span><input name="categoria" placeholder="Inseticida, insumo, equipamento..."></label>
+            <label><span>Unidade de medida</span>
+                <select name="unidade_medida">
+                    <option value="UN">UN</option>
+                    <option value="ML">ML</option>
+                    <option value="L">L</option>
+                    <option value="G">G</option>
+                    <option value="KG">KG</option>
+                </select>
+            </label>
             <label><span>Principio ativo</span><input name="principio_ativo" required></label>
             <label><span>Grupo quimico</span><input name="grupo_quimico" required></label>
             <label><span>Toxicidade</span><input name="toxicidade" required></label>
@@ -2009,7 +2037,7 @@ function buildForms() {
                     <option value="true">Informar aliquotas manualmente</option>
                 </select>
             </label>
-            <label><span>Estoque atual</span><input name="estoque_atual" type="number" min="0" step="0.01" value="0"></label>
+            <label><span>Saldo inicial</span><input name="estoque_atual" type="number" min="0" step="0.01" value="0"></label>
             <label><span>Estoque minimo</span><input name="estoque_minimo" type="number" min="0" step="0.01" value="0"></label>
         </div>
         <section class="tax-profile-card">
@@ -2025,64 +2053,143 @@ function buildForms() {
             </div>
             <div class="origin-note" id="product-tax-source-note">Sem NCM vinculado. Informe um NCM para preencher automaticamente as aliquotas.</div>
         </section>
-        <div class="section-heading">
-            <h3>Importacoes de estoque</h3>
-            <p>Use XML da NF-e ou CSV para dar entrada em produtos e registrar a despesa no financeiro.</p>
-        </div>
-        <div class="form-grid">
-            <label class="full-width">
-                <span>Modelos de importacao</span>
-                <div class="inline-actions">
-                    <a class="btn btn-default ghost-button" href="/static/import_templates/modelo_importacao_produtos_v3_1.csv" target="_blank" rel="noreferrer">Baixar CSV modelo</a>
-                    <a class="btn btn-default ghost-button" href="/static/import_templates/modelo_importacao_produtos_v3_1.xlsx" target="_blank" rel="noreferrer">Baixar planilha modelo</a>
-                </div>
-            </label>
-            <label class="full-width"><span>Arquivo XML</span><input id="product-xml-file" type="file" accept=".xml,application/xml"></label>
-            <label><span>Registrar no financeiro</span>
-                <select id="product-xml-finance">
-                    <option value="true">Sim</option>
-                    <option value="false">Nao</option>
-                </select>
-            </label>
-            <div class="inline-actions">
-                <button type="button" class="btn btn-default ghost-button" id="product-xml-import-button">Importar XML</button>
-            </div>
-            <label class="full-width"><span>Arquivo CSV</span><input id="product-csv-file" type="file" accept=".csv,text/csv"></label>
-            <label><span>Registrar no financeiro</span>
-                <select id="product-csv-finance">
-                    <option value="true">Sim</option>
-                    <option value="false">Nao</option>
-                </select>
-            </label>
-            <div class="inline-actions">
-                <button type="button" class="btn btn-default ghost-button" id="product-csv-import-button">Importar CSV</button>
-            </div>
-        </div>
-        <div class="section-heading">
-            <h3>Movimentacao manual de estoque</h3>
-            <p>Registre entradas, saídas e acompanhe o histórico sem misturar saldos entre empresas.</p>
-        </div>
-        <form id="stock-movement-form" class="form-grid">
-            <label><span>Produto</span><select name="produto_id" required><option value="">Selecione um produto</option></select></label>
-            <label><span>Tipo</span>
-                <select name="tipo_movimento">
-                    <option value="entrada">Entrada</option>
-                    <option value="saida">Saida</option>
-                </select>
-            </label>
-            <label><span>Quantidade</span><input name="quantidade" type="number" min="0.01" step="0.01" required></label>
-            <label><span>Motivo</span><input name="motivo" required placeholder="Ex.: Compra, ajuste, consumo interno"></label>
-            <label><span>Referencia</span><input name="referencia" placeholder="NF, lote, OS, ajuste..."></label>
-            <label class="full-width"><span>Observacoes</span><textarea name="observacoes" rows="2"></textarea></label>
-            <div class="inline-actions">
-                <button type="submit" class="btn btn-default ghost-button">Registrar movimentacao</button>
-            </div>
-        </form>
-        <div id="stock-movement-history" class="inline-details-panel"></div>
         ${formActionHtml("product", "Salvar produto", "Cancelar edicao")}
     `;
 
-    document.getElementById("pest-form").innerHTML = `
+    const stockActionsPanel = document.getElementById("stock-actions-panel");
+    if (stockActionsPanel) {
+        stockActionsPanel.innerHTML = `
+            <section class="stock-section-block" id="stock-section-import">
+                <div class="section-heading">
+                    <h3>Importacoes de estoque</h3>
+                    <p>Use XML, CSV ou planilha para dar entrada em produtos e registrar despesa no financeiro quando necessario.</p>
+                </div>
+                <div class="form-grid">
+                    <label class="full-width">
+                        <span>Modelos de importacao</span>
+                        <div class="inline-actions">
+                            <a class="btn btn-default ghost-button" href="/static/import_templates/modelo_importacao_produtos_v3_1.csv" target="_blank" rel="noreferrer">Baixar CSV modelo</a>
+                            <a class="btn btn-default ghost-button" href="/static/import_templates/modelo_importacao_produtos_v3_1.xlsx" target="_blank" rel="noreferrer">Baixar planilha modelo</a>
+                        </div>
+                    </label>
+                    <label class="full-width"><span>Arquivo XML</span><input id="product-xml-file" type="file" accept=".xml,application/xml"></label>
+                    <label><span>Registrar no financeiro</span>
+                        <select id="product-xml-finance">
+                            <option value="true">Sim</option>
+                            <option value="false">Nao</option>
+                        </select>
+                    </label>
+                    <div class="inline-actions ui-form-actions">
+                        <button type="button" class="btn btn-default ghost-button" id="product-xml-import-button">Importar XML</button>
+                    </div>
+                    <label class="full-width"><span>Arquivo CSV</span><input id="product-csv-file" type="file" accept=".csv,text/csv"></label>
+                    <label><span>Registrar no financeiro</span>
+                        <select id="product-csv-finance">
+                            <option value="true">Sim</option>
+                            <option value="false">Nao</option>
+                        </select>
+                    </label>
+                    <div class="inline-actions ui-form-actions">
+                        <button type="button" class="btn btn-default ghost-button" id="product-csv-import-button">Importar CSV</button>
+                    </div>
+                    <label class="full-width"><span>Arquivo XLSX</span><input id="product-xlsx-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+                    <label><span>Registrar no financeiro</span>
+                        <select id="product-xlsx-finance">
+                            <option value="true">Sim</option>
+                            <option value="false">Nao</option>
+                        </select>
+                    </label>
+                    <div class="inline-actions ui-form-actions">
+                        <button type="button" class="btn btn-default ghost-button" id="product-xlsx-import-button">Importar planilha</button>
+                    </div>
+                </div>
+            </section>
+            <section class="stock-section-block" id="stock-section-movement">
+                <div class="section-heading">
+                    <h3>Movimentacao manual</h3>
+                    <p>Registre entradas e saidas sem misturar saldos entre empresas.</p>
+                </div>
+                <form id="stock-movement-form" class="form-grid data-form">
+                    <label><span>Produto</span><select name="produto_id" required><option value="">Selecione um produto</option></select></label>
+                    <label><span>Tipo</span>
+                        <select name="tipo_movimento">
+                            <option value="entrada">Entrada</option>
+                            <option value="saida">Saida</option>
+                        </select>
+                    </label>
+                    <label><span>Quantidade</span><input name="quantidade" type="number" min="0.01" step="0.01" required></label>
+                    <label><span>Unidade</span>
+                        <select name="unidade_medida">
+                            <option value="UN">UN</option>
+                            <option value="ML">ML</option>
+                            <option value="L">L</option>
+                            <option value="G">G</option>
+                            <option value="KG">KG</option>
+                        </select>
+                    </label>
+                    <label><span>Motivo</span><input name="motivo" required placeholder="Ex.: Compra, ajuste, consumo interno"></label>
+                    <label><span>Referencia</span><input name="referencia" placeholder="NF, lote, OS, ajuste..."></label>
+                    <label class="full-width"><span>Observacoes</span><textarea name="observacoes" rows="2"></textarea></label>
+                    <div class="inline-actions ui-form-actions">
+                        <button type="submit" class="btn btn-primary">Registrar movimentacao</button>
+                    </div>
+                </form>
+            </section>
+            <section class="stock-section-block" id="stock-section-balance">
+                <div class="section-heading">
+                    <h3>Balanco e inventario</h3>
+                    <p>Informe o saldo contado para gerar o ajuste com justificativa e historico completo.</p>
+                </div>
+                <form id="stock-balance-form" class="form-grid data-form">
+                    <label><span>Produto</span><select name="produto_id" required><option value="">Selecione um produto</option></select></label>
+                    <label><span>Saldo contado</span><input name="saldo_contado" type="number" min="0" step="0.01" required></label>
+                    <label><span>Unidade</span>
+                        <select name="unidade_medida">
+                            <option value="UN">UN</option>
+                            <option value="ML">ML</option>
+                            <option value="L">L</option>
+                            <option value="G">G</option>
+                            <option value="KG">KG</option>
+                        </select>
+                    </label>
+                    <label><span>Justificativa</span><input name="motivo" required placeholder="Ex.: Inventario mensal"></label>
+                    <label><span>Referencia</span><input name="referencia" placeholder="BAL-..."></label>
+                    <label class="full-width"><span>Observacoes</span><textarea name="observacoes" rows="2"></textarea></label>
+                    <div class="inline-actions ui-form-actions">
+                        <button type="submit" class="btn btn-secondary">Registrar balanco</button>
+                    </div>
+                </form>
+            </section>
+            <section class="stock-section-block" id="stock-section-transfer">
+                <div class="section-heading">
+                    <h3>Transferencia entre unidades</h3>
+                    <p>Move saldo entre matriz e filiais vinculadas mantendo cada estoque separado.</p>
+                </div>
+                <form id="stock-transfer-form" class="form-grid data-form">
+                    <label><span>Produto de origem</span><select name="produto_id" required><option value="">Selecione um produto</option></select></label>
+                    <label><span>Empresa destino</span><select name="empresa_destino_id" required><option value="">Selecione a empresa destino</option></select></label>
+                    <label><span>Quantidade</span><input name="quantidade" type="number" min="0.01" step="0.01" required></label>
+                    <label><span>Unidade</span>
+                        <select name="unidade_medida">
+                            <option value="UN">UN</option>
+                            <option value="ML">ML</option>
+                            <option value="L">L</option>
+                            <option value="G">G</option>
+                            <option value="KG">KG</option>
+                        </select>
+                    </label>
+                    <label><span>Motivo</span><input name="motivo" required placeholder="Ex.: Reposicao da filial"></label>
+                    <label><span>Referencia</span><input name="referencia" placeholder="TRF-..."></label>
+                    <label class="full-width"><span>Observacoes</span><textarea name="observacoes" rows="2"></textarea></label>
+                    <div class="inline-actions ui-form-actions">
+                        <button type="submit" class="btn btn-secondary">Transferir estoque</button>
+                    </div>
+                </form>
+            </section>
+        `;
+    }
+
+document.getElementById("pest-form").innerHTML = `
         <div class="form-grid">
             <label><span>Nome comum</span><input name="nome_comum" required></label>
             <label><span>Nome cientifico</span><input name="nome_cientifico" required></label>
@@ -2636,7 +2743,10 @@ function buildForms() {
     bindCrudForms();
     bindProductXmlImport();
     bindProductCsvImport();
+    bindProductXlsxImport();
     bindStockMovementForm();
+    bindStockBalanceForm();
+    bindStockTransferForm();
     bindCustomerAutoLookup();
     bindNfeFormHelpers();
     bindProductFiscalControls();
@@ -2644,6 +2754,8 @@ function buildForms() {
     bindWorkOrderSelectors();
     bindAppointmentWorkspace();
     bindFinancialModuleWorkspace();
+    bindStockFilters();
+    bindStockFocusActions();
     clearWorkOrderForm();
     clearAppointmentForm();
     clearReceiptForm();
@@ -2708,6 +2820,46 @@ function bindFinancialModuleWorkspace() {
     bindNfeFilters();
     bindSimplesSummaryRefresh();
     bindReceiptWorkspace();
+}
+
+function bindStockFilters() {
+    const bindings = [
+        ["stock-search-filter", "stockSearch", "input"],
+        ["stock-company-filter", "stockCompany", "change"],
+        ["stock-category-filter", "stockCategory", "change"],
+        ["stock-status-filter", "stockStatus", "change"],
+    ];
+    bindings.forEach(([id, key, eventName]) => {
+        const field = document.getElementById(id);
+        if (!field || field.dataset.bound === "true") {
+            return;
+        }
+        field.dataset.bound = "true";
+        field.addEventListener(eventName, () => {
+            state.filters[key] = field.value;
+            renderStockModule();
+        });
+    });
+
+    const clearButton = document.getElementById("stock-clear-filters");
+    if (clearButton && clearButton.dataset.bound !== "true") {
+        clearButton.dataset.bound = "true";
+        clearButton.addEventListener("click", () => {
+            state.filters.stockSearch = "";
+            state.filters.stockCompany = "";
+            state.filters.stockCategory = "";
+            state.filters.stockStatus = "todos";
+            const searchField = document.getElementById("stock-search-filter");
+            const companyField = document.getElementById("stock-company-filter");
+            const categoryField = document.getElementById("stock-category-filter");
+            const statusField = document.getElementById("stock-status-filter");
+            if (searchField) searchField.value = "";
+            if (companyField) companyField.value = "";
+            if (categoryField) categoryField.value = "";
+            if (statusField) statusField.value = "todos";
+            renderStockModule();
+        });
+    }
 }
 
 function bindFinanceFilters() {
@@ -3132,6 +3284,48 @@ function bindProductCsvImport() {
             await loadAllData();
             toast(
                 `CSV importado: ${result.produtos_processados} item(ns), ${result.produtos_criados} criado(s) e ${result.produtos_atualizados} atualizado(s).`,
+            );
+        } catch (error) {
+            toast(error.message);
+            setSyncStatus("Falha na importacao");
+        } finally {
+            button.disabled = false;
+            setSyncStatus("Sincronizado");
+        }
+    });
+}
+
+function bindProductXlsxImport() {
+    const button = document.getElementById("product-xlsx-import-button");
+    if (!button) {
+        return;
+    }
+    button.addEventListener("click", async () => {
+        const fileInput = document.getElementById("product-xlsx-file");
+        const financeSelect = document.getElementById("product-xlsx-finance");
+        const file = fileInput?.files?.[0];
+        if (!file) {
+            toast("Selecione uma planilha XLSX para importar.");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("xlsx_file", file);
+
+        button.disabled = true;
+        setSyncStatus("Importando planilha...");
+        try {
+            const result = await apiFetch(
+                `/api/v1/produtos/importar-xlsx?registrar_financeiro=${financeSelect.value}`,
+                {
+                    method: "POST",
+                    body: formData,
+                },
+            );
+            fileInput.value = "";
+            await loadAllData();
+            toast(
+                `Planilha importada: ${result.produtos_processados} item(ns), ${result.produtos_criados} criado(s) e ${result.produtos_atualizados} atualizado(s).`,
             );
         } catch (error) {
             toast(error.message);
@@ -4270,8 +4464,53 @@ function hydrateDynamicControls() {
         document.querySelector('#stock-movement-form [name="produto_id"]'),
         state.products.map((item) => ({
             ...item,
-            display_name: `${item.nome} | ${item.empresa_prestadora_nome || "Sem empresa"} | saldo ${item.estoque_atual}`,
+            display_name: `${item.nome} | ${item.empresa_prestadora_nome || "Sem empresa"} | saldo ${item.estoque_atual} ${item.unidade_medida || "UN"}`,
         })),
+        "id",
+        "display_name",
+    );
+    setSelectOptions(
+        document.getElementById("stock-company-filter"),
+        state.stockCompanies.map((item) => ({ ...item, display_name: item.nome_fantasia || item.razao_social })),
+        "id",
+        "display_name",
+    );
+    const stockCategories = Array.from(new Set(state.stockPositions.map((item) => item.categoria).filter(Boolean)))
+        .sort((a, b) => String(a).localeCompare(String(b), "pt-BR"))
+        .map((item) => ({ value: item, label: item }));
+    setSelectOptions(
+        document.getElementById("stock-category-filter"),
+        stockCategories.map((item) => ({ id: item.value, display_name: item.label })),
+        "id",
+        "display_name",
+    );
+    setSelectOptions(
+        document.querySelector('#stock-balance-form [name="produto_id"]'),
+        state.products.map((item) => ({
+            ...item,
+            display_name: `${item.nome} | saldo ${item.estoque_atual} ${item.unidade_medida || "UN"}` ,
+        })),
+        "id",
+        "display_name",
+    );
+    setSelectOptions(
+        document.querySelector('#stock-transfer-form [name="produto_id"]'),
+        state.products.map((item) => ({
+            ...item,
+            display_name: `${item.nome} | origem ${item.empresa_prestadora_nome || "Sem empresa"} | saldo ${item.estoque_atual} ${item.unidade_medida || "UN"}`,
+        })),
+        "id",
+        "display_name",
+    );
+    const currentCompanyId = String(state.user?.empresa_prestadora_id || "");
+    setSelectOptions(
+        document.querySelector('#stock-transfer-form [name="empresa_destino_id"]'),
+        state.stockCompanies
+            .filter((item) => String(item.id) !== currentCompanyId)
+            .map((item) => ({
+                ...item,
+                display_name: item.nome_fantasia || item.razao_social,
+            })),
         "id",
         "display_name",
     );
@@ -6479,6 +6718,57 @@ function bindStockMovementForm() {
     });
 }
 
+function bindStockBalanceForm() {
+    const form = document.getElementById("stock-balance-form");
+    if (!form) {
+        return;
+    }
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = objectFromForm(form);
+        payload.produto_id = Number(payload.produto_id || 0);
+        payload.saldo_contado = String(payload.saldo_contado || "").trim();
+        payload.referencia = payload.referencia || null;
+        payload.observacoes = payload.observacoes || null;
+        if (!payload.produto_id) {
+            toast("Selecione um produto para o balanco.");
+            return;
+        }
+        await apiFetch("/api/v1/produtos/estoque/balanco", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        });
+        form.reset();
+        await afterMutation("Balanco de estoque registrado com sucesso.");
+    });
+}
+
+function bindStockTransferForm() {
+    const form = document.getElementById("stock-transfer-form");
+    if (!form) {
+        return;
+    }
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = objectFromForm(form);
+        payload.produto_id = Number(payload.produto_id || 0);
+        payload.empresa_destino_id = Number(payload.empresa_destino_id || 0);
+        payload.quantidade = String(payload.quantidade || "").trim();
+        payload.referencia = payload.referencia || null;
+        payload.observacoes = payload.observacoes || null;
+        if (!payload.produto_id || !payload.empresa_destino_id) {
+            toast("Selecione o produto e a empresa destino para transferir.");
+            return;
+        }
+        await apiFetch("/api/v1/produtos/estoque/transferencias", {
+            method: "POST",
+            body: JSON.stringify(payload),
+        });
+        form.reset();
+        await afterMutation("Transferencia de estoque registrada com sucesso.");
+    });
+}
+
 function currentContractCustomer() {
     return getEntityByKind("customer", Number(state.contractWorkspace.customerId || 0));
 }
@@ -6618,22 +6908,160 @@ function bindContractFileActions() {
 function renderProducts() {
     setTableContent(
         "products-table",
-        ["Produto", "Empresa", "NCM", "Tributacao", "Estoque", "Minimo", "Registro", "Acoes"],
+        ["Produto", "Categoria", "Unidade", "Registro", "Base fiscal", "Saldo inicial", "Minimo", "Acoes"],
         state.products.map((item) => [
-            `<div>${escapeHtml(item.nome)}<div class="origin-note">${escapeHtml(item.principio_ativo)}</div></div>`,
-            escapeHtml(item.empresa_prestadora_nome || "-"),
+            `<div>${escapeHtml(item.nome)}<div class="origin-note">${escapeHtml(item.principio_ativo || "-")}</div></div>`,
+            escapeHtml(item.categoria || "-"),
+            escapeHtml(item.unidade_medida || "UN"),
+            escapeHtml(item.registro_ms || "-"),
             item.ncm ? `<div>${escapeHtml(item.ncm)}<div class="origin-note">${escapeHtml(item.ncm_descricao || "")}</div></div>` : "-",
-            `<div>ICMS ${escapeHtml(String(item.aliquota_icms || 0))}%<div class="origin-note">IPI ${escapeHtml(String(item.aliquota_ipi || 0))}% | PIS ${escapeHtml(String(item.aliquota_pis || 0))}% | COFINS ${escapeHtml(String(item.aliquota_cofins || 0))}%</div></div>`,
-            `${item.estoque_atual}`,
-            `${item.estoque_minimo}`,
-            item.registro_ms,
+            `${escapeHtml(String(item.estoque_atual))} ${escapeHtml(item.unidade_medida || "UN")}`,
+            `${escapeHtml(String(item.estoque_minimo))} ${escapeHtml(item.unidade_medida || "UN")}`,
             actionButtons("product", item.id),
         ]),
         "Nenhum produto cadastrado.",
         { nonSortableTargets: [7] },
     );
-    renderStockMovementHistory();
     bindEntityActions("product");
+}
+
+function getFilteredStockPositions() {
+    const search = String(state.filters.stockSearch || "").trim().toLowerCase();
+    const companyFilter = String(state.filters.stockCompany || "");
+    const categoryFilter = String(state.filters.stockCategory || "").trim().toLowerCase();
+    const statusFilter = String(state.filters.stockStatus || "todos");
+    return state.stockPositions.filter((item) => {
+        if (companyFilter && String(item.empresa_prestadora_id) !== companyFilter) {
+            return false;
+        }
+        if (categoryFilter && String(item.categoria || "").trim().toLowerCase() !== categoryFilter) {
+            return false;
+        }
+        if (search) {
+            const haystack = [
+                item.produto_nome,
+                item.empresa_prestadora_nome,
+                item.categoria,
+                item.registro_ms,
+            ].join(" ").toLowerCase();
+            if (!haystack.includes(search)) {
+                return false;
+            }
+        }
+        const currentStock = Number(item.estoque_atual || 0);
+        if (statusFilter === "baixo" && !item.estoque_baixo) {
+            return false;
+        }
+        if (statusFilter === "normal" && (item.estoque_baixo || currentStock === 0)) {
+            return false;
+        }
+        if (statusFilter === "zerado" && currentStock !== 0) {
+            return false;
+        }
+        return true;
+    });
+}
+
+function stockStatusBadge(item) {
+    const currentStock = Number(item.estoque_atual || 0);
+    if (currentStock === 0) {
+        return badge("Zerado", "danger");
+    }
+    if (item.estoque_baixo) {
+        return badge("Baixo", "warn");
+    }
+    return badge("Normal", "success");
+}
+
+function renderStockModule() {
+    const ownProductIds = new Set(state.products.map((item) => item.id));
+    setTableContent(
+        "stock-positions-table",
+        ["Produto", "Empresa", "Categoria", "Saldo", "Minimo", "Status", "Acoes"],
+        getFilteredStockPositions().map((item) => {
+            const actions = ownProductIds.has(item.produto_id)
+                ? `
+                    <div class="inline-actions compact-actions">
+                        <button type="button" class="btn btn-xs btn-primary" data-stock-action="entrada" data-product-id="${item.produto_id}">Entrada</button>
+                        <button type="button" class="btn btn-xs btn-secondary" data-stock-action="saida" data-product-id="${item.produto_id}">Saida</button>
+                        <button type="button" class="btn btn-xs btn-default ghost-button" data-stock-action="balanco" data-product-id="${item.produto_id}">Balanco</button>
+                    </div>
+                `
+                : '<span class="origin-note">Visualizacao compartilhada</span>';
+            return [
+                `<div>${escapeHtml(item.produto_nome)}<div class="origin-note">Registro ${escapeHtml(item.registro_ms || "-")} | ${escapeHtml(item.unidade_medida || "UN")}</div></div>`,
+                escapeHtml(item.empresa_prestadora_nome || "-"),
+                escapeHtml(item.categoria || "-"),
+                `${escapeHtml(String(item.estoque_atual))} ${escapeHtml(item.unidade_medida || "UN")}`,
+                `${escapeHtml(String(item.estoque_minimo))} ${escapeHtml(item.unidade_medida || "UN")}`,
+                stockStatusBadge(item),
+                actions,
+            ];
+        }),
+        "Nenhuma posicao de estoque encontrada para os filtros aplicados.",
+        { nonSortableTargets: [6], pageLength: 8 },
+    );
+    renderStockMovementHistory();
+    renderStockImportHistory();
+    bindStockActionButtons();
+}
+
+function bindStockActionButtons() {
+    document.querySelectorAll("[data-stock-action]").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", () => {
+            openStockAction(button.dataset.stockAction, Number(button.dataset.productId || 0));
+        });
+    });
+}
+
+function openStockAction(action, productId = 0) {
+    switchView("estoque");
+    const product = state.products.find((item) => item.id === productId) || state.stockPositions.find((item) => item.produto_id === productId) || null;
+    if (action === "entrada" || action === "saida") {
+        const form = document.getElementById("stock-movement-form");
+        if (form) {
+            form.querySelector('[name="produto_id"]').value = productId ? String(productId) : "";
+            form.querySelector('[name="tipo_movimento"]').value = action === "saida" ? "saida" : "entrada";
+            form.querySelector('[name="unidade_medida"]').value = product?.unidade_medida || "UN";
+            form.querySelector('[name="quantidade"]').focus();
+        }
+        document.getElementById("stock-section-movement")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+    }
+    if (action === "balanco") {
+        const form = document.getElementById("stock-balance-form");
+        if (form) {
+            form.querySelector('[name="produto_id"]').value = productId ? String(productId) : "";
+            form.querySelector('[name="unidade_medida"]').value = product?.unidade_medida || "UN";
+            form.querySelector('[name="saldo_contado"]').focus();
+        }
+        document.getElementById("stock-section-balance")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+    }
+}
+
+function bindStockFocusActions() {
+    document.querySelectorAll("[data-stock-focus]").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", () => {
+            const targetMap = {
+                movement: "stock-section-movement",
+                balance: "stock-section-balance",
+                transfer: "stock-section-transfer",
+                import: "stock-section-import",
+                history: "stock-movement-history",
+            };
+            const targetId = targetMap[button.dataset.stockFocus];
+            document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+    });
 }
 
 function renderStockMovementHistory() {
@@ -6641,7 +7069,7 @@ function renderStockMovementHistory() {
     if (!target) {
         return;
     }
-    const recentItems = state.stockMovements.slice(0, 10);
+    const recentItems = state.stockMovements.slice(0, 12);
     if (!recentItems.length) {
         target.innerHTML = `<div class="empty-state">Nenhuma movimentacao de estoque registrada ainda.</div>`;
         return;
@@ -6649,17 +7077,58 @@ function renderStockMovementHistory() {
     target.innerHTML = `
         <div class="section-heading compact">
             <h4>Historico recente de estoque</h4>
-            <p>Visualizacao por empresa/unidade, sem consolidar saldos.</p>
+            <p>Entradas, saidas, ajustes, balancos e transferencias por empresa/unidade.</p>
         </div>
         <div class="stack-list">
             ${recentItems
-                .map((item) => `
+                .map((item) => {
+                    const relatedCompany = item.empresa_relacionada_nome ? ` | relacao: ${escapeHtml(item.empresa_relacionada_nome)}` : "";
+                    const reference = item.referencia ? ` | ref. ${escapeHtml(item.referencia)}` : "";
+                    const notes = item.observacoes ? `<div class="origin-note">${escapeHtml(item.observacoes)}</div>` : "";
+                    return `
                     <article class="list-card">
                         <strong>${escapeHtml(item.produto_nome)}</strong>
-                        <div class="origin-note">${escapeHtml(item.empresa_prestadora_nome || "-")} | ${escapeHtml(item.tipo_movimento)} | saldo ${escapeHtml(String(item.saldo_posterior))}</div>
+                        <div class="origin-note">${escapeHtml(item.empresa_prestadora_nome || "-")} | ${escapeHtml(item.tipo_movimento)} ${escapeHtml(String(item.quantidade))} ${escapeHtml(item.unidade_medida || "UN")}${relatedCompany}${reference}</div>
                         <div>${escapeHtml(item.motivo)}</div>
-                    </article>
-                `)
+                        <div class="origin-note">Origem ${escapeHtml(item.origem)} | saldo ${escapeHtml(String(item.saldo_anterior))} -> ${escapeHtml(String(item.saldo_posterior))} | ${escapeHtml(formatDateTime(item.created_at))}</div>
+                        ${notes}
+                    </article>`;
+                })
+                .join("")}
+        </div>
+    `;
+}
+
+function renderStockImportHistory() {
+    const target = document.getElementById("stock-import-history");
+    if (!target) {
+        return;
+    }
+    const recentItems = state.stockImportLogs.slice(0, 8);
+    if (!recentItems.length) {
+        target.innerHTML = `<div class="empty-state">Nenhuma importacao registrada ainda.</div>`;
+        return;
+    }
+    target.innerHTML = `
+        <div class="section-heading compact">
+            <h4>Historico de importacoes</h4>
+            <p>Rastreabilidade completa para XML, CSV e planilhas com log por empresa.</p>
+        </div>
+        <div class="stack-list">
+            ${recentItems
+                .map((item) => {
+                    const errors = Array.isArray(item.errors) && item.errors.length
+                        ? `<div class="origin-note">Pendencias: ${escapeHtml(item.errors.join(" | "))}</div>`
+                        : "";
+                    const fileInfo = item.nome_arquivo ? `Arquivo ${escapeHtml(item.nome_arquivo)} | ` : "";
+                    return `
+                        <article class="list-card">
+                            <strong>${escapeHtml(String(item.tipo_arquivo).toUpperCase())} | ${escapeHtml(item.referencia)}</strong>
+                            <div class="origin-note">${escapeHtml(item.empresa_prestadora_nome || "-")} | ${fileInfo}${escapeHtml(formatDateTime(item.created_at))}</div>
+                            <div>${escapeHtml(String(item.produtos_processados))} item(ns), ${escapeHtml(String(item.produtos_criados))} criado(s), ${escapeHtml(String(item.produtos_atualizados))} atualizado(s), total ${escapeHtml(String(item.total_movimentado))}.</div>
+                            ${errors}
+                        </article>`;
+                })
                 .join("")}
         </div>
     `;

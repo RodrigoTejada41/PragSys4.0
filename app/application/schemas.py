@@ -193,6 +193,8 @@ class ProductBase(BaseModel):
     toxicidade: str
     concentracao: str
     registro_ms: str
+    categoria: Optional[str] = None
+    unidade_medida: str = Field(default="UN", min_length=1, max_length=10)
     ncm: Optional[str] = None
     ncm_descricao: Optional[str] = None
     aliquota_icms: Decimal = Field(default=Decimal("0.0000"), ge=0)
@@ -224,11 +226,31 @@ class StockMovementCreate(BaseModel):
     produto_id: int
     tipo_movimento: str = Field(min_length=1, max_length=30)
     quantidade: Decimal = Field(gt=0)
+    unidade_medida: Optional[str] = Field(default=None, min_length=1, max_length=10)
     motivo: str = Field(min_length=3, max_length=255)
     observacoes: Optional[str] = None
     referencia: Optional[str] = Field(default=None, max_length=120)
     empresa_prestadora_id: Optional[int] = None
     empresa_relacionada_id: Optional[int] = None
+
+
+class StockTransferCreate(BaseModel):
+    produto_id: int
+    empresa_destino_id: int
+    quantidade: Decimal = Field(gt=0)
+    unidade_medida: Optional[str] = Field(default=None, min_length=1, max_length=10)
+    motivo: str = Field(min_length=3, max_length=255)
+    observacoes: Optional[str] = None
+    referencia: Optional[str] = Field(default=None, max_length=120)
+
+
+class StockBalanceCreate(BaseModel):
+    produto_id: int
+    saldo_contado: Decimal = Field(ge=0)
+    unidade_medida: Optional[str] = Field(default=None, min_length=1, max_length=10)
+    motivo: str = Field(min_length=3, max_length=255)
+    observacoes: Optional[str] = None
+    referencia: Optional[str] = Field(default=None, max_length=120)
 
 
 class StockMovementRead(BaseModel):
@@ -247,6 +269,7 @@ class StockMovementRead(BaseModel):
     origem: str
     motivo: str
     quantidade: Decimal
+    unidade_medida: str
     saldo_anterior: Decimal
     saldo_posterior: Decimal
     referencia: Optional[str] = None
@@ -259,9 +282,12 @@ class StockPositionRead(BaseModel):
     produto_nome: str
     empresa_prestadora_id: int
     empresa_prestadora_nome: str
+    categoria: Optional[str] = None
+    unidade_medida: str
     estoque_atual: Decimal
     estoque_minimo: Decimal
     registro_ms: str
+    estoque_baixo: bool = False
 
 
 class NcmTaxProfileRead(BaseModel):
@@ -308,6 +334,7 @@ class ProductXmlImportResult(BaseModel):
 class ProductCsvImportItemRead(BaseModel):
     nome: str
     registro_ms: str
+    unidade_medida: str
     quantidade_entrada: Decimal
     custo_total: Decimal
     produto_id: int
@@ -325,6 +352,26 @@ class ProductCsvImportResult(BaseModel):
     lancamentos_financeiros: int
     valor_financeiro_total: Decimal
     itens: List[ProductCsvImportItemRead]
+
+
+class StockImportLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    empresa_prestadora_id: int
+    empresa_prestadora_nome: Optional[str] = None
+    usuario_id: Optional[int] = None
+    usuario_nome: Optional[str] = None
+    tipo_arquivo: str
+    origem: str
+    referencia: str
+    nome_arquivo: Optional[str] = None
+    produtos_processados: int
+    produtos_criados: int
+    produtos_atualizados: int
+    total_movimentado: Decimal
+    errors: List[str] = Field(default_factory=list)
+    created_at: datetime
 
 
 class PestBase(BaseModel):

@@ -799,6 +799,55 @@ def _migration_20260327_005_cit_name(engine: Engine) -> None:
         )
 
 
+def _migration_20260327_006_stock_module_expansion(engine: Engine) -> None:
+    _add_column_if_missing(engine, "produtos", "categoria", "categoria VARCHAR(80)")
+    _add_column_if_missing(engine, "produtos", "unidade_medida", "unidade_medida VARCHAR(10) NOT NULL DEFAULT 'UN'")
+    _add_column_if_missing(engine, "estoque_movimentacoes", "unidade_medida", "unidade_medida VARCHAR(10) NOT NULL DEFAULT 'UN'")
+    _create_index_if_missing(engine, "produtos", "ix_produtos_categoria", ["categoria"])
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE produtos
+                SET unidade_medida = 'UN'
+                WHERE unidade_medida IS NULL OR trim(unidade_medida) = ''
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE estoque_movimentacoes
+                SET unidade_medida = 'UN'
+                WHERE unidade_medida IS NULL OR trim(unidade_medida) = ''
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS estoque_importacoes (
+                    id INTEGER PRIMARY KEY,
+                    empresa_prestadora_id INTEGER NOT NULL,
+                    usuario_id INTEGER,
+                    tipo_arquivo VARCHAR(20) NOT NULL,
+                    origem VARCHAR(30) NOT NULL,
+                    referencia VARCHAR(120) NOT NULL,
+                    nome_arquivo VARCHAR(255),
+                    produtos_processados INTEGER NOT NULL DEFAULT 0,
+                    produtos_criados INTEGER NOT NULL DEFAULT 0,
+                    produtos_atualizados INTEGER NOT NULL DEFAULT 0,
+                    total_movimentado NUMERIC NOT NULL DEFAULT 0,
+                    errors_json TEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+    _create_index_if_missing(engine, "estoque_importacoes", "ix_estoque_importacoes_empresa_data", ["empresa_prestadora_id", "created_at"])
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
@@ -813,6 +862,7 @@ MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260327_003_user_permissions", _migration_20260327_003_user_permissions),
     ("20260327_004_company_technical_data", _migration_20260327_004_company_technical_data),
     ("20260327_005_cit_name", _migration_20260327_005_cit_name),
+    ("20260327_006_stock_module_expansion", _migration_20260327_006_stock_module_expansion),
 ]
 
 

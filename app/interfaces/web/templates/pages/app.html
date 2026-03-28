@@ -52,7 +52,80 @@
         </div>
     </section>
 
-    {{ crud_view("produtos", "Novo produto", "Controle principio ativo, estoque atual e rastreabilidade de uso.", "product-form", "Estoque tecnico", "Itens disponiveis para aplicacao nas ordens de servico.", "products-table") }}
+    {{ crud_view("produtos", "Novo produto", "Mantenha o catalogo de produtos, categorias, unidade de medida e base fiscal sem misturar a operacao de estoque.", "product-form", "Catalogo de produtos", "Consulta do cadastro tecnico usado pelo estoque, OS e documentos.", "products-table") }}
+
+    <section class="view" id="view-estoque">
+        <div class="stock-module-shell">
+            <section class="card panel panel-accent">
+                <div class="card-body">
+                    <div class="section-heading compact">
+                        <p class="eyebrow">Estoque</p>
+                        <h3>Operacao de estoque separada do cadastro de produtos</h3>
+                        <p>Concentre aqui entradas, saidas, balancos, transferencias, importacoes e historico, mantendo o cadastro de produtos em um modulo proprio.</p>
+                    </div>
+                    <div class="inline-actions ui-form-actions stock-quick-actions">
+                        <button type="button" class="btn btn-primary" data-stock-focus="movement">Entrada / saida</button>
+                        <button type="button" class="btn btn-secondary" data-stock-focus="balance">Balanco</button>
+                        <button type="button" class="btn btn-secondary" data-stock-focus="transfer">Transferencia</button>
+                        <button type="button" class="btn btn-default ghost-button" data-stock-focus="import">Importar XML / planilha</button>
+                        <button type="button" class="btn btn-default ghost-button" data-stock-focus="history">Historico</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card panel">
+                <div class="card-body">
+                    <div class="section-heading">
+                        <h3>Filtros do estoque</h3>
+                        <p>Filtre por empresa, produto, categoria e status sem misturar saldos entre unidades.</p>
+                    </div>
+                    <div class="finance-filter-grid compact">
+                        <label>
+                            <span>Busca</span>
+                            <input id="stock-search-filter" type="search" placeholder="Produto, registro ou empresa">
+                        </label>
+                        <label>
+                            <span>Empresa</span>
+                            <select id="stock-company-filter"><option value="">Todas as empresas</option></select>
+                        </label>
+                        <label>
+                            <span>Categoria</span>
+                            <select id="stock-category-filter"><option value="">Todas as categorias</option></select>
+                        </label>
+                        <label>
+                            <span>Status</span>
+                            <select id="stock-status-filter">
+                                <option value="todos">Todos</option>
+                                <option value="baixo">Estoque baixo</option>
+                                <option value="normal">Normal</option>
+                                <option value="zerado">Zerado</option>
+                            </select>
+                        </label>
+                        <div class="finance-filter-actions">
+                            <button type="button" class="btn btn-default ghost-button" id="stock-clear-filters">Limpar filtros</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="split-panel stock-layout">
+                <section class="card panel form-panel">
+                    <div class="card-body" id="stock-actions-panel"></div>
+                </section>
+                <section class="card panel">
+                    <div class="card-body">
+                        <div class="section-heading">
+                            <h3>Posicao atual do estoque</h3>
+                            <p>Visualize saldo atual, unidade, minimo, alertas e acesse as rotinas operacionais sem sair do modulo.</p>
+                        </div>
+                        <div id="stock-positions-table"></div>
+                        <div id="stock-movement-history" class="inline-details-panel"></div>
+                        <div id="stock-import-history" class="inline-details-panel"></div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </section>
 
     {{ crud_view("pragas", "Nova praga", "Mantenha o catalogo tecnico usado nas execucoes e documentos.", "pest-form", "Catalogo de pragas", "Base de referencia operacional para a equipe de campo.", "pests-table") }}
 

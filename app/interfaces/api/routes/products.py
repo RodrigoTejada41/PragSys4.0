@@ -4,22 +4,31 @@ from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.application.schemas import (
-    ProductCreate,
     ProductCsvImportResult,
+    ProductCreate,
     ProductRead,
+    ProviderCompanyRead,
+    StockBalanceCreate,
+    StockImportLogRead,
     StockMovementCreate,
     StockMovementRead,
     StockPositionRead,
+    StockTransferCreate,
     ProductUpdate,
     ProductXmlImportResult,
 )
 from app.application.services import (
     create_product,
+    create_stock_balance,
     create_stock_movement,
+    create_stock_transfer,
     delete_product,
     import_products_from_csv,
     import_products_from_invoice_xml,
+    import_products_from_xlsx,
     list_products,
+    list_stock_companies,
+    list_stock_import_logs,
     list_stock_movements,
     list_stock_positions,
     update_product,
@@ -29,6 +38,17 @@ from app.infrastructure.models import User
 from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/produtos", tags=["produtos"])
+
+
+@router.get(
+    "/estoque/empresas",
+    response_model=List[ProviderCompanyRead],
+)
+def get_stock_companies(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin", "operador", "gestor_estoque"], ["stock.view"])),
+) -> List[ProviderCompanyRead]:
+    return list_stock_companies(db, current_user=current_user)
 
 
 @router.get(
@@ -141,6 +161,7 @@ async def import_product_xml(
         await xml_file.read(),
         create_finance_entry=registrar_financeiro,
         current_user=current_user,
+        original_filename=xml_file.filename or "estoque.xml",
     )
 
 
@@ -159,4 +180,62 @@ async def import_product_csv(
         await csv_file.read(),
         create_finance_entry=registrar_financeiro,
         current_user=current_user,
+        original_filename=csv_file.filename or "estoque.csv",
     )
+
+
+@router.post(
+    "/importar-xlsx",
+    response_model=ProductCsvImportResult,
+)
+async def import_product_xlsx(
+    xlsx_file: UploadFile = File(...),
+    registrar_financeiro: bool = True,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin", "gestor_estoque"], ["stock.manage"])),
+) -> ProductCsvImportResult:
+    return import_products_from_xlsx(
+        db,
+        await xlsx_file.read(),
+        create_finance_entry=registrar_financeiro,
+        current_user=current_user,
+        original_filename=xlsx_file.filename or "estoque.xlsx",
+    )
+
+
+@router.post(
+    "/estoque/balanco",
+    response_model=StockMovementRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def post_stock_balance(
+    payload: StockBalanceCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin", "gestor_estoque"], ["stock.move"])),
+) -> StockMovementRead:
+    return create_stock_balance(db, payload, current_user=current_user)
+
+
+@router.post(
+    "/estoque/transferencias",
+    response_model=List[StockMovementRead],
+    status_code=status.HTTP_201_CREATED,
+)
+def post_stock_transfer(
+    payload: StockTransferCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin", "gestor_estoque"], ["stock.move"])),
+) -> List[StockMovementRead]:
+    return create_stock_transfer(db, payload, current_user=current_user)
+
+
+@router.get(
+    "/estoque/importacoes",
+    response_model=List[StockImportLogRead],
+)
+def get_stock_import_logs(
+    empresa_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin", "gestor_estoque"], ["stock.view"])),
+) -> List[StockImportLogRead]:
+    return list_stock_import_logs(db, current_user=current_user, company_id=empresa_id)
