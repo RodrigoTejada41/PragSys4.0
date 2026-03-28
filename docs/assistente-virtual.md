@@ -11,6 +11,7 @@ Foi adicionado um assistente virtual contextual para funcionar como "treinador d
 - grade de cards clicaveis por modulo
 - modo de ensino guiado dentro do proprio painel
 - chat textual como apoio secundario
+- base local de conhecimento, sem dependencia de API externa paga
 - resposta contextual baseada na tela atual
 - respostas alinhadas ao perfil do usuario:
   - `master`
@@ -59,6 +60,13 @@ Foi adicionado um assistente virtual contextual para funcionar como "treinador d
   - `E:\Projetos\Controle_de_pragas1.1\app\interfaces\web\templates\base.html`
   - `E:\Projetos\Controle_de_pragas1.1\app\interfaces\web\static\app.js`
   - `E:\Projetos\Controle_de_pragas1.1\app\interfaces\web\static\design-system.css`
+
+## IA local sem custo
+
+- o assistente opera com base interna estruturada no proprio sistema
+- o modo atual nao depende de API externa
+- a interpretacao das perguntas livres e feita localmente por busca guiada e contexto da tela
+- a arquitetura esta pronta para evoluir no futuro para um motor local mais sofisticado, sem quebrar a central de ajuda atual
 
 ## Validacao recomendada
 
