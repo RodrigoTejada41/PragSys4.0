@@ -24,6 +24,7 @@ NAV_ITEMS = [
     {"view": "produtos", "label": "Produtos", "icon": "fas fa-box-open", "classes": "stock-only"},
     {"view": "estoque", "label": "Estoque", "icon": "fas fa-warehouse", "classes": "stock-only"},
     {"view": "estoque-importacoes", "label": "Importacoes", "icon": "fas fa-file-import", "classes": "stock-only"},
+    {"view": "estoque-estrutura", "label": "Armazens e locais", "icon": "fas fa-layer-group", "classes": "stock-only"},
     {"view": "estoque-balanco", "label": "Balanco", "icon": "fas fa-clipboard-check", "classes": "stock-only"},
     {"view": "estoque-inventario", "label": "Inventario", "icon": "fas fa-qrcode", "classes": "stock-only"},
     {"view": "estoque-etiquetas", "label": "Etiquetas", "icon": "fas fa-tags", "classes": "stock-only"},

@@ -66,6 +66,7 @@
                     <div class="inline-actions ui-form-actions stock-quick-actions">
                         <button type="button" class="btn btn-primary" data-stock-view="estoque">Operacao</button>
                         <button type="button" class="btn btn-secondary" data-stock-view="estoque-importacoes">Importacoes</button>
+                        <button type="button" class="btn btn-secondary" data-stock-view="estoque-estrutura">Armazens e locais</button>
                         <button type="button" class="btn btn-secondary" data-stock-view="estoque-balanco">Balanco</button>
                         <button type="button" class="btn btn-secondary" data-stock-view="estoque-inventario">Inventario</button>
                         <button type="button" class="btn btn-secondary" data-stock-view="estoque-etiquetas">Etiquetas</button>
@@ -122,6 +123,13 @@
                     hidden
                 >
                     <div class="card-body" id="stock-import-panel"></div>
+                </section>
+                <section
+                    class="card panel form-panel stock-screen-panel"
+                    data-stock-screen-panel="structure"
+                    hidden
+                >
+                    <div class="card-body" id="stock-structure-workspace-panel"></div>
                 </section>
                 <section
                     class="card panel form-panel stock-screen-panel"

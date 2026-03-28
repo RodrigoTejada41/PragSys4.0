@@ -73,6 +73,7 @@
 ## Navegacao por paginas
 - Estoque: operacao geral e estrutura fisica
 - Importacoes: XML, CSV, planilhas e auditoria das cargas
+- Armazens e locais: cadastro da estrutura fisica por deposito, veiculo, equipe e prateleira
 - Balanco: saldo contado e ajuste manual imediato
 - Inventario: abertura de sessao, leitura continua e fechamento com divergencias
 - Etiquetas: geracao de PDF e revisao dos identificadores dos produtos

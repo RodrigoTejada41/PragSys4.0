@@ -223,6 +223,7 @@ const viewTitles = {
     produtos: "Produtos",
     estoque: "Estoque",
     "estoque-importacoes": "Importacoes de estoque",
+    "estoque-estrutura": "Armazens e locais",
     "estoque-balanco": "Balanco de estoque",
     "estoque-inventario": "Inventario de estoque",
     "estoque-etiquetas": "Etiquetas de estoque",
@@ -2088,6 +2089,7 @@ function buildForms() {
 
     const stockActionsPanel = document.getElementById("stock-actions-panel");
     const stockImportPanel = document.getElementById("stock-import-panel");
+    const stockStructureWorkspacePanel = document.getElementById("stock-structure-workspace-panel");
     const stockBalancePanel = document.getElementById("stock-balance-panel");
     const stockInventoryWorkspacePanel = document.getElementById("stock-inventory-workspace-panel");
     const stockLabelsPanel = document.getElementById("stock-labels-panel");
@@ -2127,31 +2129,6 @@ function buildForms() {
                         <button type="submit" class="btn btn-primary">Registrar movimentacao</button>
                     </div>
                 </form>
-            </section>
-            <section class="stock-section-block" id="stock-section-structure">
-                <div class="section-heading">
-                    <h3>Armazens, locais e etiquetas</h3>
-                    <p>Estruture o estoque por deposito, veiculo, equipe ou prateleira e gere etiquetas com QR e codigo de barras.</p>
-                </div>
-                <form id="stock-warehouse-form" class="form-grid data-form">
-                    <label><span>Armazem</span><input name="nome" required placeholder="Ex.: Deposito central"></label>
-                    <label><span>Codigo</span><input name="codigo" required placeholder="Ex.: DEP-CENTRAL"></label>
-                    <label><span>Tipo</span><input name="tipo" value="armazem" placeholder="armazem, veiculo, equipe"></label>
-                    <label><span>Ativo</span><select name="ativo"><option value="true">Sim</option><option value="false">Nao</option></select></label>
-                    <label><span>Padrao</span><select name="padrao"><option value="false">Nao</option><option value="true">Sim</option></select></label>
-                    <label class="full-width"><span>Descricao</span><input name="descricao" placeholder="Contexto do armazem"></label>
-                    <div class="inline-actions ui-form-actions"><button type="submit" class="btn btn-default">Salvar armazem</button></div>
-                </form>
-                <form id="stock-location-form" class="form-grid data-form">
-                    <label><span>Armazem</span><select name="armazem_id" required><option value="">Selecione</option></select></label>
-                    <label><span>Local fisico</span><input name="nome" required placeholder="Ex.: Prateleira A1"></label>
-                    <label><span>Codigo</span><input name="codigo" required placeholder="Ex.: A1"></label>
-                    <label><span>Ativo</span><select name="ativo"><option value="true">Sim</option><option value="false">Nao</option></select></label>
-                    <label><span>Padrao</span><select name="padrao"><option value="false">Nao</option><option value="true">Sim</option></select></label>
-                    <label class="full-width"><span>Descricao</span><input name="descricao" placeholder="Contexto do local"></label>
-                    <div class="inline-actions ui-form-actions"><button type="submit" class="btn btn-default">Salvar local</button></div>
-                </form>
-                <div id="stock-structure-panel" class="inline-details-panel"></div>
             </section>
         `;
     }
@@ -2233,6 +2210,35 @@ function buildForms() {
                         <button type="submit" class="btn btn-secondary">Registrar balanco</button>
                     </div>
                 </form>
+            </section>
+        `;
+    }
+    if (stockStructureWorkspacePanel) {
+        stockStructureWorkspacePanel.innerHTML = `
+            <section class="stock-section-block" id="stock-section-structure">
+                <div class="section-heading">
+                    <h3>Armazens e locais fisicos</h3>
+                    <p>Estruture o estoque por deposito, veiculo, equipe, prateleira ou compartimento fisico.</p>
+                </div>
+                <form id="stock-warehouse-form" class="form-grid data-form">
+                    <label><span>Armazem</span><input name="nome" required placeholder="Ex.: Deposito central"></label>
+                    <label><span>Codigo</span><input name="codigo" required placeholder="Ex.: DEP-CENTRAL"></label>
+                    <label><span>Tipo</span><input name="tipo" value="armazem" placeholder="armazem, veiculo, equipe"></label>
+                    <label><span>Ativo</span><select name="ativo"><option value="true">Sim</option><option value="false">Nao</option></select></label>
+                    <label><span>Padrao</span><select name="padrao"><option value="false">Nao</option><option value="true">Sim</option></select></label>
+                    <label class="full-width"><span>Descricao</span><input name="descricao" placeholder="Contexto do armazem"></label>
+                    <div class="inline-actions ui-form-actions"><button type="submit" class="btn btn-default">Salvar armazem</button></div>
+                </form>
+                <form id="stock-location-form" class="form-grid data-form">
+                    <label><span>Armazem</span><select name="armazem_id" required><option value="">Selecione</option></select></label>
+                    <label><span>Local fisico</span><input name="nome" required placeholder="Ex.: Prateleira A1"></label>
+                    <label><span>Codigo</span><input name="codigo" required placeholder="Ex.: A1"></label>
+                    <label><span>Ativo</span><select name="ativo"><option value="true">Sim</option><option value="false">Nao</option></select></label>
+                    <label><span>Padrao</span><select name="padrao"><option value="false">Nao</option><option value="true">Sim</option></select></label>
+                    <label class="full-width"><span>Descricao</span><input name="descricao" placeholder="Contexto do local"></label>
+                    <div class="inline-actions ui-form-actions"><button type="submit" class="btn btn-default">Salvar local</button></div>
+                </form>
+                <div id="stock-structure-panel" class="inline-details-panel"></div>
             </section>
         `;
     }
@@ -6912,11 +6918,13 @@ function bindStockTransferForm() {
 }
 
 function setStockWorkspaceView(view) {
-    const allowedViews = new Set(["operations", "imports", "balance", "inventory", "labels", "transfer"]);
+    const allowedViews = new Set(["operations", "imports", "structure", "balance", "inventory", "labels", "transfer"]);
     state.stockScreen = allowedViews.has(view) ? view : "operations";
     document.querySelectorAll("[data-stock-view]").forEach((button) => {
         const mapped = button.dataset.stockView === "estoque-importacoes"
             ? "imports"
+            : button.dataset.stockView === "estoque-estrutura"
+                ? "structure"
             : button.dataset.stockView === "estoque-balanco"
             ? "balance"
             : button.dataset.stockView === "estoque-inventario"
@@ -6945,6 +6953,10 @@ function setStockWorkspaceView(view) {
             imports: {
                 title: "Importacoes de estoque",
                 description: "Use esta tela apenas para XML, CSV, planilhas e auditoria das cargas em massa.",
+            },
+            structure: {
+                title: "Armazens e locais",
+                description: "Use esta tela apenas para estruturar depositos, veiculos, equipes, prateleiras e locais fisicos.",
             },
             balance: {
                 title: "Balanco e inventario",
@@ -6976,6 +6988,9 @@ function resolveStockScreenFromView(view) {
     if (mapped === "importacoes") {
         return "imports";
     }
+    if (mapped === "estrutura") {
+        return "structure";
+    }
     if (mapped === "balanco") {
         return "balance";
     }
@@ -6995,6 +7010,7 @@ function openStockView(screen = "operations") {
     const mapped = {
         operations: "estoque",
         imports: "estoque-importacoes",
+        structure: "estoque-estrutura",
         balance: "estoque-balanco",
         inventory: "estoque-inventario",
         labels: "estoque-etiquetas",
@@ -7648,8 +7664,8 @@ function renderStockStructureSummary() {
     if (!target) {
         return;
     }
-    target.hidden = state.stockScreen !== "operations";
-    if (state.stockScreen !== "operations") {
+    target.hidden = state.stockScreen !== "structure";
+    if (state.stockScreen !== "structure") {
         target.innerHTML = "";
         return;
     }
