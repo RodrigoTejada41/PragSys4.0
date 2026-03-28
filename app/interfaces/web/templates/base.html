@@ -57,42 +57,79 @@
             <span class="assistant-fab-label">Assistente</span>
         </button>
 
-        <aside class="assistant-panel hidden" id="assistant-panel" aria-hidden="true">
+        <div class="assistant-overlay hidden" id="assistant-overlay"></div>
+
+        <section class="assistant-panel hidden" id="assistant-panel" aria-hidden="true" aria-modal="true" role="dialog">
             <div class="assistant-panel-header">
                 <div>
-                    <p class="eyebrow">Assistente virtual</p>
-                    <h3>Treinador do sistema</h3>
-                    <p class="assistant-context" id="assistant-context-label">Ajuda contextual do modulo atual.</p>
+                    <p class="eyebrow">Central de ajuda</p>
+                    <h3>Assistente do Sistema</h3>
+                    <p class="assistant-context" id="assistant-context-label">Aprenda o sistema por modulos e acoes guiadas.</p>
                 </div>
-                <button
-                    type="button"
-                    class="btn btn-default ghost-button btn-sm assistant-minimize"
-                    id="assistant-minimize"
-                    aria-label="Minimizar assistente"
-                >
-                    Minimizar
-                </button>
+                <div class="assistant-header-actions">
+                    <button
+                        type="button"
+                        class="btn btn-default ghost-button btn-sm assistant-minimize"
+                        id="assistant-minimize"
+                        aria-label="Minimizar assistente"
+                    >
+                        Minimizar
+                    </button>
+                    <button
+                        type="button"
+                        class="btn btn-default ghost-button btn-sm assistant-close"
+                        id="assistant-close"
+                        aria-label="Fechar assistente"
+                    >
+                        Fechar
+                    </button>
+                </div>
             </div>
 
-            <div class="assistant-messages" id="assistant-messages"></div>
-            <div class="assistant-suggestions" id="assistant-suggestions"></div>
-
-            <form class="assistant-form" id="assistant-form">
-                <label class="assistant-input-group" for="assistant-input">
-                    <span>Pergunte sobre esta tela ou fluxo</span>
-                    <textarea
-                        id="assistant-input"
-                        rows="2"
-                        maxlength="1200"
-                        placeholder="Ex.: Como criar uma OS? Como dar baixa no estoque?"
-                    ></textarea>
-                </label>
-                <div class="assistant-form-actions">
-                    <button type="button" class="btn btn-default ghost-button" id="assistant-context-help">Ajuda desta tela</button>
-                    <button type="submit" class="btn btn-primary" id="assistant-send">Enviar</button>
+            <div class="assistant-panel-body">
+                <div class="assistant-home" id="assistant-home">
+                    <section class="assistant-context-banner" id="assistant-context-banner"></section>
+                    <section class="assistant-module-grid" id="assistant-module-grid"></section>
                 </div>
-            </form>
-        </aside>
+
+                <div class="assistant-detail hidden" id="assistant-detail">
+                    <div class="assistant-detail-toolbar">
+                        <button type="button" class="btn btn-default ghost-button btn-sm" id="assistant-back">
+                            Voltar aos modulos
+                        </button>
+                    </div>
+                    <div class="assistant-detail-card">
+                        <div class="assistant-detail-copy" id="assistant-detail-copy"></div>
+                        <div class="assistant-topic-actions" id="assistant-topic-actions"></div>
+                    </div>
+                </div>
+
+                <div class="assistant-chat-shell">
+                    <button type="button" class="assistant-chat-toggle" id="assistant-chat-toggle" aria-expanded="false">
+                        Dvidas por texto
+                    </button>
+                    <div class="assistant-chat-region hidden" id="assistant-chat-region">
+                        <div class="assistant-messages" id="assistant-messages"></div>
+                        <div class="assistant-suggestions" id="assistant-suggestions"></div>
+                        <form class="assistant-form" id="assistant-form">
+                            <label class="assistant-input-group" for="assistant-input">
+                                <span>Pergunte sobre a tela ou sobre um fluxo</span>
+                                <textarea
+                                    id="assistant-input"
+                                    rows="2"
+                                    maxlength="1200"
+                                    placeholder="Ex.: Como criar uma OS? Como dar baixa no estoque?"
+                                ></textarea>
+                            </label>
+                            <div class="assistant-form-actions">
+                                <button type="button" class="btn btn-default ghost-button" id="assistant-context-help">Ajuda desta tela</button>
+                                <button type="submit" class="btn btn-primary" id="assistant-send">Enviar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </section>
     </div>
 
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>

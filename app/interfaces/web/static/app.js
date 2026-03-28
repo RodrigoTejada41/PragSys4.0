@@ -26,6 +26,9 @@ const state = {
         isOpen: false,
         isLoading: false,
         initialized: false,
+        activeModule: null,
+        activeLesson: null,
+        chatOpen: false,
         messages: [],
         suggestions: [],
         contextLabel: "Dashboard",
@@ -257,6 +260,369 @@ const viewTitles = {
     licencas: "Licencas",
 };
 
+const assistantModuleCards = {
+    estoque: {
+        icon: "fas fa-boxes-stacked",
+        title: "Estoque",
+        description: "Entradas, saidas, balanco, inventario, etiquetas e transferencias.",
+        permission: "stock.view",
+        views: ["estoque", "estoque-importacoes", "estoque-estrutura", "estoque-balanco", "estoque-inventario", "estoque-etiquetas", "estoque-transferencias"],
+        lessons: {
+            overview: {
+                title: "Estoque - como funciona",
+                sections: [
+                    ["O que e", "O modulo Estoque concentra a operacao diaria do saldo dos produtos por empresa, armazem e local fisico."],
+                    ["Para que serve", "Serve para registrar entrada, saida, ajuste, balanco, inventario, importacao e transferencia sem misturar isso com o cadastro tecnico do produto."],
+                    ["Onde fica", "Menu lateral > Estoque."],
+                    ["Passo a passo", ["Abra o modulo Estoque.", "Escolha a pagina operacional desejada: Operacao, Importacoes, Balanco, Inventario, Etiquetas ou Transferencias.", "Selecione o produto e informe os dados obrigatorios antes de confirmar.", "Revise o historico logo apos a movimentacao para validar o saldo."]],
+                    ["Exemplo real", "Baixa de 500 ML de um inseticida usado em atendimento, com motivo, empresa e local fisico registrados."],
+                    ["Dica pratica", "Sempre informe local fisico e motivo da movimentacao. Isso evita divergencias no inventario."],
+                    ["Proxima acao sugerida", "Escolha abaixo se voce quer cadastrar produto, dar entrada, dar baixa, fazer inventario ou transferir saldo."],
+                ],
+            },
+            cadastrar_produto: {
+                title: "Cadastrar produto",
+                sections: [
+                    ["O que e", "Cadastro base do produto usado por estoque, OS, documentos e fiscal."],
+                    ["Para que serve", "Cria o item tecnico para depois ser movimentado no estoque."],
+                    ["Onde fica", "Menu lateral > Produtos."],
+                    ["Passo a passo", ["Abra Produtos.", "Clique em Novo produto.", "Preencha nome, categoria, unidade de medida, registro e estoque minimo.", "Salve o cadastro.", "Depois volte ao Estoque para iniciar as movimentacoes."]],
+                    ["Exemplo real", "Inseticida X | Unidade ML | Estoque minimo 1000."],
+                    ["Dica pratica", "Defina a unidade certa desde o inicio para evitar erro na baixa futura."],
+                    ["Proxima acao sugerida", "Depois do cadastro, faca uma entrada inicial no Estoque."],
+                ],
+            },
+            entrada: {
+                title: "Entrada de estoque",
+                sections: [
+                    ["O que e", "Lancamento de entrada para aumentar saldo do produto."],
+                    ["Para que serve", "Registrar compra, reposicao, acerto positivo ou carga inicial."],
+                    ["Onde fica", "Menu lateral > Estoque > Operacao."],
+                    ["Passo a passo", ["Na tela Estoque, selecione Entrada.", "Escolha ou leia o produto.", "Informe quantidade, empresa, armazem, local e motivo.", "Confirme a movimentacao."]],
+                    ["Exemplo real", "Entrada de 20 UN de armadilha adesiva no armazem principal."],
+                    ["Dica pratica", "Use motivo claro, como compra, reposicao ou estoque inicial."],
+                    ["Proxima acao sugerida", "Se quiser, depois valide o saldo na posicao atual do estoque."],
+                ],
+            },
+            saida: {
+                title: "Saida (baixa) de estoque",
+                sections: [
+                    ["O que e", "Baixa de saldo para consumo, uso tecnico, perda ou descarte."],
+                    ["Para que serve", "Registrar o consumo real e manter o historico de rastreabilidade."],
+                    ["Onde fica", "Menu lateral > Estoque > Operacao."],
+                    ["Passo a passo", ["Na tela Estoque, selecione Saida.", "Escolha ou leia o produto.", "Informe quantidade, motivo e local fisico.", "Confirme para atualizar saldo e historico."]],
+                    ["Exemplo real", "Baixa de 500 ML de produto aplicado em uma OS."],
+                    ["Dica pratica", "Se a baixa estiver ligada a atendimento, registre observacao coerente com a OS."],
+                    ["Proxima acao sugerida", "Depois consulte o historico para validar quem movimentou e qual saldo ficou."],
+                ],
+            },
+            inventario: {
+                title: "Inventario",
+                sections: [
+                    ["O que e", "Sessao de contagem para comparar quantidade fisica com o saldo do sistema."],
+                    ["Para que serve", "Identificar divergencias e fechar ajuste com rastreabilidade."],
+                    ["Onde fica", "Menu lateral > Estoque > Inventario."],
+                    ["Passo a passo", ["Abra Inventario.", "Selecione empresa, armazem e local.", "Inicie a sessao.", "Leia ou selecione os produtos e informe a contagem.", "Finalize para gerar divergencias."]],
+                    ["Exemplo real", "Contagem do estoque do veiculo tecnico ao fim do dia."],
+                    ["Dica pratica", "Nao misture locais fisicos diferentes na mesma contagem."],
+                    ["Proxima acao sugerida", "Se houver diferenca, siga para Balanco e conclua o ajuste com justificativa."],
+                ],
+            },
+            transferencia: {
+                title: "Transferencia",
+                sections: [
+                    ["O que e", "Movimentacao entre armazens, locais ou unidades vinculadas."],
+                    ["Para que serve", "Repositionar saldo sem somar estoques indevidamente."],
+                    ["Onde fica", "Menu lateral > Estoque > Transferencias."],
+                    ["Passo a passo", ["Abra Transferencias.", "Selecione origem e destino.", "Escolha ou leia o produto.", "Informe a quantidade.", "Confirme a transferencia."]],
+                    ["Exemplo real", "Transferencia de 2 UN do almoxarifado para o veiculo da equipe."],
+                    ["Dica pratica", "Confirme origem e destino antes de salvar, porque cada local mantem saldo proprio."],
+                    ["Proxima acao sugerida", "Revise o historico para conferir a saida na origem e a entrada no destino."],
+                ],
+            },
+        },
+    },
+    ordens: {
+        icon: "fas fa-file-signature",
+        title: "Ordem de Servico",
+        description: "Cadastro, acompanhamento e geracao de documentos operacionais.",
+        permission: "work_orders.view",
+        views: ["ordens", "ordens-nova", "ordens-cadastradas"],
+        lessons: {
+            overview: {
+                title: "Ordem de Servico - como funciona",
+                sections: [
+                    ["O que e", "A OS registra a execucao do servico, os produtos aplicados, horarios, observacoes e documentos gerados."],
+                    ["Para que serve", "Formalizar o atendimento e concentrar evidencias tecnicas e documentais."],
+                    ["Onde fica", "Menu lateral > Ordens de servico."],
+                    ["Passo a passo", ["Abra Nova ordem de servico.", "Preencha cliente, tecnico, data, local, horarios e servico executado.", "Inclua produtos aplicados e observacoes.", "Salve a ordem.", "Depois gere OS, relatorio tecnico e certificado."]],
+                    ["Exemplo real", "Atendimento de desinsetizacao com tecnico vinculado, horario de inicio e fim, e produto aplicado."],
+                    ["Dica pratica", "Antes de emitir documentos, confirme se Configuracoes tecnicas da empresa estao completas."],
+                    ["Proxima acao sugerida", "Escolha abaixo se voce quer aprender a criar, preencher ou emitir documentos da OS."],
+                ],
+            },
+            criar: {
+                title: "Como criar uma OS",
+                sections: [
+                    ["O que e", "Fluxo de abertura de uma nova ordem de servico."],
+                    ["Para que serve", "Registrar um atendimento novo no sistema."],
+                    ["Onde fica", "Ordens de servico > Nova ordem de servico."],
+                    ["Passo a passo", ["Selecione cliente e tecnico.", "Preencha data, local e horarios.", "Informe servico executado.", "Inclua produtos e pragas relacionadas quando aplicavel.", "Salve a ordem."]],
+                    ["Exemplo real", "OS de controle de baratas para cliente comercial, com horario 08:00-09:30."],
+                    ["Dica pratica", "Preencha horarios separados para facilitar documento e historico."],
+                    ["Proxima acao sugerida", "Depois da OS salva, abra a emissao de relatorio tecnico ou certificado."],
+                ],
+            },
+            preencher: {
+                title: "Como preencher a OS corretamente",
+                sections: [
+                    ["O que e", "Orientacao de preenchimento tecnico e documental da ordem."],
+                    ["Para que serve", "Evitar retrabalho e bloquear documentos incompletos."],
+                    ["Onde fica", "Dentro do formulario da OS."],
+                    ["Passo a passo", ["Revise dados do cliente e endereco.", "Confirme tecnico responsavel.", "Informe horarios de inicio e fim.", "Descreva servico executado e orientacoes.", "Adicione produtos aplicados com quantidade coerente."]],
+                    ["Exemplo real", "Aplicacao de gel inseticida em area interna com orientacao de nao limpar por 24 horas."],
+                    ["Dica pratica", "Nao deixe observacoes tecnicas vazias quando houve condicao especial no atendimento."],
+                    ["Proxima acao sugerida", "Se a ordem estiver concluida, gere os documentos vinculados."],
+                ],
+            },
+            documentos: {
+                title: "Como gerar certificado e relatorio tecnico",
+                sections: [
+                    ["O que e", "Emissao documental vinculada a ordem salva."],
+                    ["Para que serve", "Gerar OS impressa, relatorio tecnico e certificado conforme os dados institucionais da empresa."],
+                    ["Onde fica", "Na OS cadastrada, apos salvar a ordem."],
+                    ["Passo a passo", ["Salve a OS.", "Abra a ordem cadastrada.", "Clique em Visualizar OS, Relatorio Tecnico ou Certificado.", "Se houver bloqueio, revise Configuracoes > Dados tecnicos / Empresa."]],
+                    ["Exemplo real", "Emissao do certificado com assinatura, licencas e CIT apos concluir uma OS."],
+                    ["Dica pratica", "Mantenha licencas, assinatura e responsavel tecnico sempre atualizados para evitar bloqueio."],
+                    ["Proxima acao sugerida", "Se quiser, eu posso te orientar na parte de Configuracoes tecnicas."],
+                ],
+            },
+        },
+    },
+    clientes: {
+        icon: "fas fa-user-group",
+        title: "Clientes",
+        description: "Cadastro principal de clientes e contratos vinculados.",
+        permission: "customers.view",
+        views: ["clientes"],
+        lessons: {
+            overview: {
+                title: "Clientes - como funciona",
+                sections: [
+                    ["O que e", "Modulo para cadastro do cliente e gestao dos contratos relacionados."],
+                    ["Para que serve", "Organizar dados cadastrais usados em agenda, OS, financeiro e documentos."],
+                    ["Onde fica", "Menu lateral > Clientes."],
+                    ["Passo a passo", ["Abra Clientes.", "Preencha razao social, documento, telefone e endereco.", "Salve o cadastro.", "Selecione o cliente para consultar ou criar contratos vinculados."]],
+                    ["Exemplo real", "Cliente comercial com CNPJ, contato principal e endereco operacional completo."],
+                    ["Dica pratica", "Revise telefone e endereco; esses dados reaparecem em varios fluxos do sistema."],
+                    ["Proxima acao sugerida", "Depois do cadastro, vincule contrato se o atendimento for recorrente."],
+                ],
+            },
+            cadastrar: {
+                title: "Cadastrar cliente",
+                sections: [
+                    ["O que e", "Inclusao de novo cliente na base."],
+                    ["Para que serve", "Criar o cadastro base para operacao e documentos."],
+                    ["Onde fica", "Menu lateral > Clientes > Novo cliente."],
+                    ["Passo a passo", ["Informe razao social.", "Preencha CPF/CNPJ, telefone e contato.", "Complete endereco, cidade e estado.", "Salve o cadastro."]],
+                    ["Exemplo real", "Condominio com telefone do sindico e endereco completo para visitas."],
+                    ["Dica pratica", "Use documento valido para facilitar consulta e cobranca."],
+                    ["Proxima acao sugerida", "Se o servico for recorrente, siga para contratos."],
+                ],
+            },
+            contratos: {
+                title: "Vincular contrato ao cliente",
+                sections: [
+                    ["O que e", "Cadastro de contrato dentro do contexto do cliente."],
+                    ["Para que serve", "Controlar recorrencia, vencimento e cobranca."],
+                    ["Onde fica", "Clientes > Contratos do cliente selecionado."],
+                    ["Passo a passo", ["Selecione um cliente na base.", "Abra a area de contratos vinculados.", "Preencha nome, vigencia, tipo de cobranca e valor.", "Salve o contrato."]],
+                    ["Exemplo real", "Contrato mensal com cobranca automatica todo dia 10."],
+                    ["Dica pratica", "Revise vencimento e tipo de cobranca para evitar falhas no financeiro."],
+                    ["Proxima acao sugerida", "Depois acompanhe os lancamentos gerados no Financeiro."],
+                ],
+            },
+        },
+    },
+    financeiro: {
+        icon: "fas fa-wallet",
+        title: "Financeiro",
+        description: "Lancamentos, recibos, NF-e, fluxo de caixa e relatorios.",
+        permission: "finance.view",
+        views: ["financeiro", "financeiro-lancamentos", "financeiro-recibos", "financeiro-nfe", "financeiro-caixa", "financeiro-relatorios"],
+        lessons: {
+            overview: {
+                title: "Financeiro - como funciona",
+                sections: [
+                    ["O que e", "Modulo financeiro dividido por lancamentos, recibos, NF-e, caixa e relatorios."],
+                    ["Para que serve", "Controlar receitas, despesas, comprovantes e acompanhamento financeiro."],
+                    ["Onde fica", "Menu lateral > Financeiro."],
+                    ["Passo a passo", ["Abra a pagina financeira adequada: Lancamentos, Recibos, NF-e, Caixa ou Relatorios.", "Registre ou consulte os dados do periodo.", "Revise origem, categoria e status antes de salvar."]],
+                    ["Exemplo real", "Lancamento de receita vinculada a atendimento e emissao do recibo correspondente."],
+                    ["Dica pratica", "Preencha origem e categoria corretamente; isso melhora caixa e relatorios."],
+                    ["Proxima acao sugerida", "Escolha abaixo se quer aprender lancamentos, recibos ou fluxo de caixa."],
+                ],
+            },
+            lancamentos: {
+                title: "Lancamentos financeiros",
+                sections: [
+                    ["O que e", "Registro de receita ou despesa."],
+                    ["Para que serve", "Manter contas a receber e contas a pagar organizadas."],
+                    ["Onde fica", "Financeiro > Lancamentos."],
+                    ["Passo a passo", ["Abra Lancamentos.", "Escolha receita ou despesa.", "Informe cliente/origem, valor, vencimento e categoria.", "Salve o registro."]],
+                    ["Exemplo real", "Receita referente a servico executado em contrato mensal."],
+                    ["Dica pratica", "Atualize o status para pago somente quando a confirmacao for real."],
+                    ["Proxima acao sugerida", "Se precisar de comprovante, siga para Recibos."],
+                ],
+            },
+            recibos: {
+                title: "Emitir recibo",
+                sections: [
+                    ["O que e", "Comprovante financeiro gerado pelo sistema."],
+                    ["Para que serve", "Formalizar recebimento ou pagamento vinculado ao cliente."],
+                    ["Onde fica", "Financeiro > Recibos."],
+                    ["Passo a passo", ["Abra Recibos.", "Selecione cliente e origem.", "Informe valor e forma de pagamento.", "Salve e visualize o recibo."]],
+                    ["Exemplo real", "Recibo de pagamento em PIX referente a atendimento avulso."],
+                    ["Dica pratica", "Confirme data e valor antes de emitir o documento."],
+                    ["Proxima acao sugerida", "Depois confira o fluxo de caixa para validar o reflexo financeiro."],
+                ],
+            },
+            caixa: {
+                title: "Fluxo de caixa",
+                sections: [
+                    ["O que e", "Resumo financeiro consolidado do periodo."],
+                    ["Para que serve", "Acompanhar entradas, saidas e saldo operacional."],
+                    ["Onde fica", "Financeiro > Fluxo de caixa."],
+                    ["Passo a passo", ["Abra a tela de caixa.", "Filtre por periodo.", "Compare entradas e saidas.", "Revise pendencias antes do fechamento."]],
+                    ["Exemplo real", "Fechamento semanal das receitas recebidas e despesas pagas."],
+                    ["Dica pratica", "Use o caixa como leitura gerencial, mas faca os ajustes nos lancamentos de origem."],
+                    ["Proxima acao sugerida", "Se quiser consolidado por periodo, abra Relatorios financeiros."],
+                ],
+            },
+        },
+    },
+    contratos: {
+        icon: "fas fa-file-contract",
+        title: "Contratos",
+        description: "Vinculo comercial com o cliente e base de recorrencia.",
+        permission: "contracts.view",
+        views: ["clientes"],
+        lessons: {
+            overview: {
+                title: "Contratos - como funciona",
+                sections: [
+                    ["O que e", "Gestao contratual vinculada ao cliente dentro do modulo Clientes."],
+                    ["Para que serve", "Controlar vigencia, cobranca e obrigacoes recorrentes."],
+                    ["Onde fica", "Menu lateral > Clientes, apos selecionar o cliente."],
+                    ["Passo a passo", ["Cadastre o cliente.", "Selecione o cliente na base.", "Abra a area de contratos.", "Preencha vigencia, tipo de cobranca e valor.", "Salve o contrato."]],
+                    ["Exemplo real", "Contrato mensal com cobranca automatica e vencimento no dia 10."],
+                    ["Dica pratica", "Revise datas de inicio e fim para evitar contratos ativos fora da vigencia."],
+                    ["Proxima acao sugerida", "Depois acompanhe reflexo no financeiro e nos relatorios."],
+                ],
+            },
+        },
+    },
+    configuracoes: {
+        icon: "fas fa-sliders",
+        title: "Configuracoes",
+        description: "Dados institucionais, documentos tecnicos, integracoes e manutencao.",
+        permission: "settings.view",
+        views: ["configuracoes"],
+        lessons: {
+            overview: {
+                title: "Configuracoes - como funciona",
+                sections: [
+                    ["O que e", "Centro institucional do sistema."],
+                    ["Para que serve", "Controlar dados da empresa, licencas, assinatura, integracoes e parametros do sistema."],
+                    ["Onde fica", "Menu lateral > Configuracoes."],
+                    ["Passo a passo", ["Abra Configuracoes.", "Revise Dados tecnicos / Empresa.", "Suba licencas e assinatura quando necessario.", "Salve as alteracoes.", "Teste a geracao de documentos se mexeu em dados tecnicos."]],
+                    ["Exemplo real", "Atualizacao de licenca ambiental e assinatura do responsavel tecnico."],
+                    ["Dica pratica", "Qualquer alteracao aqui impacta documentos e algumas integracoes."],
+                    ["Proxima acao sugerida", "Escolha abaixo se quer aprender documentos tecnicos ou integracoes."],
+                ],
+            },
+            documentos: {
+                title: "Dados tecnicos e documentos",
+                sections: [
+                    ["O que e", "Cadastro institucional usado em OS, relatorios e certificados."],
+                    ["Para que serve", "Liberar emissao documental com dados obrigatorios consistentes."],
+                    ["Onde fica", "Configuracoes > Dados tecnicos / Empresa."],
+                    ["Passo a passo", ["Preencha responsavel tecnico, conselho, numero e UF do registro.", "Informe licenca sanitaria e licenca ambiental.", "Suba assinatura.", "Preencha CIT e centro de informacao toxicolgica.", "Salve e valide gerando um documento."]],
+                    ["Exemplo real", "Atualizacao da licenca sanitaria que sera impressa no certificado."],
+                    ["Dica pratica", "Se um documento bloquear, essa deve ser a primeira area a revisar."],
+                    ["Proxima acao sugerida", "Depois gere uma OS ou relatorio tecnico para validar a configuracao."],
+                ],
+            },
+            integracoes: {
+                title: "Integracoes",
+                sections: [
+                    ["O que e", "Configuraes operacionais de WhatsApp, Google e outros recursos externos."],
+                    ["Para que serve", "Conectar automacoes sem misturar isso com cadastros operacionais."],
+                    ["Onde fica", "Configuracoes > Integracoes."],
+                    ["Passo a passo", ["Abra Configuracoes.", "V localize a area de integracoes.", "Atualize os parametros permitidos.", "Teste a conexao antes de usar em producao."]],
+                    ["Exemplo real", "Atualizacao do status de WhatsApp para uso em agenda operacional."],
+                    ["Dica pratica", "Altere integraes com cautela, porque podem afetar agenda e comunicacoes."],
+                    ["Proxima acao sugerida", "Se quiser, valide o status depois na propria tela de Configuracoes."],
+                ],
+            },
+        },
+    },
+    usuarios: {
+        icon: "fas fa-user-shield",
+        title: "Usuarios",
+        description: "Perfis, permissoes e vinculo obrigatorio com empresa.",
+        permission: "users.manage",
+        views: ["usuarios"],
+        lessons: {
+            overview: {
+                title: "Usuarios - como funciona",
+                sections: [
+                    ["O que e", "Modulo de gestao de acesso ao sistema."],
+                    ["Para que serve", "Criar usuarios, definir perfil, aplicar permissoes granulares e vincular empresa."],
+                    ["Onde fica", "Menu lateral > Usuarios."],
+                    ["Passo a passo", ["Abra Usuarios.", "Escolha o nivel do usuario.", "Vincule a empresa prestadora.", "Ajuste as permissoes por checkbox.", "Salve o cadastro."]],
+                    ["Exemplo real", "Operador da empresa Alpha com acesso a agenda e ordens, sem acesso financeiro."],
+                    ["Dica pratica", "Libere somente o necessario para reduzir erro operacional."],
+                    ["Proxima acao sugerida", "Se quiser, veja abaixo a diferenca entre perfis e permissoes."],
+                ],
+            },
+            perfis: {
+                title: "Perfis e permissoes",
+                sections: [
+                    ["O que e", "Modelo de RBAC com nivel + permissoes granulares."],
+                    ["Para que serve", "Separar acesso entre Master, Admin, Operador e Gestor de estoque."],
+                    ["Onde fica", "Dentro do cadastro de usuario."],
+                    ["Passo a passo", ["Escolha o nivel principal.", "Revise os checkboxes por categoria.", "Confirme a empresa vinculada.", "Salve e teste o usuario no modulo liberado."]],
+                    ["Exemplo real", "Admin com acesso operacional completo, mas sem gerenciar empresas prestadoras e licencas."],
+                    ["Dica pratica", "Sempre valide o acesso do usuario com o menor privilegio possivel."],
+                    ["Proxima acao sugerida", "Depois revise se o menu do usuario bate com as permissoes definidas."],
+                ],
+            },
+        },
+    },
+    relatorios: {
+        icon: "fas fa-chart-column",
+        title: "Relatorios",
+        description: "Visoes consolidadas espalhadas por contratos, financeiro e operacao.",
+        permission: "contracts.view",
+        views: ["dashboard", "financeiro-relatorios"],
+        lessons: {
+            overview: {
+                title: "Relatorios - como funciona",
+                sections: [
+                    ["O que e", "Conjunto de visoes analiticas do sistema."],
+                    ["Para que serve", "Apoiar acompanhamento gerencial de contratos, financeiro e operacao."],
+                    ["Onde fica", "Dashboard e Financeiro > Relatorios, alem de resumos em modulos especificos."],
+                    ["Passo a passo", ["Abra o modulo com a visao que deseja analisar.", "Aplique filtros de periodo, cliente ou status.", "Revise os totais consolidados.", "Use os resultados para acao operacional ou fechamento."]],
+                    ["Exemplo real", "Relatorio financeiro do periodo e resumo de contratos a vencer."],
+                    ["Dica pratica", "Use filtros antes de interpretar totais, especialmente em ambiente multiempresa."],
+                    ["Proxima acao sugerida", "Se precisar de detalhe operacional, volte ao modulo de origem do dado."],
+                ],
+            },
+        },
+    },
+};
+
 const dashboardCharts = {
     status: null,
     finance: null,
@@ -334,10 +700,17 @@ function bindNavigation() {
 function bindAssistant() {
     const toggle = document.getElementById("assistant-toggle");
     const minimize = document.getElementById("assistant-minimize");
+    const close = document.getElementById("assistant-close");
+    const overlay = document.getElementById("assistant-overlay");
+    const panel = document.getElementById("assistant-panel");
     const form = document.getElementById("assistant-form");
+    const back = document.getElementById("assistant-back");
     const contextButton = document.getElementById("assistant-context-help");
+    const chatToggle = document.getElementById("assistant-chat-toggle");
+    const moduleGrid = document.getElementById("assistant-module-grid");
+    const topicActions = document.getElementById("assistant-topic-actions");
     const suggestions = document.getElementById("assistant-suggestions");
-    if (!toggle || !form || !suggestions) {
+    if (!toggle || !form || !suggestions || !moduleGrid || !topicActions || !panel) {
         return;
     }
 
@@ -353,8 +726,27 @@ function bindAssistant() {
         closeAssistant();
     });
 
+    close?.addEventListener("click", () => {
+        closeAssistant();
+    });
+
+    overlay?.addEventListener("click", () => {
+        closeAssistant();
+    });
+
+    back?.addEventListener("click", () => {
+        state.assistant.activeModule = null;
+        state.assistant.activeLesson = null;
+        renderAssistant();
+    });
+
     contextButton?.addEventListener("click", async () => {
         await sendAssistantPrompt("", { contextual: true });
+    });
+
+    chatToggle?.addEventListener("click", () => {
+        state.assistant.chatOpen = !state.assistant.chatOpen;
+        renderAssistant();
     });
 
     form.addEventListener("submit", async (event) => {
@@ -379,7 +771,53 @@ function bindAssistant() {
         await sendAssistantPrompt(button.dataset.assistantSuggestion || "");
     });
 
+    panel.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-assistant-module]");
+        if (!(button instanceof HTMLButtonElement)) {
+            return;
+        }
+        const moduleKey = button.dataset.assistantModule;
+        if (!moduleKey) {
+            return;
+        }
+        openAssistantLesson(moduleKey, "overview");
+    });
+
+    topicActions.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-assistant-topic]");
+        if (!(button instanceof HTMLButtonElement)) {
+            return;
+        }
+        const moduleKey = button.dataset.assistantModule;
+        const lessonKey = button.dataset.assistantTopic;
+        if (!moduleKey || !lessonKey) {
+            return;
+        }
+        openAssistantLesson(moduleKey, lessonKey);
+    });
+
     renderAssistant();
+}
+
+function getAssistantPermission(moduleKey) {
+    return assistantModuleCards[moduleKey]?.permission || "";
+}
+
+function canAccessAssistantModule(moduleKey) {
+    const moduleConfig = assistantModuleCards[moduleKey];
+    if (!state.user || !moduleConfig) {
+        return false;
+    }
+    if (state.user.role === "master") {
+        return true;
+    }
+    const permission = getAssistantPermission(moduleKey);
+    return !permission || hasPermission(permission);
+}
+
+function resolveAssistantCurrentModule() {
+    const currentView = state.assistant.currentView || "dashboard";
+    return Object.entries(assistantModuleCards).find(([, moduleConfig]) => moduleConfig.views.includes(currentView))?.[0] || null;
 }
 
 function getAssistantStorageKey() {
@@ -415,6 +853,9 @@ function persistAssistantHistory() {
 function initializeAssistantForCurrentUser() {
     state.assistant.initialized = true;
     state.assistant.contextLabel = viewTitles[state.assistant.currentView] || viewTitles.dashboard;
+    state.assistant.activeModule = null;
+    state.assistant.activeLesson = null;
+    state.assistant.chatOpen = false;
     loadAssistantHistory();
     renderAssistant();
 }
@@ -435,10 +876,10 @@ async function openAssistant() {
     state.assistant.isOpen = true;
     renderAssistant();
     const input = document.getElementById("assistant-input");
-    if (input instanceof HTMLTextAreaElement) {
+    if (state.assistant.chatOpen && input instanceof HTMLTextAreaElement) {
         input.focus();
     }
-    if (!state.assistant.messages.length) {
+    if (!state.assistant.messages.length && state.assistant.chatOpen) {
         await sendAssistantPrompt("", { contextual: true, skipUserMessage: true });
     }
 }
@@ -450,6 +891,9 @@ function closeAssistant({ preserveHistory = true, forceHideWidget = false } = {}
         state.assistant.messages = [];
         state.assistant.suggestions = [];
     }
+    state.assistant.activeModule = null;
+    state.assistant.activeLesson = null;
+    state.assistant.chatOpen = false;
     if (forceHideWidget) {
         document.getElementById("assistant-widget")?.classList.add("hidden");
     }
@@ -474,27 +918,150 @@ function renderAssistantHeader() {
         : `Tela atual: ${moduleName}.`;
 }
 
+function openAssistantLesson(moduleKey, lessonKey = "overview") {
+    const moduleConfig = assistantModuleCards[moduleKey];
+    if (!moduleConfig) {
+        return;
+    }
+    state.assistant.activeModule = moduleKey;
+    state.assistant.activeLesson = moduleConfig.lessons[lessonKey] ? lessonKey : "overview";
+    renderAssistant();
+}
+
+function renderAssistantContextBanner() {
+    const banner = document.getElementById("assistant-context-banner");
+    if (!banner) {
+        return;
+    }
+    const currentModule = resolveAssistantCurrentModule();
+    if (!currentModule || !assistantModuleCards[currentModule] || !canAccessAssistantModule(currentModule)) {
+        banner.innerHTML = `
+            <h4>Ajuda guiada do sistema</h4>
+            <p>Escolha um modulo abaixo para aprender o fluxo sem sair da tela atual.</p>
+        `;
+        return;
+    }
+
+    const moduleConfig = assistantModuleCards[currentModule];
+    banner.innerHTML = `
+        <h4>Atalho da tela atual: ${escapeHtml(moduleConfig.title)}</h4>
+        <p>Voce esta em ${escapeHtml(state.assistant.contextLabel || moduleConfig.title)}. Posso te guiar neste fluxo agora mesmo.</p>
+        <div class="assistant-context-shortcuts">
+            ${buildButtonHtml({
+                label: `Abrir ajuda de ${moduleConfig.title}`,
+                variant: "primary",
+                type: "button",
+                classes: "assistant-context-cta",
+                dataAttributes: `data-assistant-module="${escapeHtml(currentModule)}"`,
+            })}
+        </div>
+    `;
+}
+
+function renderAssistantModuleGrid() {
+    const moduleGrid = document.getElementById("assistant-module-grid");
+    if (!moduleGrid) {
+        return;
+    }
+
+    const contextualModule = resolveAssistantCurrentModule();
+    moduleGrid.innerHTML = Object.entries(assistantModuleCards)
+        .filter(([moduleKey]) => canAccessAssistantModule(moduleKey))
+        .map(([moduleKey, moduleConfig]) => `
+            <button
+                type="button"
+                class="assistant-module-card ${moduleKey === contextualModule ? "is-contextual" : ""}"
+                data-assistant-module="${escapeHtml(moduleKey)}"
+            >
+                <i class="${escapeHtml(moduleConfig.icon)}" aria-hidden="true"></i>
+                <strong>${escapeHtml(moduleConfig.title)}</strong>
+                <span>${escapeHtml(moduleConfig.description)}</span>
+                <small>Clique para aprender</small>
+            </button>
+        `)
+        .join("");
+}
+
+function renderAssistantLessonDetail() {
+    const home = document.getElementById("assistant-home");
+    const detail = document.getElementById("assistant-detail");
+    const detailCopy = document.getElementById("assistant-detail-copy");
+    const topicActions = document.getElementById("assistant-topic-actions");
+    if (!home || !detail || !detailCopy || !topicActions) {
+        return;
+    }
+
+    const moduleKey = state.assistant.activeModule;
+    const moduleConfig = assistantModuleCards[moduleKey];
+    if (!moduleKey || !moduleConfig || !canAccessAssistantModule(moduleKey)) {
+        home.classList.remove("hidden");
+        detail.classList.add("hidden");
+        detailCopy.innerHTML = "";
+        topicActions.innerHTML = "";
+        return;
+    }
+
+    const lessonKey = state.assistant.activeLesson || "overview";
+    const lesson = moduleConfig.lessons[lessonKey] || moduleConfig.lessons.overview;
+    home.classList.add("hidden");
+    detail.classList.remove("hidden");
+
+    detailCopy.innerHTML = `
+        <h4>${escapeHtml(lesson.title)}</h4>
+        ${lesson.sections.map(([heading, content]) => {
+            const body = Array.isArray(content)
+                ? `<ol>${content.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ol>`
+                : `<p>${escapeHtml(content)}</p>`;
+            return `
+                <section class="assistant-lesson-block">
+                    <h5>${escapeHtml(heading)}</h5>
+                    ${body}
+                </section>
+            `;
+        }).join("")}
+    `;
+
+    topicActions.innerHTML = Object.entries(moduleConfig.lessons)
+        .map(([key, entry]) => buildButtonHtml({
+            label: entry.title,
+            variant: key === lessonKey ? "primary" : "secondary",
+            type: "button",
+            classes: "assistant-topic-button",
+            dataAttributes: `data-assistant-module="${escapeHtml(moduleKey)}" data-assistant-topic="${escapeHtml(key)}"`,
+        }))
+        .join("");
+}
+
 function renderAssistant() {
     const widget = document.getElementById("assistant-widget");
+    const overlay = document.getElementById("assistant-overlay");
     const panel = document.getElementById("assistant-panel");
     const toggle = document.getElementById("assistant-toggle");
+    const chatToggle = document.getElementById("assistant-chat-toggle");
+    const chatRegion = document.getElementById("assistant-chat-region");
     const messages = document.getElementById("assistant-messages");
     const suggestions = document.getElementById("assistant-suggestions");
     const sendButton = document.getElementById("assistant-send");
     const input = document.getElementById("assistant-input");
-    if (!widget || !panel || !toggle || !messages || !suggestions) {
+    if (!widget || !panel || !toggle || !messages || !suggestions || !overlay || !chatToggle || !chatRegion) {
         return;
     }
 
     renderAssistantHeader();
+    renderAssistantContextBanner();
+    renderAssistantModuleGrid();
+    renderAssistantLessonDetail();
     toggle.setAttribute("aria-expanded", state.assistant.isOpen ? "true" : "false");
+    overlay.classList.toggle("hidden", !state.assistant.isOpen);
     panel.classList.toggle("hidden", !state.assistant.isOpen);
     panel.setAttribute("aria-hidden", state.assistant.isOpen ? "false" : "true");
+    chatToggle.setAttribute("aria-expanded", state.assistant.chatOpen ? "true" : "false");
+    chatRegion.classList.toggle("hidden", !state.assistant.chatOpen);
 
     if (!state.assistant.messages.length) {
         messages.innerHTML = `
             <div class="assistant-empty-state">
-                Pergunte sobre a tela atual, fluxo operacional, permissao ou melhor pratica do sistema.
+                Se preferir, voce pode tirar uma duvida por texto aqui. O foco principal fica nos cards de ajuda guiada.
             </div>
         `;
     } else {

@@ -7,7 +7,10 @@ Foi adicionado um assistente virtual contextual para funcionar como "treinador d
 ## O que foi implementado
 
 - botao flutuante fixo no canto inferior direito
-- painel lateral de chat com historico por usuario no navegador
+- painel retangular centralizado, com visual de central de ajuda
+- grade de cards clicaveis por modulo
+- modo de ensino guiado dentro do proprio painel
+- chat textual como apoio secundario
 - resposta contextual baseada na tela atual
 - respostas alinhadas ao perfil do usuario:
   - `master`
@@ -34,9 +37,18 @@ Foi adicionado um assistente virtual contextual para funcionar como "treinador d
 
 ## Experiencia de uso
 
-- o primeiro clique abre ajuda contextual da tela atual
-- o usuario pode perguntar livremente ou usar sugestoes rapidas
-- o painel pode ser minimizado sem perder o historico da conversa
+- o primeiro clique abre a central de ajuda no centro da interface
+- o usuario pode aprender sem digitar, apenas clicando nos cards de modulo
+- cada modulo abre um conteudo didatico com:
+  - o que e
+  - para que serve
+  - onde fica
+  - passo a passo
+  - exemplo real
+  - dica pratica
+  - proxima acao sugerida
+- o chat textual continua disponivel como suporte complementar
+- o painel pode ser minimizado ou fechado sem perder o historico da conversa
 
 ## Arquitetura
 
@@ -52,6 +64,8 @@ Foi adicionado um assistente virtual contextual para funcionar como "treinador d
 
 1. entrar no sistema
 2. abrir o assistente no dashboard
-3. navegar para Estoque e pedir: `Como dar baixa no estoque?`
-4. navegar para Ordens e pedir: `Como criar uma OS?`
-5. testar com perfil restrito e confirmar que modulos bloqueados recebem resposta compativel com a permissao
+3. validar os cards de modulo no painel central
+4. clicar em `Estoque` e depois em `Saida (baixa)`
+5. clicar em `Ordem de Servico` e depois em `Como criar uma OS`
+6. abrir o chat textual e pedir: `Como dar baixa no estoque?`
+7. testar com perfil restrito e confirmar que modulos bloqueados nao aparecem ou recebem resposta compativel com a permissao
