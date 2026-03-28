@@ -848,6 +848,179 @@ def _migration_20260327_006_stock_module_expansion(engine: Engine) -> None:
     _create_index_if_missing(engine, "estoque_importacoes", "ix_estoque_importacoes_empresa_data", ["empresa_prestadora_id", "created_at"])
 
 
+def _migration_20260327_007_stock_traceability(engine: Engine) -> None:
+    _add_column_if_missing(engine, "produtos", "codigo_barras", "codigo_barras VARCHAR(80)")
+    _add_column_if_missing(engine, "produtos", "qr_code_value", "qr_code_value VARCHAR(120)")
+    _create_index_if_missing(engine, "produtos", "ix_produtos_codigo_barras", ["codigo_barras"])
+    _create_index_if_missing(engine, "produtos", "ix_produtos_qr_code_value", ["qr_code_value"])
+
+    _add_column_if_missing(engine, "estoque_movimentacoes", "armazem_id", "armazem_id INTEGER")
+    _add_column_if_missing(engine, "estoque_movimentacoes", "local_id", "local_id INTEGER")
+    _add_column_if_missing(engine, "estoque_movimentacoes", "armazem_relacionado_id", "armazem_relacionado_id INTEGER")
+    _add_column_if_missing(engine, "estoque_movimentacoes", "local_relacionado_id", "local_relacionado_id INTEGER")
+    _add_column_if_missing(engine, "estoque_movimentacoes", "codigo_lido", "codigo_lido VARCHAR(120)")
+    _create_index_if_missing(engine, "estoque_movimentacoes", "ix_estoque_movimentacoes_armazem_id", ["armazem_id"])
+    _create_index_if_missing(engine, "estoque_movimentacoes", "ix_estoque_movimentacoes_local_id", ["local_id"])
+    _create_index_if_missing(engine, "estoque_movimentacoes", "ix_estoque_movimentacoes_codigo_lido", ["codigo_lido"])
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS estoque_armazens (
+                    id INTEGER PRIMARY KEY,
+                    empresa_prestadora_id INTEGER NOT NULL,
+                    nome VARCHAR(120) NOT NULL,
+                    codigo VARCHAR(40) NOT NULL,
+                    descricao TEXT,
+                    tipo VARCHAR(30) NOT NULL DEFAULT 'armazem',
+                    ativo BOOLEAN NOT NULL DEFAULT 1,
+                    padrao BOOLEAN NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_estoque_armazens_empresa_codigo UNIQUE (empresa_prestadora_id, codigo)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS estoque_locais (
+                    id INTEGER PRIMARY KEY,
+                    empresa_prestadora_id INTEGER NOT NULL,
+                    armazem_id INTEGER NOT NULL,
+                    nome VARCHAR(120) NOT NULL,
+                    codigo VARCHAR(40) NOT NULL,
+                    descricao TEXT,
+                    ativo BOOLEAN NOT NULL DEFAULT 1,
+                    padrao BOOLEAN NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_estoque_locais_armazem_codigo UNIQUE (armazem_id, codigo)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS estoque_saldos (
+                    id INTEGER PRIMARY KEY,
+                    produto_id INTEGER NOT NULL,
+                    empresa_prestadora_id INTEGER NOT NULL,
+                    armazem_id INTEGER NOT NULL,
+                    local_id INTEGER NOT NULL,
+                    quantidade_atual NUMERIC NOT NULL DEFAULT 0,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_estoque_saldos_produto_local UNIQUE (produto_id, armazem_id, local_id)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS estoque_inventarios (
+                    id INTEGER PRIMARY KEY,
+                    empresa_prestadora_id INTEGER NOT NULL,
+                    armazem_id INTEGER NOT NULL,
+                    local_id INTEGER NOT NULL,
+                    status VARCHAR(30) NOT NULL DEFAULT 'aberto',
+                    observacoes TEXT,
+                    created_by_user_id INTEGER,
+                    finished_by_user_id INTEGER,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    finished_at DATETIME
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS estoque_inventario_itens (
+                    id INTEGER PRIMARY KEY,
+                    inventario_id INTEGER NOT NULL,
+                    produto_id INTEGER NOT NULL,
+                    quantidade_sistema NUMERIC NOT NULL DEFAULT 0,
+                    quantidade_contada NUMERIC NOT NULL DEFAULT 0,
+                    divergencia NUMERIC NOT NULL DEFAULT 0,
+                    ultimo_codigo_lido VARCHAR(120),
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_estoque_inventario_item_produto UNIQUE (inventario_id, produto_id)
+                )
+                """
+            )
+        )
+
+        connection.execute(
+            text(
+                """
+                INSERT INTO estoque_armazens (empresa_prestadora_id, nome, codigo, descricao, tipo, ativo, padrao, created_at)
+                SELECT company.id, 'Armazem principal', 'MAIN', 'Estrutura padrao criada automaticamente.', 'armazem', 1, 1, CURRENT_TIMESTAMP
+                FROM empresas_prestadoras company
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM estoque_armazens warehouse WHERE warehouse.empresa_prestadora_id = company.id
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO estoque_locais (empresa_prestadora_id, armazem_id, nome, codigo, descricao, ativo, padrao, created_at)
+                SELECT warehouse.empresa_prestadora_id, warehouse.id, 'Geral', 'GERAL', 'Local padrao criado automaticamente.', 1, 1, CURRENT_TIMESTAMP
+                FROM estoque_armazens warehouse
+                WHERE warehouse.padrao = 1
+                  AND NOT EXISTS (
+                      SELECT 1 FROM estoque_locais location WHERE location.armazem_id = warehouse.id
+                  )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO estoque_saldos (produto_id, empresa_prestadora_id, armazem_id, local_id, quantidade_atual, updated_at)
+                SELECT
+                    product.id,
+                    product.empresa_prestadora_id,
+                    warehouse.id,
+                    location.id,
+                    COALESCE(product.estoque_atual, 0),
+                    CURRENT_TIMESTAMP
+                FROM produtos product
+                JOIN estoque_armazens warehouse
+                  ON warehouse.empresa_prestadora_id = product.empresa_prestadora_id
+                 AND warehouse.padrao = 1
+                JOIN estoque_locais location
+                  ON location.armazem_id = warehouse.id
+                 AND location.padrao = 1
+                WHERE product.empresa_prestadora_id IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM estoque_saldos balance
+                      WHERE balance.produto_id = product.id
+                  )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE produtos
+                SET qr_code_value = 'PRD-' || COALESCE(empresa_prestadora_id, 0) || '-' || id
+                WHERE qr_code_value IS NULL OR trim(qr_code_value) = ''
+                """
+            )
+        )
+
+    _create_index_if_missing(engine, "estoque_armazens", "ix_estoque_armazens_empresa_nome", ["empresa_prestadora_id", "nome"])
+    _create_index_if_missing(engine, "estoque_locais", "ix_estoque_locais_empresa_nome", ["empresa_prestadora_id", "nome"])
+    _create_index_if_missing(engine, "estoque_saldos", "ix_estoque_saldos_empresa_produto", ["empresa_prestadora_id", "produto_id"])
+    _create_index_if_missing(engine, "estoque_inventarios", "ix_estoque_inventarios_empresa_status", ["empresa_prestadora_id", "status"])
+    _create_index_if_missing(engine, "estoque_inventario_itens", "ix_estoque_inventario_itens_produto", ["produto_id"])
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
@@ -863,6 +1036,7 @@ MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260327_004_company_technical_data", _migration_20260327_004_company_technical_data),
     ("20260327_005_cit_name", _migration_20260327_005_cit_name),
     ("20260327_006_stock_module_expansion", _migration_20260327_006_stock_module_expansion),
+    ("20260327_007_stock_traceability", _migration_20260327_007_stock_traceability),
 ]
 
 

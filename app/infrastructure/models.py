@@ -212,6 +212,8 @@ class Product(Base):
     nome: Mapped[str] = mapped_column(String(120), nullable=False)
     categoria: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
     unidade_medida: Mapped[str] = mapped_column(String(10), nullable=False, default="UN")
+    codigo_barras: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    qr_code_value: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
     principio_ativo: Mapped[str] = mapped_column(String(120), nullable=False)
     grupo_quimico: Mapped[str] = mapped_column(String(120), nullable=False)
     toxicidade: Mapped[str] = mapped_column(String(80), nullable=False)
@@ -240,6 +242,11 @@ class Product(Base):
         cascade="all, delete-orphan",
         order_by="StockMovement.created_at.desc()",
     )
+    estoque_saldos: Mapped[List["StockLocationBalance"]] = relationship(
+        back_populates="produto",
+        cascade="all, delete-orphan",
+    )
+    inventario_itens: Mapped[List["StockInventoryItem"]] = relationship(back_populates="produto")
 
 
 class StockMovement(Base):
@@ -262,6 +269,14 @@ class StockMovement(Base):
         nullable=True,
         index=True,
     )
+    armazem_id: Mapped[Optional[int]] = mapped_column(ForeignKey("estoque_armazens.id"), nullable=True, index=True)
+    local_id: Mapped[Optional[int]] = mapped_column(ForeignKey("estoque_locais.id"), nullable=True, index=True)
+    armazem_relacionado_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("estoque_armazens.id"),
+        nullable=True,
+        index=True,
+    )
+    local_relacionado_id: Mapped[Optional[int]] = mapped_column(ForeignKey("estoque_locais.id"), nullable=True, index=True)
     usuario_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     tipo_movimento: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     origem: Mapped[str] = mapped_column(String(50), nullable=False, default="manual", index=True)
@@ -271,6 +286,7 @@ class StockMovement(Base):
     saldo_anterior: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     saldo_posterior: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     referencia: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    codigo_lido: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
     observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
 
@@ -280,6 +296,10 @@ class StockMovement(Base):
         foreign_keys=[empresa_prestadora_id],
     )
     empresa_relacionada: Mapped[Optional["ProviderCompany"]] = relationship(foreign_keys=[empresa_relacionada_id])
+    armazem: Mapped[Optional["StockWarehouse"]] = relationship(foreign_keys=[armazem_id])
+    local: Mapped[Optional["StockLocation"]] = relationship(foreign_keys=[local_id])
+    armazem_relacionado: Mapped[Optional["StockWarehouse"]] = relationship(foreign_keys=[armazem_relacionado_id])
+    local_relacionado: Mapped[Optional["StockLocation"]] = relationship(foreign_keys=[local_relacionado_id])
     usuario: Mapped[Optional["User"]] = relationship(back_populates="estoque_movimentacoes")
 
 
@@ -305,6 +325,137 @@ class StockImportLog(Base):
 
     empresa_prestadora: Mapped["ProviderCompany"] = relationship()
     usuario: Mapped[Optional["User"]] = relationship()
+
+
+class StockWarehouse(Base):
+    __tablename__ = "estoque_armazens"
+    __table_args__ = (
+        UniqueConstraint("empresa_prestadora_id", "codigo", name="uq_estoque_armazens_empresa_codigo"),
+        Index("ix_estoque_armazens_empresa_nome", "empresa_prestadora_id", "nome"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_prestadora_id: Mapped[int] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=False,
+        index=True,
+    )
+    nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    codigo: Mapped[str] = mapped_column(String(40), nullable=False)
+    descricao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tipo: Mapped[str] = mapped_column(String(30), nullable=False, default="armazem")
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    padrao: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
+
+    empresa_prestadora: Mapped["ProviderCompany"] = relationship()
+    locais: Mapped[List["StockLocation"]] = relationship(
+        back_populates="armazem",
+        cascade="all, delete-orphan",
+        order_by="StockLocation.nome.asc()",
+    )
+    saldos: Mapped[List["StockLocationBalance"]] = relationship(back_populates="armazem")
+
+
+class StockLocation(Base):
+    __tablename__ = "estoque_locais"
+    __table_args__ = (
+        UniqueConstraint("armazem_id", "codigo", name="uq_estoque_locais_armazem_codigo"),
+        Index("ix_estoque_locais_empresa_nome", "empresa_prestadora_id", "nome"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_prestadora_id: Mapped[int] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=False,
+        index=True,
+    )
+    armazem_id: Mapped[int] = mapped_column(ForeignKey("estoque_armazens.id"), nullable=False, index=True)
+    nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    codigo: Mapped[str] = mapped_column(String(40), nullable=False)
+    descricao: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ativo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    padrao: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
+
+    empresa_prestadora: Mapped["ProviderCompany"] = relationship()
+    armazem: Mapped["StockWarehouse"] = relationship(back_populates="locais")
+    saldos: Mapped[List["StockLocationBalance"]] = relationship(back_populates="local")
+    inventarios: Mapped[List["StockInventorySession"]] = relationship(back_populates="local")
+
+
+class StockLocationBalance(Base):
+    __tablename__ = "estoque_saldos"
+    __table_args__ = (
+        UniqueConstraint("produto_id", "armazem_id", "local_id", name="uq_estoque_saldos_produto_local"),
+        Index("ix_estoque_saldos_empresa_produto", "empresa_prestadora_id", "produto_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    produto_id: Mapped[int] = mapped_column(ForeignKey("produtos.id"), nullable=False, index=True)
+    empresa_prestadora_id: Mapped[int] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=False,
+        index=True,
+    )
+    armazem_id: Mapped[int] = mapped_column(ForeignKey("estoque_armazens.id"), nullable=False, index=True)
+    local_id: Mapped[int] = mapped_column(ForeignKey("estoque_locais.id"), nullable=False, index=True)
+    quantidade_atual: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
+
+    produto: Mapped["Product"] = relationship(back_populates="estoque_saldos")
+    armazem: Mapped["StockWarehouse"] = relationship(back_populates="saldos")
+    local: Mapped["StockLocation"] = relationship(back_populates="saldos")
+
+
+class StockInventorySession(Base):
+    __tablename__ = "estoque_inventarios"
+    __table_args__ = (
+        Index("ix_estoque_inventarios_empresa_status", "empresa_prestadora_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_prestadora_id: Mapped[int] = mapped_column(
+        ForeignKey("empresas_prestadoras.id"),
+        nullable=False,
+        index=True,
+    )
+    armazem_id: Mapped[int] = mapped_column(ForeignKey("estoque_armazens.id"), nullable=False, index=True)
+    local_id: Mapped[int] = mapped_column(ForeignKey("estoque_locais.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="aberto", index=True)
+    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    finished_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    armazem: Mapped["StockWarehouse"] = relationship()
+    local: Mapped["StockLocation"] = relationship(back_populates="inventarios")
+    itens: Mapped[List["StockInventoryItem"]] = relationship(
+        back_populates="inventario",
+        cascade="all, delete-orphan",
+        order_by="StockInventoryItem.id.asc()",
+    )
+
+
+class StockInventoryItem(Base):
+    __tablename__ = "estoque_inventario_itens"
+    __table_args__ = (
+        UniqueConstraint("inventario_id", "produto_id", name="uq_estoque_inventario_item_produto"),
+        Index("ix_estoque_inventario_itens_produto", "produto_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    inventario_id: Mapped[int] = mapped_column(ForeignKey("estoque_inventarios.id"), nullable=False, index=True)
+    produto_id: Mapped[int] = mapped_column(ForeignKey("produtos.id"), nullable=False, index=True)
+    quantidade_sistema: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    quantidade_contada: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    divergencia: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    ultimo_codigo_lido: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
+
+    inventario: Mapped["StockInventorySession"] = relationship(back_populates="itens")
+    produto: Mapped["Product"] = relationship(back_populates="inventario_itens")
 
 
 class Pest(Base):

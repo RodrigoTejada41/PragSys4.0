@@ -17,6 +17,10 @@ from xml.etree import ElementTree as ET
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
+from reportlab.graphics.barcode import code128
+from reportlab.graphics.barcode.qr import QrCodeWidget
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics import renderPDF
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -46,10 +50,23 @@ from app.application.schemas import (
     ProductCreate,
     ProductCsvImportResult,
     StockBalanceCreate,
+    StockCodeLookupRead,
     StockImportLogRead,
+    StockInventoryCountCreate,
+    StockInventoryFinalizeCreate,
+    StockInventoryItemRead,
+    StockInventorySessionCreate,
+    StockInventorySessionRead,
+    StockLabelRequest,
+    StockLocationCreate,
+    StockLocationRead,
+    StockLocationUpdate,
     StockMovementCreate,
     StockPositionRead,
     StockTransferCreate,
+    StockWarehouseCreate,
+    StockWarehouseRead,
+    StockWarehouseUpdate,
     ProductXmlImportResult,
     ProductUpdate,
     TechnicianCreate,
@@ -74,8 +91,13 @@ from app.infrastructure.models import (
     Pest,
     ProviderCompany,
     Product,
+    StockInventoryItem,
+    StockInventorySession,
     StockImportLog,
+    StockLocation,
+    StockLocationBalance,
     StockMovement,
+    StockWarehouse,
     Technician,
     User,
     WorkOrder,
@@ -317,6 +339,8 @@ def _serialize_product(product: Product) -> Product:
     company = getattr(product, "empresa_prestadora", None)
     product.empresa_prestadora_nome = company.nome_fantasia or company.razao_social if company else None
     product.unidade_medida = _normalize_stock_unit(getattr(product, "unidade_medida", "UN"))
+    product.codigo_interno = _build_internal_product_code(product)
+    product.qr_code_value = getattr(product, "qr_code_value", None) or _build_product_qr_code_value(product)
     return product
 
 
@@ -332,6 +356,12 @@ def _serialize_stock_movement(item: StockMovement) -> StockMovement:
         if item.empresa_relacionada
         else None
     )
+    item.armazem_nome = item.armazem.nome if getattr(item, "armazem", None) else None
+    item.local_nome = item.local.nome if getattr(item, "local", None) else None
+    item.armazem_relacionado_nome = (
+        item.armazem_relacionado.nome if getattr(item, "armazem_relacionado", None) else None
+    )
+    item.local_relacionado_nome = item.local_relacionado.nome if getattr(item, "local_relacionado", None) else None
     item.usuario_nome = item.usuario.nome if item.usuario else None
     item.unidade_medida = _normalize_stock_unit(getattr(item, "unidade_medida", "UN"))
     return item
@@ -349,6 +379,53 @@ def _serialize_stock_import_log(item: StockImportLog) -> StockImportLog:
     except json.JSONDecodeError:
         item.errors = []
     return item
+
+
+def _serialize_stock_warehouse(item: StockWarehouse) -> StockWarehouseRead:
+    company = getattr(item, "empresa_prestadora", None)
+    item.empresa_prestadora_nome = company.nome_fantasia or company.razao_social if company else None
+    return item
+
+
+def _serialize_stock_location(item: StockLocation) -> StockLocationRead:
+    company = getattr(item, "empresa_prestadora", None)
+    item.empresa_prestadora_nome = company.nome_fantasia or company.razao_social if company else None
+    item.armazem_nome = item.armazem.nome if getattr(item, "armazem", None) else None
+    return item
+
+
+def _serialize_stock_inventory_item(item: StockInventoryItem) -> StockInventoryItemRead:
+    item.produto_nome = item.produto.nome if getattr(item, "produto", None) else None
+    item.unidade_medida = (
+        _normalize_stock_unit(item.produto.unidade_medida) if getattr(item, "produto", None) else "UN"
+    )
+    return item
+
+
+def _serialize_stock_inventory_session(item: StockInventorySession) -> StockInventorySessionRead:
+    item.empresa_prestadora_nome = None
+    if getattr(item, "armazem", None) and getattr(item.armazem, "empresa_prestadora", None):
+        company = item.armazem.empresa_prestadora
+        item.empresa_prestadora_nome = company.nome_fantasia or company.razao_social
+    item.armazem_nome = item.armazem.nome if getattr(item, "armazem", None) else None
+    item.local_nome = item.local.nome if getattr(item, "local", None) else None
+    item.itens = [_serialize_stock_inventory_item(entry) for entry in getattr(item, "itens", [])]
+    return item
+
+
+def _sanitize_stock_code(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _build_internal_product_code(product: Product) -> str:
+    return f"PRD-{product.empresa_prestadora_id or 0}-{product.id}"
+
+
+def _build_product_qr_code_value(product: Product) -> str:
+    return getattr(product, "qr_code_value", None) or _build_internal_product_code(product)
 
 
 def _get_current_company(current_user: Optional[User]) -> Optional[ProviderCompany]:
@@ -378,6 +455,199 @@ def _get_stock_accessible_company_ids(current_user: Optional[User]) -> set[int]:
         if child.is_active and child.compartilha_visualizacao_estoque:
             company_ids.add(child.id)
     return company_ids
+
+
+def _assert_user_can_access_company_for_stock(current_user: Optional[User], company_id: int) -> None:
+    if current_user is None or _is_master_user(current_user):
+        return
+    accessible_company_ids = _get_stock_accessible_company_ids(current_user)
+    if company_id not in accessible_company_ids:
+        raise BusinessRuleViolation("Sem permissao para operar estoque nesta empresa.")
+
+
+def _build_next_company_stock_code(db: Session, company_id: int, prefix: str, model) -> str:
+    base_prefix = f"{prefix}-{company_id}"
+    counter = 1
+    while True:
+        code = f"{base_prefix}-{counter:03d}"
+        exists = db.query(model).filter(model.empresa_prestadora_id == company_id, model.codigo == code).first()
+        if not exists:
+            return code
+        counter += 1
+
+
+def _ensure_default_stock_structure(db: Session, company_id: int) -> tuple[StockWarehouse, StockLocation]:
+    warehouse = (
+        db.query(StockWarehouse)
+        .filter(StockWarehouse.empresa_prestadora_id == company_id, StockWarehouse.padrao.is_(True))
+        .first()
+    )
+    if warehouse is None:
+        warehouse = StockWarehouse(
+            empresa_prestadora_id=company_id,
+            nome="Armazem principal",
+            codigo=_build_next_company_stock_code(db, company_id, "MAIN", StockWarehouse),
+            descricao="Estrutura principal criada automaticamente.",
+            tipo="armazem",
+            ativo=True,
+            padrao=True,
+        )
+        db.add(warehouse)
+        db.flush()
+
+    location = (
+        db.query(StockLocation)
+        .filter(StockLocation.armazem_id == warehouse.id, StockLocation.padrao.is_(True))
+        .first()
+    )
+    if location is None:
+        location = StockLocation(
+            empresa_prestadora_id=company_id,
+            armazem_id=warehouse.id,
+            nome="Geral",
+            codigo=_build_next_company_stock_code(db, company_id, "LOC", StockLocation),
+            descricao="Local padrao criado automaticamente.",
+            ativo=True,
+            padrao=True,
+        )
+        db.add(location)
+        db.flush()
+    return warehouse, location
+
+
+def _get_stock_warehouse_or_fail(db: Session, warehouse_id: int) -> StockWarehouse:
+    warehouse = db.query(StockWarehouse).filter(StockWarehouse.id == warehouse_id).first()
+    if warehouse is None:
+        raise BusinessRuleViolation("Armazem de estoque nao encontrado.")
+    if not warehouse.ativo:
+        raise BusinessRuleViolation("O armazem selecionado esta inativo.")
+    return warehouse
+
+
+def _get_stock_location_or_fail(db: Session, location_id: int) -> StockLocation:
+    location = db.query(StockLocation).filter(StockLocation.id == location_id).first()
+    if location is None:
+        raise BusinessRuleViolation("Local fisico de estoque nao encontrado.")
+    if not location.ativo:
+        raise BusinessRuleViolation("O local fisico selecionado esta inativo.")
+    return location
+
+
+def _resolve_stock_structure(
+    db: Session,
+    *,
+    company_id: int,
+    warehouse_id: Optional[int] = None,
+    location_id: Optional[int] = None,
+    current_user: Optional[User] = None,
+) -> tuple[StockWarehouse, StockLocation]:
+    _assert_user_can_access_company_for_stock(current_user, company_id)
+    if warehouse_id is None and location_id is None:
+        return _ensure_default_stock_structure(db, company_id)
+
+    location = _get_stock_location_or_fail(db, location_id) if location_id is not None else None
+    warehouse = _get_stock_warehouse_or_fail(db, warehouse_id or (location.armazem_id if location else 0))
+    if warehouse.empresa_prestadora_id != company_id:
+        raise BusinessRuleViolation("O armazem selecionado nao pertence a empresa informada.")
+    if location is None:
+        location = (
+            db.query(StockLocation)
+            .filter(StockLocation.armazem_id == warehouse.id, StockLocation.padrao.is_(True))
+            .first()
+        )
+        if location is None:
+            _, location = _ensure_default_stock_structure(db, company_id)
+    if location.empresa_prestadora_id != company_id or location.armazem_id != warehouse.id:
+        raise BusinessRuleViolation("O local fisico selecionado nao pertence ao armazem informado.")
+    return warehouse, location
+
+
+def _get_or_create_stock_balance(
+    db: Session,
+    *,
+    product: Product,
+    warehouse: StockWarehouse,
+    location: StockLocation,
+) -> StockLocationBalance:
+    balance = (
+        db.query(StockLocationBalance)
+        .filter(
+            StockLocationBalance.produto_id == product.id,
+            StockLocationBalance.armazem_id == warehouse.id,
+            StockLocationBalance.local_id == location.id,
+        )
+        .first()
+    )
+    if balance is None:
+        balance = StockLocationBalance(
+            produto_id=product.id,
+            empresa_prestadora_id=product.empresa_prestadora_id,
+            armazem_id=warehouse.id,
+            local_id=location.id,
+            quantidade_atual=Decimal("0.00"),
+        )
+        db.add(balance)
+        db.flush()
+    return balance
+
+
+def _recalculate_product_stock_total(db: Session, product_id: int) -> None:
+    balances = db.query(StockLocationBalance).filter(StockLocationBalance.produto_id == product_id).all()
+    total = _money(sum((Decimal(entry.quantidade_atual) for entry in balances), Decimal("0.00")))
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if product is not None:
+        product.estoque_atual = total
+
+
+def _ensure_product_codes_are_unique(
+    db: Session,
+    *,
+    codigo_barras: Optional[str],
+    qr_code_value: Optional[str],
+    product_id: Optional[int] = None,
+) -> None:
+    if codigo_barras:
+        query = db.query(Product).filter(Product.codigo_barras == codigo_barras)
+        if product_id is not None:
+            query = query.filter(Product.id != product_id)
+        if query.first():
+            raise BusinessRuleViolation("Ja existe produto cadastrado com este codigo de barras.")
+    if qr_code_value:
+        query = db.query(Product).filter(Product.qr_code_value == qr_code_value)
+        if product_id is not None:
+            query = query.filter(Product.id != product_id)
+        if query.first():
+            raise BusinessRuleViolation("Ja existe produto cadastrado com este QR Code.")
+
+
+def _find_product_by_stock_code(
+    db: Session,
+    code: str,
+    current_user: Optional[User] = None,
+) -> Product:
+    sanitized_code = _sanitize_stock_code(code)
+    if not sanitized_code:
+        raise BusinessRuleViolation("Informe um codigo valido para localizar o produto.")
+
+    query = _apply_company_scope(
+        db.query(Product).options(joinedload(Product.empresa_prestadora)),
+        Product,
+        current_user,
+    )
+    product = query.filter(Product.codigo_barras == sanitized_code).first()
+    if product is None:
+        product = query.filter(Product.qr_code_value == sanitized_code).first()
+    if product is None and sanitized_code.startswith("PRD-"):
+        try:
+            _, company_str, product_str = sanitized_code.split("-", 2)
+            product = query.filter(Product.id == int(product_str), Product.empresa_prestadora_id == int(company_str)).first()
+        except (ValueError, TypeError):
+            product = None
+    if product is None:
+        product = query.filter(Product.registro_ms == sanitized_code).first()
+    if product is None:
+        raise BusinessRuleViolation("Produto nao encontrado para o codigo informado.")
+    return product
 
 
 def _get_current_license_for_company(db: Session, provider_company_id: Optional[int]) -> Optional[License]:
@@ -1309,6 +1579,11 @@ def _create_stock_movement_entry(
     notes: Optional[str] = None,
     target_company_id: Optional[int] = None,
     related_company_id: Optional[int] = None,
+    warehouse_id: Optional[int] = None,
+    location_id: Optional[int] = None,
+    related_warehouse_id: Optional[int] = None,
+    related_location_id: Optional[int] = None,
+    scanned_code: Optional[str] = None,
     unit_of_measure: Optional[str] = None,
     enforce_user_company_scope: bool = True,
 ) -> StockMovement:
@@ -1325,21 +1600,42 @@ def _create_stock_movement_entry(
     if product.empresa_prestadora_id != company_id:
         raise BusinessRuleViolation("O produto selecionado nao pertence a empresa informada para o estoque.")
 
+    warehouse, location = _resolve_stock_structure(
+        db,
+        company_id=company_id,
+        warehouse_id=warehouse_id,
+        location_id=location_id,
+        current_user=current_user if enforce_user_company_scope else None,
+    )
+    balance = _get_or_create_stock_balance(db, product=product, warehouse=warehouse, location=location)
+
     previous_balance = _money(Decimal(product.estoque_atual))
+    previous_location_balance = _money(Decimal(balance.quantidade_atual))
     if movement_type == "entrada":
         next_balance = _money(previous_balance + normalized_quantity)
+        next_location_balance = _money(previous_location_balance + normalized_quantity)
     elif movement_type == "saida":
         next_balance = _money(previous_balance - normalized_quantity)
+        next_location_balance = _money(previous_location_balance - normalized_quantity)
         if next_balance < Decimal("0.00"):
             raise BusinessRuleViolation(f"Estoque insuficiente para o produto '{product.nome}'.")
+        if next_location_balance < Decimal("0.00"):
+            raise BusinessRuleViolation(
+                f"Saldo insuficiente no local '{location.nome}' para o produto '{product.nome}'."
+            )
     else:
         raise BusinessRuleViolation("Tipo de movimentacao de estoque invalido.")
 
     product.estoque_atual = next_balance
+    balance.quantidade_atual = next_location_balance
     movement = StockMovement(
         produto_id=product.id,
         empresa_prestadora_id=company_id,
         empresa_relacionada_id=related_company_id,
+        armazem_id=warehouse.id,
+        local_id=location.id,
+        armazem_relacionado_id=related_warehouse_id,
+        local_relacionado_id=related_location_id,
         usuario_id=current_user.id if current_user else None,
         tipo_movimento=movement_type,
         origem=origin,
@@ -1349,6 +1645,7 @@ def _create_stock_movement_entry(
         saldo_anterior=previous_balance,
         saldo_posterior=next_balance,
         referencia=reference,
+        codigo_lido=_sanitize_stock_code(scanned_code),
         observacoes=notes,
     )
     db.add(movement)
@@ -1360,21 +1657,26 @@ def list_stock_positions(
     current_user: Optional[User] = None,
     company_id: Optional[int] = None,
 ) -> List[StockPositionRead]:
-    query = db.query(Product).options(joinedload(Product.empresa_prestadora))
+    query = db.query(StockLocationBalance).options(
+        joinedload(StockLocationBalance.produto).joinedload(Product.empresa_prestadora),
+        joinedload(StockLocationBalance.armazem),
+        joinedload(StockLocationBalance.local),
+    )
     if current_user is None or _is_master_user(current_user):
         if company_id is not None:
-            query = query.filter(Product.empresa_prestadora_id == company_id)
+            query = query.filter(StockLocationBalance.empresa_prestadora_id == company_id)
     else:
         accessible_company_ids = _get_stock_accessible_company_ids(current_user)
-        query = query.filter(Product.empresa_prestadora_id.in_(accessible_company_ids))
+        query = query.filter(StockLocationBalance.empresa_prestadora_id.in_(accessible_company_ids))
         if company_id is not None:
             if company_id not in accessible_company_ids:
                 raise BusinessRuleViolation("Sem permissao para visualizar estoque desta empresa.")
-            query = query.filter(Product.empresa_prestadora_id == company_id)
+            query = query.filter(StockLocationBalance.empresa_prestadora_id == company_id)
 
-    products = query.order_by(Product.nome.asc()).all()
+    balances = query.join(StockLocationBalance.produto).order_by(Product.nome.asc()).all()
     positions = []
-    for product in products:
+    for balance in balances:
+        product = balance.produto
         company = getattr(product, "empresa_prestadora", None)
         positions.append(
             StockPositionRead(
@@ -1384,10 +1686,16 @@ def list_stock_positions(
                 empresa_prestadora_nome=company.nome_fantasia or company.razao_social if company else "Sem empresa",
                 categoria=product.categoria,
                 unidade_medida=_normalize_stock_unit(product.unidade_medida),
-                estoque_atual=_money(Decimal(product.estoque_atual)),
+                estoque_atual=_money(Decimal(balance.quantidade_atual)),
                 estoque_minimo=_money(Decimal(product.estoque_minimo)),
                 registro_ms=product.registro_ms,
-                estoque_baixo=Decimal(product.estoque_atual) <= Decimal(product.estoque_minimo),
+                estoque_baixo=Decimal(balance.quantidade_atual) <= Decimal(product.estoque_minimo),
+                armazem_id=balance.armazem_id,
+                armazem_nome=balance.armazem.nome if balance.armazem else None,
+                local_id=balance.local_id,
+                local_nome=balance.local.nome if balance.local else None,
+                codigo_barras=product.codigo_barras,
+                qr_code_value=product.qr_code_value or _build_product_qr_code_value(product),
             )
         )
     return positions
@@ -1406,6 +1714,10 @@ def list_stock_movements(
         joinedload(StockMovement.usuario),
         joinedload(StockMovement.empresa_prestadora),
         joinedload(StockMovement.empresa_relacionada),
+        joinedload(StockMovement.armazem),
+        joinedload(StockMovement.local),
+        joinedload(StockMovement.armazem_relacionado),
+        joinedload(StockMovement.local_relacionado),
     )
     if current_user is None or _is_master_user(current_user):
         if company_id is not None:
@@ -1429,7 +1741,12 @@ def create_stock_movement(
     payload: StockMovementCreate,
     current_user: Optional[User] = None,
 ) -> StockMovement:
-    product = _get_product_or_fail(db, payload.produto_id, current_user=current_user)
+    if payload.produto_id:
+        product = _get_product_or_fail(db, payload.produto_id, current_user=current_user)
+    elif payload.codigo_lido:
+        product = _find_product_by_stock_code(db, payload.codigo_lido, current_user=current_user)
+    else:
+        raise BusinessRuleViolation("Selecione um produto ou informe um codigo para movimentar o estoque.")
     movement_unit = _normalize_stock_unit(payload.unidade_medida or product.unidade_medida)
     normalized_quantity = _convert_stock_quantity(Decimal(payload.quantidade), movement_unit, product.unidade_medida)
     movement = _create_stock_movement_entry(
@@ -1444,6 +1761,9 @@ def create_stock_movement(
         notes=payload.observacoes,
         target_company_id=payload.empresa_prestadora_id,
         related_company_id=payload.empresa_relacionada_id,
+        warehouse_id=payload.armazem_id,
+        location_id=payload.local_id,
+        scanned_code=payload.codigo_lido,
         unit_of_measure=product.unidade_medida,
     )
     db.commit()
@@ -1456,7 +1776,12 @@ def create_stock_balance(
     payload: StockBalanceCreate,
     current_user: Optional[User] = None,
 ) -> StockMovement:
-    product = _get_product_or_fail(db, payload.produto_id, current_user=current_user)
+    if payload.produto_id:
+        product = _get_product_or_fail(db, payload.produto_id, current_user=current_user)
+    elif payload.codigo_lido:
+        product = _find_product_by_stock_code(db, payload.codigo_lido, current_user=current_user)
+    else:
+        raise BusinessRuleViolation("Selecione um produto ou informe um codigo para registrar o balanco.")
     counted_unit = _normalize_stock_unit(payload.unidade_medida or product.unidade_medida)
     counted_balance = _convert_stock_quantity(Decimal(payload.saldo_contado), counted_unit, product.unidade_medida)
     current_balance = _money(Decimal(product.estoque_atual))
@@ -1474,6 +1799,9 @@ def create_stock_balance(
         origin="inventario_balanco",
         reference=payload.referencia or f"BAL-{date.today().isoformat()}",
         notes=payload.observacoes or f"Balanço de estoque. Saldo anterior: {current_balance} | saldo contado: {counted_balance}.",
+        warehouse_id=payload.armazem_id,
+        location_id=payload.local_id,
+        scanned_code=payload.codigo_lido,
         unit_of_measure=product.unidade_medida,
     )
     db.commit()
@@ -1494,7 +1822,12 @@ def create_stock_transfer(
     payload: StockTransferCreate,
     current_user: Optional[User] = None,
 ) -> list[StockMovement]:
-    source_product = _get_product_or_fail(db, payload.produto_id, current_user=current_user)
+    if payload.produto_id:
+        source_product = _get_product_or_fail(db, payload.produto_id, current_user=current_user)
+    elif payload.codigo_lido:
+        source_product = _find_product_by_stock_code(db, payload.codigo_lido, current_user=current_user)
+    else:
+        raise BusinessRuleViolation("Selecione um produto ou informe um codigo para transferir o estoque.")
     source_company_id = source_product.empresa_prestadora_id
     if source_company_id is None:
         raise BusinessRuleViolation("Produto sem empresa vinculada para transferencia.")
@@ -1549,6 +1882,11 @@ def create_stock_transfer(
         reference=reference,
         notes=payload.observacoes or f"Transferencia para {target_company.nome_fantasia or target_company.razao_social}.",
         related_company_id=target_company.id,
+        warehouse_id=payload.armazem_origem_id,
+        location_id=payload.local_origem_id,
+        related_warehouse_id=payload.armazem_destino_id,
+        related_location_id=payload.local_destino_id,
+        scanned_code=payload.codigo_lido,
         unit_of_measure=source_product.unidade_medida,
         enforce_user_company_scope=False,
     )
@@ -1563,6 +1901,11 @@ def create_stock_transfer(
         reference=reference,
         notes=payload.observacoes or f"Transferencia recebida de empresa {source_company_id}.",
         related_company_id=source_company_id,
+        warehouse_id=payload.armazem_destino_id,
+        location_id=payload.local_destino_id,
+        related_warehouse_id=payload.armazem_origem_id,
+        related_location_id=payload.local_origem_id,
+        scanned_code=payload.codigo_lido,
         unit_of_measure=target_product.unidade_medida,
         enforce_user_company_scope=False,
     )
@@ -1594,14 +1937,483 @@ def list_stock_import_logs(
     return [_serialize_stock_import_log(item) for item in query.order_by(StockImportLog.created_at.desc(), StockImportLog.id.desc()).all()]
 
 
+def list_stock_warehouses(
+    db: Session,
+    current_user: Optional[User] = None,
+    company_id: Optional[int] = None,
+) -> List[StockWarehouseRead]:
+    query = db.query(StockWarehouse).options(joinedload(StockWarehouse.empresa_prestadora)).order_by(StockWarehouse.nome.asc())
+    if current_user is None or _is_master_user(current_user):
+        if company_id is not None:
+            query = query.filter(StockWarehouse.empresa_prestadora_id == company_id)
+    else:
+        accessible_company_ids = _get_stock_accessible_company_ids(current_user)
+        query = query.filter(StockWarehouse.empresa_prestadora_id.in_(accessible_company_ids))
+        if company_id is not None:
+            if company_id not in accessible_company_ids:
+                raise BusinessRuleViolation("Sem permissao para visualizar armazens desta empresa.")
+            query = query.filter(StockWarehouse.empresa_prestadora_id == company_id)
+    warehouses = query.all()
+    return [_serialize_stock_warehouse(item) for item in warehouses]
+
+
+def create_stock_warehouse(
+    db: Session,
+    payload: StockWarehouseCreate,
+    current_user: Optional[User] = None,
+) -> StockWarehouseRead:
+    company_id = payload.empresa_prestadora_id or _get_new_record_company_id(current_user)
+    if company_id is None:
+        raise BusinessRuleViolation("Empresa nao identificada para o armazem.")
+    _assert_user_can_access_company_for_stock(current_user, company_id)
+    _ensure_provider_company_can_be_linked(db, company_id)
+    normalized_code = _sanitize_stock_code(payload.codigo)
+    existing = (
+        db.query(StockWarehouse)
+        .filter(StockWarehouse.empresa_prestadora_id == company_id, StockWarehouse.codigo == normalized_code)
+        .first()
+    )
+    if existing:
+        raise BusinessRuleViolation("Ja existe armazem cadastrado com este codigo na empresa.")
+    if payload.padrao:
+        db.query(StockWarehouse).filter(StockWarehouse.empresa_prestadora_id == company_id).update({"padrao": False})
+    warehouse = StockWarehouse(
+        empresa_prestadora_id=company_id,
+        nome=payload.nome.strip(),
+        codigo=normalized_code,
+        descricao=payload.descricao,
+        tipo=payload.tipo,
+        ativo=payload.ativo,
+        padrao=payload.padrao,
+    )
+    db.add(warehouse)
+    db.commit()
+    db.refresh(warehouse)
+    return _serialize_stock_warehouse(warehouse)
+
+
+def update_stock_warehouse(
+    db: Session,
+    warehouse_id: int,
+    payload: StockWarehouseUpdate,
+    current_user: Optional[User] = None,
+) -> StockWarehouseRead:
+    warehouse = _get_stock_warehouse_or_fail(db, warehouse_id)
+    company_id = payload.empresa_prestadora_id or warehouse.empresa_prestadora_id
+    _assert_user_can_access_company_for_stock(current_user, company_id)
+    duplicate = (
+        db.query(StockWarehouse)
+        .filter(
+            StockWarehouse.empresa_prestadora_id == company_id,
+            StockWarehouse.codigo == _sanitize_stock_code(payload.codigo),
+            StockWarehouse.id != warehouse_id,
+        )
+        .first()
+    )
+    if duplicate:
+        raise BusinessRuleViolation("Ja existe outro armazem com este codigo na empresa.")
+    if payload.padrao:
+        db.query(StockWarehouse).filter(
+            StockWarehouse.empresa_prestadora_id == company_id,
+            StockWarehouse.id != warehouse_id,
+        ).update({"padrao": False})
+    warehouse.nome = payload.nome.strip()
+    warehouse.codigo = _sanitize_stock_code(payload.codigo)
+    warehouse.descricao = payload.descricao
+    warehouse.tipo = payload.tipo
+    warehouse.ativo = payload.ativo
+    warehouse.padrao = payload.padrao
+    db.commit()
+    db.refresh(warehouse)
+    return _serialize_stock_warehouse(warehouse)
+
+
+def list_stock_locations(
+    db: Session,
+    current_user: Optional[User] = None,
+    company_id: Optional[int] = None,
+    warehouse_id: Optional[int] = None,
+) -> List[StockLocationRead]:
+    query = db.query(StockLocation).options(
+        joinedload(StockLocation.empresa_prestadora),
+        joinedload(StockLocation.armazem),
+    ).order_by(StockLocation.nome.asc())
+    if warehouse_id is not None:
+        query = query.filter(StockLocation.armazem_id == warehouse_id)
+    if current_user is None or _is_master_user(current_user):
+        if company_id is not None:
+            query = query.filter(StockLocation.empresa_prestadora_id == company_id)
+    else:
+        accessible_company_ids = _get_stock_accessible_company_ids(current_user)
+        query = query.filter(StockLocation.empresa_prestadora_id.in_(accessible_company_ids))
+        if company_id is not None:
+            if company_id not in accessible_company_ids:
+                raise BusinessRuleViolation("Sem permissao para visualizar locais desta empresa.")
+            query = query.filter(StockLocation.empresa_prestadora_id == company_id)
+    return [_serialize_stock_location(item) for item in query.all()]
+
+
+def create_stock_location(
+    db: Session,
+    payload: StockLocationCreate,
+    current_user: Optional[User] = None,
+) -> StockLocationRead:
+    warehouse = _get_stock_warehouse_or_fail(db, payload.armazem_id)
+    _assert_user_can_access_company_for_stock(current_user, warehouse.empresa_prestadora_id)
+    duplicate = (
+        db.query(StockLocation)
+        .filter(StockLocation.armazem_id == warehouse.id, StockLocation.codigo == _sanitize_stock_code(payload.codigo))
+        .first()
+    )
+    if duplicate:
+        raise BusinessRuleViolation("Ja existe local cadastrado com este codigo no armazem.")
+    if payload.padrao:
+        db.query(StockLocation).filter(StockLocation.armazem_id == warehouse.id).update({"padrao": False})
+    location = StockLocation(
+        empresa_prestadora_id=warehouse.empresa_prestadora_id,
+        armazem_id=warehouse.id,
+        nome=payload.nome.strip(),
+        codigo=_sanitize_stock_code(payload.codigo),
+        descricao=payload.descricao,
+        ativo=payload.ativo,
+        padrao=payload.padrao,
+    )
+    db.add(location)
+    db.commit()
+    db.refresh(location)
+    return _serialize_stock_location(location)
+
+
+def update_stock_location(
+    db: Session,
+    location_id: int,
+    payload: StockLocationUpdate,
+    current_user: Optional[User] = None,
+) -> StockLocationRead:
+    location = _get_stock_location_or_fail(db, location_id)
+    warehouse = _get_stock_warehouse_or_fail(db, payload.armazem_id)
+    _assert_user_can_access_company_for_stock(current_user, warehouse.empresa_prestadora_id)
+    duplicate = (
+        db.query(StockLocation)
+        .filter(
+            StockLocation.armazem_id == warehouse.id,
+            StockLocation.codigo == _sanitize_stock_code(payload.codigo),
+            StockLocation.id != location_id,
+        )
+        .first()
+    )
+    if duplicate:
+        raise BusinessRuleViolation("Ja existe outro local com este codigo no armazem.")
+    if payload.padrao:
+        db.query(StockLocation).filter(StockLocation.armazem_id == warehouse.id, StockLocation.id != location_id).update({"padrao": False})
+    location.empresa_prestadora_id = warehouse.empresa_prestadora_id
+    location.armazem_id = warehouse.id
+    location.nome = payload.nome.strip()
+    location.codigo = _sanitize_stock_code(payload.codigo)
+    location.descricao = payload.descricao
+    location.ativo = payload.ativo
+    location.padrao = payload.padrao
+    db.commit()
+    db.refresh(location)
+    return _serialize_stock_location(location)
+
+
+def lookup_product_by_stock_code(
+    db: Session,
+    code: str,
+    current_user: Optional[User] = None,
+) -> StockCodeLookupRead:
+    product = _find_product_by_stock_code(db, code, current_user=current_user)
+    default_warehouse, default_location = _ensure_default_stock_structure(db, product.empresa_prestadora_id)
+    _get_or_create_stock_balance(db, product=product, warehouse=default_warehouse, location=default_location)
+    db.flush()
+    return StockCodeLookupRead(
+        produto_id=product.id,
+        produto_nome=product.nome,
+        codigo_interno=_build_internal_product_code(product),
+        codigo_barras=product.codigo_barras,
+        qr_code_value=product.qr_code_value or _build_product_qr_code_value(product),
+        unidade_medida=_normalize_stock_unit(product.unidade_medida),
+        empresa_prestadora_id=product.empresa_prestadora_id,
+        empresa_prestadora_nome=product.empresa_prestadora.nome_fantasia or product.empresa_prestadora.razao_social if product.empresa_prestadora else None,
+        armazem_id=default_warehouse.id,
+        armazem_nome=default_warehouse.nome,
+        local_id=default_location.id,
+        local_nome=default_location.nome,
+        estoque_atual=_money(Decimal(product.estoque_atual)),
+    )
+
+
+def create_stock_inventory_session(
+    db: Session,
+    payload: StockInventorySessionCreate,
+    current_user: Optional[User] = None,
+) -> StockInventorySessionRead:
+    warehouse = _get_stock_warehouse_or_fail(db, payload.armazem_id)
+    location = _get_stock_location_or_fail(db, payload.local_id)
+    if location.armazem_id != warehouse.id:
+        raise BusinessRuleViolation("O local do inventario precisa pertencer ao armazem informado.")
+    _assert_user_can_access_company_for_stock(current_user, warehouse.empresa_prestadora_id)
+    session = StockInventorySession(
+        empresa_prestadora_id=warehouse.empresa_prestadora_id,
+        armazem_id=warehouse.id,
+        local_id=location.id,
+        observacoes=payload.observacoes,
+        created_by_user_id=current_user.id if current_user else None,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return _serialize_stock_inventory_session(session)
+
+
+def register_stock_inventory_count(
+    db: Session,
+    inventory_id: int,
+    payload: StockInventoryCountCreate,
+    current_user: Optional[User] = None,
+) -> StockInventorySessionRead:
+    session = (
+        db.query(StockInventorySession)
+        .options(
+            joinedload(StockInventorySession.armazem).joinedload(StockWarehouse.empresa_prestadora),
+            joinedload(StockInventorySession.local),
+            joinedload(StockInventorySession.itens).joinedload(StockInventoryItem.produto),
+        )
+        .filter(StockInventorySession.id == inventory_id)
+        .first()
+    )
+    if session is None:
+        raise BusinessRuleViolation("Inventario de estoque nao encontrado.")
+    if session.status != "aberto":
+        raise BusinessRuleViolation("Este inventario ja foi finalizado.")
+    _assert_user_can_access_company_for_stock(current_user, session.empresa_prestadora_id)
+
+    product = _find_product_by_stock_code(db, payload.codigo, current_user=current_user) if payload.codigo else _get_product_or_fail(
+        db,
+        payload.produto_id or 0,
+        current_user=current_user,
+    )
+    if product.empresa_prestadora_id != session.empresa_prestadora_id:
+        raise BusinessRuleViolation("O produto informado nao pertence a empresa do inventario.")
+
+    counted_unit = _normalize_stock_unit(payload.unidade_medida or product.unidade_medida)
+    counted_quantity = _convert_stock_quantity(Decimal(payload.quantidade), counted_unit, product.unidade_medida)
+    balance = (
+        db.query(StockLocationBalance)
+        .filter(
+            StockLocationBalance.produto_id == product.id,
+            StockLocationBalance.armazem_id == session.armazem_id,
+            StockLocationBalance.local_id == session.local_id,
+        )
+        .first()
+    )
+    quantity_in_system = _money(Decimal(balance.quantidade_atual if balance else 0))
+    item = (
+        db.query(StockInventoryItem)
+        .options(joinedload(StockInventoryItem.produto))
+        .filter(StockInventoryItem.inventario_id == session.id, StockInventoryItem.produto_id == product.id)
+        .first()
+    )
+    if item is None:
+        item = StockInventoryItem(
+            inventario_id=session.id,
+            produto_id=product.id,
+            quantidade_sistema=quantity_in_system,
+            quantidade_contada=Decimal("0.00"),
+            divergencia=Decimal("0.00"),
+            ultimo_codigo_lido=_sanitize_stock_code(payload.codigo),
+        )
+        db.add(item)
+        db.flush()
+    item.quantidade_contada = _money(Decimal(item.quantidade_contada) + counted_quantity)
+    item.divergencia = _money(Decimal(item.quantidade_contada) - Decimal(item.quantidade_sistema))
+    if payload.codigo:
+        item.ultimo_codigo_lido = _sanitize_stock_code(payload.codigo)
+    db.commit()
+    db.expire_all()
+    refreshed = (
+        db.query(StockInventorySession)
+        .options(
+            joinedload(StockInventorySession.armazem).joinedload(StockWarehouse.empresa_prestadora),
+            joinedload(StockInventorySession.local),
+            joinedload(StockInventorySession.itens).joinedload(StockInventoryItem.produto),
+        )
+        .filter(StockInventorySession.id == session.id)
+        .first()
+    )
+    return _serialize_stock_inventory_session(refreshed)
+
+
+def finalize_stock_inventory_session(
+    db: Session,
+    inventory_id: int,
+    payload: StockInventoryFinalizeCreate,
+    current_user: Optional[User] = None,
+) -> StockInventorySessionRead:
+    session = (
+        db.query(StockInventorySession)
+        .options(
+            joinedload(StockInventorySession.armazem).joinedload(StockWarehouse.empresa_prestadora),
+            joinedload(StockInventorySession.local),
+            joinedload(StockInventorySession.itens).joinedload(StockInventoryItem.produto),
+        )
+        .filter(StockInventorySession.id == inventory_id)
+        .first()
+    )
+    if session is None:
+        raise BusinessRuleViolation("Inventario de estoque nao encontrado.")
+    if session.status != "aberto":
+        raise BusinessRuleViolation("Este inventario ja foi finalizado.")
+    _assert_user_can_access_company_for_stock(current_user, session.empresa_prestadora_id)
+
+    if payload.aplicar_ajustes:
+        adjustment_reason = payload.motivo_ajuste or f"Ajuste de inventario #{session.id}"
+        for item in session.itens:
+            difference = _money(Decimal(item.quantidade_contada) - Decimal(item.quantidade_sistema))
+            if difference == Decimal("0.00"):
+                continue
+            _create_stock_movement_entry(
+                db,
+                item.produto,
+                movement_type="entrada" if difference > 0 else "saida",
+                quantity=abs(difference),
+                reason=adjustment_reason,
+                current_user=current_user,
+                origin="inventario_leitura",
+                reference=f"INV-{session.id}",
+                notes=f"Ajuste automatico do inventario {session.id}.",
+                warehouse_id=session.armazem_id,
+                location_id=session.local_id,
+                scanned_code=item.ultimo_codigo_lido,
+                unit_of_measure=item.produto.unidade_medida,
+            )
+            item.quantidade_sistema = item.quantidade_contada
+            item.divergencia = Decimal("0.00")
+
+    session.status = "finalizado"
+    session.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    session.finished_by_user_id = current_user.id if current_user else None
+    db.commit()
+    db.expire_all()
+    refreshed = (
+        db.query(StockInventorySession)
+        .options(
+            joinedload(StockInventorySession.armazem).joinedload(StockWarehouse.empresa_prestadora),
+            joinedload(StockInventorySession.local),
+            joinedload(StockInventorySession.itens).joinedload(StockInventoryItem.produto),
+        )
+        .filter(StockInventorySession.id == session.id)
+        .first()
+    )
+    return _serialize_stock_inventory_session(refreshed)
+
+
+def list_stock_inventory_sessions(
+    db: Session,
+    current_user: Optional[User] = None,
+    company_id: Optional[int] = None,
+) -> List[StockInventorySessionRead]:
+    query = db.query(StockInventorySession).options(
+        joinedload(StockInventorySession.armazem).joinedload(StockWarehouse.empresa_prestadora),
+        joinedload(StockInventorySession.local),
+        joinedload(StockInventorySession.itens).joinedload(StockInventoryItem.produto),
+    )
+    if current_user is None or _is_master_user(current_user):
+        if company_id is not None:
+            query = query.filter(StockInventorySession.empresa_prestadora_id == company_id)
+    else:
+        accessible_company_ids = _get_stock_accessible_company_ids(current_user)
+        query = query.filter(StockInventorySession.empresa_prestadora_id.in_(accessible_company_ids))
+        if company_id is not None:
+            if company_id not in accessible_company_ids:
+                raise BusinessRuleViolation("Sem permissao para visualizar inventarios desta empresa.")
+            query = query.filter(StockInventorySession.empresa_prestadora_id == company_id)
+    return [
+        _serialize_stock_inventory_session(item)
+        for item in query.order_by(StockInventorySession.created_at.desc(), StockInventorySession.id.desc()).all()
+    ]
+
+
+def generate_stock_labels_pdf(
+    db: Session,
+    payload: StockLabelRequest,
+    current_user: Optional[User] = None,
+) -> bytes:
+    product_ids = [int(product_id) for product_id in payload.produto_ids if int(product_id) > 0]
+    if not product_ids:
+        raise BusinessRuleViolation("Selecione ao menos um produto para gerar etiquetas.")
+    products = [
+        _get_product_or_fail(db, product_id, current_user=current_user)
+        for product_id in product_ids
+    ]
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    label_width = 90 * mm
+    label_height = 55 * mm
+    margin_x = 10 * mm
+    margin_y = 15 * mm
+    gap_x = 8 * mm
+    gap_y = 8 * mm
+    labels_per_row = 2
+
+    def draw_qr(x: float, y: float, value: str) -> None:
+        widget = QrCodeWidget(value)
+        bounds = widget.getBounds()
+        qr_width = bounds[2] - bounds[0]
+        qr_height = bounds[3] - bounds[1]
+        drawing = Drawing(24 * mm, 24 * mm, transform=[24 * mm / qr_width, 0, 0, 24 * mm / qr_height, 0, 0])
+        drawing.add(widget)
+        renderPDF.draw(drawing, pdf, x, y)
+
+    def draw_barcode(x: float, y: float, value: str) -> None:
+        barcode = code128.Code128(value, barHeight=10 * mm, barWidth=0.35)
+        barcode.drawOn(pdf, x, y)
+
+    for index, product in enumerate(products):
+        row = (index // labels_per_row) % 4
+        col = index % labels_per_row
+        x = margin_x + col * (label_width + gap_x)
+        y = height - margin_y - ((row + 1) * label_height) - (row * gap_y)
+        if index > 0 and index % (labels_per_row * 4) == 0:
+            pdf.showPage()
+            y = height - margin_y - label_height
+
+        pdf.setStrokeColor(colors.HexColor("#D8E1EA"))
+        pdf.roundRect(x, y, label_width, label_height, 4 * mm, stroke=1, fill=0)
+        pdf.setFont("Helvetica-Bold", 10)
+        pdf.drawString(x + 4 * mm, y + label_height - 7 * mm, product.nome[:42])
+        pdf.setFont("Helvetica", 8)
+        pdf.drawString(x + 4 * mm, y + label_height - 12 * mm, f"Registro: {product.registro_ms}")
+        pdf.drawString(x + 4 * mm, y + label_height - 16 * mm, f"Unidade: {_normalize_stock_unit(product.unidade_medida)}")
+        if product.codigo_barras:
+            draw_barcode(x + 4 * mm, y + 10 * mm, product.codigo_barras)
+            pdf.setFont("Helvetica", 7)
+            pdf.drawString(x + 4 * mm, y + 7 * mm, product.codigo_barras)
+        draw_qr(x + label_width - 28 * mm, y + 10 * mm, product.qr_code_value or _build_product_qr_code_value(product))
+        pdf.setFont("Helvetica", 6)
+        pdf.drawString(x + label_width - 30 * mm, y + 7 * mm, _build_internal_product_code(product))
+
+    pdf.save()
+    return buffer.getvalue()
+
+
 def create_product(db: Session, payload: ProductCreate, current_user: Optional[User] = None) -> Product:
     from app.application.fiscal_services import apply_tax_profile_to_product
 
     product_data = payload.model_dump()
     product_data["unidade_medida"] = _normalize_stock_unit(product_data.get("unidade_medida"))
+    product_data["codigo_barras"] = _sanitize_stock_code(product_data.get("codigo_barras"))
     initial_stock = Decimal(product_data.get("estoque_atual") or "0")
     product_data["estoque_atual"] = Decimal("0.00")
-    product = Product(**product_data, empresa_prestadora_id=_get_new_record_company_id(current_user))
+    company_id = _get_new_record_company_id(current_user)
+    _ensure_product_codes_are_unique(
+        db,
+        codigo_barras=product_data.get("codigo_barras"),
+        qr_code_value=None,
+    )
+    product = Product(**product_data, empresa_prestadora_id=company_id)
     apply_tax_profile_to_product(
         db,
         product,
@@ -1611,6 +2423,15 @@ def create_product(db: Session, payload: ProductCreate, current_user: Optional[U
     )
     db.add(product)
     db.flush()
+    product.qr_code_value = _build_product_qr_code_value(product)
+    _ensure_product_codes_are_unique(
+        db,
+        codigo_barras=product.codigo_barras,
+        qr_code_value=product.qr_code_value,
+        product_id=product.id,
+    )
+    default_warehouse, default_location = _ensure_default_stock_structure(db, company_id)
+    _get_or_create_stock_balance(db, product=product, warehouse=default_warehouse, location=default_location)
     if initial_stock > Decimal("0.00"):
         _create_stock_movement_entry(
             db,
@@ -1621,6 +2442,8 @@ def create_product(db: Session, payload: ProductCreate, current_user: Optional[U
             current_user=current_user,
             origin="saldo_inicial",
             notes="Registro automatico de saldo inicial no cadastro do produto.",
+            warehouse_id=default_warehouse.id,
+            location_id=default_location.id,
         )
     db.commit()
     db.refresh(product)
@@ -1643,8 +2466,17 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate, current
     previous_stock = _money(Decimal(product.estoque_atual))
     payload_data = payload.model_dump()
     payload_data["unidade_medida"] = _normalize_stock_unit(payload_data.get("unidade_medida"))
+    payload_data["codigo_barras"] = _sanitize_stock_code(payload_data.get("codigo_barras"))
+    qr_code_value = getattr(product, "qr_code_value", None) or _build_product_qr_code_value(product)
+    _ensure_product_codes_are_unique(
+        db,
+        codigo_barras=payload_data.get("codigo_barras"),
+        qr_code_value=qr_code_value,
+        product_id=product_id,
+    )
     for field, value in payload_data.items():
         setattr(product, field, value)
+    product.qr_code_value = qr_code_value
     apply_tax_profile_to_product(
         db,
         product,
@@ -1652,6 +2484,8 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate, current
         manual_override=payload.override_tributacao,
         manual_rates=payload.model_dump(),
     )
+    default_warehouse, default_location = _ensure_default_stock_structure(db, product.empresa_prestadora_id)
+    _get_or_create_stock_balance(db, product=product, warehouse=default_warehouse, location=default_location)
     new_stock = _money(Decimal(payload.estoque_atual))
     stock_diff = _money(new_stock - previous_stock)
     if stock_diff != Decimal("0.00"):

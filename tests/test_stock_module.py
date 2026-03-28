@@ -329,3 +329,154 @@ def test_stock_transfer_between_linked_companies_keeps_balances_separate(client,
     filial_item = next(item for item in filial_positions if item["registro_ms"] == "TRF-001")
     assert Decimal(filial_item["estoque_atual"]) == Decimal("0.50")
     assert filial_item["unidade_medida"] == "KG"
+
+
+def test_stock_warehouses_locations_and_code_lookup(client, auth_headers):
+    product = client.post(
+        "/api/v1/produtos",
+        headers=auth_headers,
+        json={
+            "nome": "Produto Scanner",
+            "categoria": "Operacional",
+            "unidade_medida": "UN",
+            "principio_ativo": "Ativo Scanner",
+            "grupo_quimico": "Grupo Scanner",
+            "toxicidade": "Baixa",
+            "concentracao": "1%",
+            "registro_ms": "SCAN-001",
+            "codigo_barras": "7891234567895",
+            "estoque_atual": "3.00",
+            "estoque_minimo": "1.00",
+        },
+    )
+    assert product.status_code == 201, product.text
+    product_payload = product.json()
+
+    warehouses = client.get("/api/v1/produtos/estoque/armazens", headers=auth_headers)
+    assert warehouses.status_code == 200, warehouses.text
+    assert warehouses.json()
+
+    new_warehouse = client.post(
+        "/api/v1/produtos/estoque/armazens",
+        headers=auth_headers,
+        json={
+            "nome": "Veiculo 01",
+            "codigo": "VAN-01",
+            "descricao": "Estoque movel",
+            "tipo": "veiculo",
+            "ativo": True,
+            "padrao": False,
+        },
+    )
+    assert new_warehouse.status_code == 201, new_warehouse.text
+    warehouse_id = new_warehouse.json()["id"]
+
+    new_location = client.post(
+        "/api/v1/produtos/estoque/locais",
+        headers=auth_headers,
+        json={
+            "armazem_id": warehouse_id,
+            "nome": "Bauleto",
+            "codigo": "BLT-01",
+            "descricao": "Compartimento traseiro",
+            "ativo": True,
+            "padrao": False,
+        },
+    )
+    assert new_location.status_code == 201, new_location.text
+    location_id = new_location.json()["id"]
+
+    movement = client.post(
+        "/api/v1/produtos/estoque/movimentacoes",
+        headers=auth_headers,
+        json={
+            "codigo_lido": "7891234567895",
+            "tipo_movimento": "entrada",
+            "quantidade": "2",
+            "unidade_medida": "UN",
+            "motivo": "Reposicao no veiculo",
+            "armazem_id": warehouse_id,
+            "local_id": location_id,
+        },
+    )
+    assert movement.status_code == 201, movement.text
+    movement_payload = movement.json()
+    assert movement_payload["produto_id"] == product_payload["id"]
+    assert movement_payload["armazem_id"] == warehouse_id
+    assert movement_payload["local_id"] == location_id
+    assert movement_payload["codigo_lido"] == "7891234567895"
+
+    lookup = client.get("/api/v1/produtos/estoque/buscar-por-codigo/7891234567895", headers=auth_headers)
+    assert lookup.status_code == 200, lookup.text
+    lookup_payload = lookup.json()
+    assert lookup_payload["produto_id"] == product_payload["id"]
+    assert lookup_payload["codigo_barras"] == "7891234567895"
+    assert lookup_payload["codigo_interno"].startswith("PRD-")
+
+
+def test_stock_inventory_and_labels_pdf(client, auth_headers):
+    product = client.post(
+        "/api/v1/produtos",
+        headers=auth_headers,
+        json={
+            "nome": "Produto Inventario",
+            "categoria": "Operacional",
+            "unidade_medida": "UN",
+            "principio_ativo": "Ativo Inventario",
+            "grupo_quimico": "Grupo Inventario",
+            "toxicidade": "Media",
+            "concentracao": "2%",
+            "registro_ms": "INV-001",
+            "codigo_barras": "7891234567002",
+            "estoque_atual": "4.00",
+            "estoque_minimo": "1.00",
+        },
+    )
+    assert product.status_code == 201, product.text
+    product_payload = product.json()
+
+    position = client.get("/api/v1/produtos/estoque", headers=auth_headers).json()
+    product_position = next(item for item in position if item["produto_id"] == product_payload["id"])
+
+    inventory = client.post(
+        "/api/v1/produtos/estoque/inventarios",
+        headers=auth_headers,
+        json={
+            "armazem_id": product_position["armazem_id"],
+            "local_id": product_position["local_id"],
+            "observacoes": "Inventario com leitura",
+        },
+    )
+    assert inventory.status_code == 201, inventory.text
+    inventory_payload = inventory.json()
+
+    count = client.post(
+        f"/api/v1/produtos/estoque/inventarios/{inventory_payload['id']}/contagens",
+        headers=auth_headers,
+        json={
+            "codigo": "7891234567002",
+            "quantidade": "5",
+            "unidade_medida": "UN",
+        },
+    )
+    assert count.status_code == 200, count.text
+    count_payload = count.json()
+    assert count_payload["itens"][0]["quantidade_contada"] == "5.00"
+
+    finalized = client.post(
+        f"/api/v1/produtos/estoque/inventarios/{inventory_payload['id']}/finalizar",
+        headers=auth_headers,
+        json={"aplicar_ajustes": True, "motivo_ajuste": "Ajuste inventario teste"},
+    )
+    assert finalized.status_code == 200, finalized.text
+    finalized_payload = finalized.json()
+    assert finalized_payload["status"] == "finalizado"
+
+    labels = client.post(
+        "/api/v1/produtos/estoque/etiquetas/pdf",
+        headers=auth_headers,
+        json={"produto_ids": [product_payload["id"]]},
+    )
+    assert labels.status_code == 200, labels.text
+    assert labels.headers["content-type"].startswith("application/pdf")
+    assert labels.content.startswith(b"%PDF")

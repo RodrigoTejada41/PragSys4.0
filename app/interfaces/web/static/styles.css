@@ -2905,3 +2905,26 @@ textarea {
         max-width: none;
     }
 }
+
+.scanner-inline {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.stock-section-block {
+    border-top: 1px solid rgba(17, 24, 39, 0.08);
+    padding-top: 18px;
+    margin-top: 18px;
+}
+
+.stock-section-block:first-child {
+    border-top: 0;
+    padding-top: 0;
+    margin-top: 0;
+}
+
+.inline-details-panel {
+    margin-top: 18px;
+}

@@ -10,6 +10,9 @@ const state = {
     stockMovements: [],
     stockImportLogs: [],
     stockCompanies: [],
+    stockWarehouses: [],
+    stockLocations: [],
+    stockInventories: [],
     nfeInvoices: [],
     simplesConfigs: [],
     pests: [],
@@ -23,6 +26,11 @@ const state = {
         whatsappConfig: null,
         whatsappQr: null,
         google: null,
+    },
+    stockWorkflow: {
+        lastLookup: null,
+        activeInventoryId: null,
+        scannerTarget: null,
     },
     finance: [],
     cashLedger: [],
@@ -737,6 +745,9 @@ async function loadAllData() {
         apiFetch("/api/v1/produtos/estoque/movimentacoes"),
         apiFetch("/api/v1/produtos/estoque/importacoes"),
         apiFetch("/api/v1/produtos/estoque/empresas"),
+        apiFetch("/api/v1/produtos/estoque/armazens"),
+        apiFetch("/api/v1/produtos/estoque/locais"),
+        apiFetch("/api/v1/produtos/estoque/inventarios"),
         stockManagerOnly ? Promise.resolve([]) : apiFetch("/api/v1/pragas"),
         stockManagerOnly ? Promise.resolve([]) : apiFetch("/api/v1/tecnicos"),
         stockManagerOnly ? Promise.resolve([]) : apiFetch("/api/v1/os"),
@@ -790,19 +801,20 @@ async function loadAllData() {
         basePromises.push(apiFetch("/api/v1/whatsapp/configuracao"));
     }
     const results = await Promise.all(basePromises);
-    const [customers, contracts, contractDashboard, products, stockPositions, stockMovements, stockImportLogs, stockCompanies, pests, technicians, workOrders, appointments, appointmentDashboard, whatsappStatus, googleStatus] = results;
-    const finance = canAccessFinance ? results[15] : [];
-    const cashLedger = canAccessFinance ? results[16] : [];
-    const financeDashboard = canAccessFinance ? results[17] : null;
-    const contractReport = canAccessFinance ? results[18] : null;
-    const receipts = canAccessFinance ? results[19] : [];
-    const nfeInvoices = canAccessFinance ? results[20] : [];
-    const sefazReadiness = canAccessFinance ? results[21] : null;
-    const simplesConfigs = canAccessFinance ? results[22] : [];
-    const cashFlowSummary = canAccessFinance ? results[23] : null;
-    const simplesSummary = canAccessFinance ? results[24] : null;
-    const settingsState = canAccessSettings ? results[25] : null;
-    const whatsappConfig = canAccessSettings ? results[26] : null;
+    const [customers, contracts, contractDashboard, products, stockPositions, stockMovements, stockImportLogs, stockCompanies, stockWarehouses, stockLocations, stockInventories, pests, technicians, workOrders, appointments, appointmentDashboard, whatsappStatus, googleStatus] = results;
+    const financeOffset = 18;
+    const finance = canAccessFinance ? results[financeOffset] : [];
+    const cashLedger = canAccessFinance ? results[financeOffset + 1] : [];
+    const financeDashboard = canAccessFinance ? results[financeOffset + 2] : null;
+    const contractReport = canAccessFinance ? results[financeOffset + 3] : null;
+    const receipts = canAccessFinance ? results[financeOffset + 4] : [];
+    const nfeInvoices = canAccessFinance ? results[financeOffset + 5] : [];
+    const sefazReadiness = canAccessFinance ? results[financeOffset + 6] : null;
+    const simplesConfigs = canAccessFinance ? results[financeOffset + 7] : [];
+    const cashFlowSummary = canAccessFinance ? results[financeOffset + 8] : null;
+    const simplesSummary = canAccessFinance ? results[financeOffset + 9] : null;
+    const settingsState = canAccessSettings ? results[financeOffset + 10] : null;
+    const whatsappConfig = canAccessSettings ? results[financeOffset + 11] : null;
 
     state.customers = customers;
     state.contracts = contracts;
@@ -812,6 +824,9 @@ async function loadAllData() {
     state.stockMovements = stockMovements;
     state.stockImportLogs = stockImportLogs;
     state.stockCompanies = stockCompanies;
+    state.stockWarehouses = stockWarehouses;
+    state.stockLocations = stockLocations;
+    state.stockInventories = stockInventories;
     state.pests = pests;
     state.technicians = technicians;
     state.workOrders = workOrders;
@@ -2019,6 +2034,7 @@ function buildForms() {
             <label><span>Toxicidade</span><input name="toxicidade" required></label>
             <label><span>Concentracao</span><input name="concentracao" required></label>
             <label><span>Registro MS</span><input name="registro_ms" required></label>
+            <label><span>Codigo de barras</span><input name="codigo_barras" placeholder="EAN, Code128 ou similar"></label>
             <label>
                 <span>NCM</span>
                 <input name="ncm" id="product-ncm-input" list="product-ncm-suggestions" placeholder="Digite codigo ou descricao">
@@ -2107,10 +2123,13 @@ function buildForms() {
             <section class="stock-section-block" id="stock-section-movement">
                 <div class="section-heading">
                     <h3>Movimentacao manual</h3>
-                    <p>Registre entradas e saidas sem misturar saldos entre empresas.</p>
+                    <p>Registre entradas e saidas com leitura rapida, armazem e local fisico sem misturar saldos entre empresas.</p>
                 </div>
                 <form id="stock-movement-form" class="form-grid data-form">
+                    <label class="full-width"><span>Leitura rapida</span><div class="scanner-inline"><input name="codigo_lido" placeholder="Leia QR Code, codigo de barras ou digite o codigo interno"><button type="button" class="btn btn-default ghost-button" data-stock-scan="movement">Ler codigo</button></div></label>
                     <label><span>Produto</span><select name="produto_id" required><option value="">Selecione um produto</option></select></label>
+                    <label><span>Armazem</span><select name="armazem_id"><option value="">Armazem padrao</option></select></label>
+                    <label><span>Local fisico</span><select name="local_id"><option value="">Local padrao</option></select></label>
                     <label><span>Tipo</span>
                         <select name="tipo_movimento">
                             <option value="entrada">Entrada</option>
@@ -2138,10 +2157,13 @@ function buildForms() {
             <section class="stock-section-block" id="stock-section-balance">
                 <div class="section-heading">
                     <h3>Balanco e inventario</h3>
-                    <p>Informe o saldo contado para gerar o ajuste com justificativa e historico completo.</p>
+                    <p>Informe o saldo contado ou abra um inventario por leitura continua para gerar ajuste com rastreabilidade.</p>
                 </div>
                 <form id="stock-balance-form" class="form-grid data-form">
+                    <label class="full-width"><span>Leitura rapida</span><div class="scanner-inline"><input name="codigo_lido" placeholder="Leia QR Code, codigo de barras ou digite o codigo interno"><button type="button" class="btn btn-default ghost-button" data-stock-scan="balance">Ler codigo</button></div></label>
                     <label><span>Produto</span><select name="produto_id" required><option value="">Selecione um produto</option></select></label>
+                    <label><span>Armazem</span><select name="armazem_id"><option value="">Armazem padrao</option></select></label>
+                    <label><span>Local fisico</span><select name="local_id"><option value="">Local padrao</option></select></label>
                     <label><span>Saldo contado</span><input name="saldo_contado" type="number" min="0" step="0.01" required></label>
                     <label><span>Unidade</span>
                         <select name="unidade_medida">
@@ -2159,6 +2181,7 @@ function buildForms() {
                         <button type="submit" class="btn btn-secondary">Registrar balanco</button>
                     </div>
                 </form>
+                <div id="stock-inventory-panel" class="inline-details-panel"></div>
             </section>
             <section class="stock-section-block" id="stock-section-transfer">
                 <div class="section-heading">
@@ -2166,8 +2189,13 @@ function buildForms() {
                     <p>Move saldo entre matriz e filiais vinculadas mantendo cada estoque separado.</p>
                 </div>
                 <form id="stock-transfer-form" class="form-grid data-form">
+                    <label class="full-width"><span>Leitura rapida</span><div class="scanner-inline"><input name="codigo_lido" placeholder="Leia QR Code, codigo de barras ou digite o codigo interno"><button type="button" class="btn btn-default ghost-button" data-stock-scan="transfer">Ler codigo</button></div></label>
                     <label><span>Produto de origem</span><select name="produto_id" required><option value="">Selecione um produto</option></select></label>
                     <label><span>Empresa destino</span><select name="empresa_destino_id" required><option value="">Selecione a empresa destino</option></select></label>
+                    <label><span>Armazem origem</span><select name="armazem_origem_id"><option value="">Armazem padrao</option></select></label>
+                    <label><span>Local origem</span><select name="local_origem_id"><option value="">Local padrao</option></select></label>
+                    <label><span>Armazem destino</span><select name="armazem_destino_id"><option value="">Armazem padrao</option></select></label>
+                    <label><span>Local destino</span><select name="local_destino_id"><option value="">Local padrao</option></select></label>
                     <label><span>Quantidade</span><input name="quantidade" type="number" min="0.01" step="0.01" required></label>
                     <label><span>Unidade</span>
                         <select name="unidade_medida">
@@ -2185,6 +2213,34 @@ function buildForms() {
                         <button type="submit" class="btn btn-secondary">Transferir estoque</button>
                     </div>
                 </form>
+            </section>
+            <section class="stock-section-block" id="stock-section-structure">
+                <div class="section-heading">
+                    <h3>Armazens, locais e etiquetas</h3>
+                    <p>Estruture o estoque por deposito, veiculo, equipe ou prateleira e gere etiquetas com QR e codigo de barras.</p>
+                </div>
+                <form id="stock-warehouse-form" class="form-grid data-form">
+                    <label><span>Armazem</span><input name="nome" required placeholder="Ex.: Deposito central"></label>
+                    <label><span>Codigo</span><input name="codigo" required placeholder="Ex.: DEP-CENTRAL"></label>
+                    <label><span>Tipo</span><input name="tipo" value="armazem" placeholder="armazem, veiculo, equipe"></label>
+                    <label><span>Ativo</span><select name="ativo"><option value="true">Sim</option><option value="false">Nao</option></select></label>
+                    <label><span>Padrao</span><select name="padrao"><option value="false">Nao</option><option value="true">Sim</option></select></label>
+                    <label class="full-width"><span>Descricao</span><input name="descricao" placeholder="Contexto do armazem"></label>
+                    <div class="inline-actions ui-form-actions"><button type="submit" class="btn btn-default">Salvar armazem</button></div>
+                </form>
+                <form id="stock-location-form" class="form-grid data-form">
+                    <label><span>Armazem</span><select name="armazem_id" required><option value="">Selecione</option></select></label>
+                    <label><span>Local fisico</span><input name="nome" required placeholder="Ex.: Prateleira A1"></label>
+                    <label><span>Codigo</span><input name="codigo" required placeholder="Ex.: A1"></label>
+                    <label><span>Ativo</span><select name="ativo"><option value="true">Sim</option><option value="false">Nao</option></select></label>
+                    <label><span>Padrao</span><select name="padrao"><option value="false">Nao</option><option value="true">Sim</option></select></label>
+                    <label class="full-width"><span>Descricao</span><input name="descricao" placeholder="Contexto do local"></label>
+                    <div class="inline-actions ui-form-actions"><button type="submit" class="btn btn-default">Salvar local</button></div>
+                </form>
+                <div class="inline-actions ui-form-actions">
+                    <button type="button" class="btn btn-default ghost-button" id="stock-generate-labels-button">Gerar etiquetas PDF</button>
+                </div>
+                <div id="stock-structure-panel" class="inline-details-panel"></div>
             </section>
         `;
     }
@@ -2747,6 +2803,8 @@ document.getElementById("pest-form").innerHTML = `
     bindStockMovementForm();
     bindStockBalanceForm();
     bindStockTransferForm();
+    bindStockStructureForms();
+    bindStockCodeHelpers();
     bindCustomerAutoLookup();
     bindNfeFormHelpers();
     bindProductFiscalControls();
@@ -4469,6 +4527,27 @@ function hydrateDynamicControls() {
         "id",
         "display_name",
     );
+    const warehouseOptions = state.stockWarehouses.map((item) => ({
+        ...item,
+        display_name: `${item.nome} | ${item.empresa_prestadora_nome || "Sem empresa"}`,
+    }));
+    [
+        document.querySelector('#stock-movement-form [name="armazem_id"]'),
+        document.querySelector('#stock-balance-form [name="armazem_id"]'),
+        document.querySelector('#stock-transfer-form [name="armazem_origem_id"]'),
+        document.querySelector('#stock-transfer-form [name="armazem_destino_id"]'),
+        document.querySelector('#stock-location-form [name="armazem_id"]'),
+    ].forEach((select) => setSelectOptions(select, warehouseOptions, "id", "display_name"));
+    const locationOptions = state.stockLocations.map((item) => ({
+        ...item,
+        display_name: `${item.nome} | ${item.armazem_nome || "Sem armazem"}`,
+    }));
+    [
+        document.querySelector('#stock-movement-form [name="local_id"]'),
+        document.querySelector('#stock-balance-form [name="local_id"]'),
+        document.querySelector('#stock-transfer-form [name="local_origem_id"]'),
+        document.querySelector('#stock-transfer-form [name="local_destino_id"]'),
+    ].forEach((select) => setSelectOptions(select, locationOptions, "id", "display_name"));
     setSelectOptions(
         document.getElementById("stock-company-filter"),
         state.stockCompanies.map((item) => ({ ...item, display_name: item.nome_fantasia || item.razao_social })),
@@ -6701,12 +6780,15 @@ function bindStockMovementForm() {
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const payload = objectFromForm(form);
-        if (!payload.produto_id) {
-            toast("Selecione um produto para movimentar o estoque.");
+        if (!payload.produto_id && !payload.codigo_lido) {
+            toast("Selecione um produto ou leia um codigo para movimentar o estoque.");
             return;
         }
-        payload.produto_id = Number(payload.produto_id);
+        payload.produto_id = Number(payload.produto_id || 0);
+        payload.armazem_id = normalizeOptionalNumber(payload.armazem_id);
+        payload.local_id = normalizeOptionalNumber(payload.local_id);
         payload.quantidade = String(payload.quantidade || "").trim();
+        payload.codigo_lido = payload.codigo_lido || null;
         payload.referencia = payload.referencia || null;
         payload.observacoes = payload.observacoes || null;
         await apiFetch("/api/v1/produtos/estoque/movimentacoes", {
@@ -6727,11 +6809,14 @@ function bindStockBalanceForm() {
         event.preventDefault();
         const payload = objectFromForm(form);
         payload.produto_id = Number(payload.produto_id || 0);
+        payload.armazem_id = normalizeOptionalNumber(payload.armazem_id);
+        payload.local_id = normalizeOptionalNumber(payload.local_id);
         payload.saldo_contado = String(payload.saldo_contado || "").trim();
+        payload.codigo_lido = payload.codigo_lido || null;
         payload.referencia = payload.referencia || null;
         payload.observacoes = payload.observacoes || null;
-        if (!payload.produto_id) {
-            toast("Selecione um produto para o balanco.");
+        if (!payload.produto_id && !payload.codigo_lido) {
+            toast("Selecione um produto ou leia um codigo para o balanco.");
             return;
         }
         await apiFetch("/api/v1/produtos/estoque/balanco", {
@@ -6753,11 +6838,16 @@ function bindStockTransferForm() {
         const payload = objectFromForm(form);
         payload.produto_id = Number(payload.produto_id || 0);
         payload.empresa_destino_id = Number(payload.empresa_destino_id || 0);
+        payload.armazem_origem_id = normalizeOptionalNumber(payload.armazem_origem_id);
+        payload.local_origem_id = normalizeOptionalNumber(payload.local_origem_id);
+        payload.armazem_destino_id = normalizeOptionalNumber(payload.armazem_destino_id);
+        payload.local_destino_id = normalizeOptionalNumber(payload.local_destino_id);
         payload.quantidade = String(payload.quantidade || "").trim();
+        payload.codigo_lido = payload.codigo_lido || null;
         payload.referencia = payload.referencia || null;
         payload.observacoes = payload.observacoes || null;
-        if (!payload.produto_id || !payload.empresa_destino_id) {
-            toast("Selecione o produto e a empresa destino para transferir.");
+        if ((!payload.produto_id && !payload.codigo_lido) || !payload.empresa_destino_id) {
+            toast("Selecione o produto ou leia um codigo e informe a empresa destino.");
             return;
         }
         await apiFetch("/api/v1/produtos/estoque/transferencias", {
@@ -6767,6 +6857,215 @@ function bindStockTransferForm() {
         form.reset();
         await afterMutation("Transferencia de estoque registrada com sucesso.");
     });
+}
+
+function normalizeOptionalNumber(value) {
+    const raw = String(value || "").trim();
+    return raw ? Number(raw) : null;
+}
+
+async function resolveStockCodeIntoForm(form, code) {
+    const sanitizedCode = String(code || "").trim();
+    if (!sanitizedCode) {
+        return;
+    }
+    const data = await apiFetch(`/api/v1/produtos/estoque/buscar-por-codigo/${encodeURIComponent(sanitizedCode)}`);
+    state.stockWorkflow.lastLookup = data;
+    const productField = form.querySelector('[name="produto_id"]');
+    if (productField) {
+        productField.value = String(data.produto_id);
+    }
+    const warehouseField = form.querySelector('[name="armazem_id"], [name="armazem_origem_id"]');
+    if (warehouseField && !warehouseField.value) {
+        warehouseField.value = String(data.armazem_id || "");
+    }
+    const locationField = form.querySelector('[name="local_id"], [name="local_origem_id"]');
+    if (locationField && !locationField.value) {
+        locationField.value = String(data.local_id || "");
+    }
+    const quantityField = form.querySelector('[name="quantidade"], [name="saldo_contado"]');
+    quantityField?.focus();
+    toast(`Produto identificado: ${data.produto_nome}.`);
+}
+
+function bindStockCodeHelpers() {
+    document.querySelectorAll("[data-stock-scan]").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", async () => {
+            const target = button.dataset.stockScan;
+            const formMap = {
+                movement: "stock-movement-form",
+                balance: "stock-balance-form",
+                transfer: "stock-transfer-form",
+            };
+            const form = document.getElementById(formMap[target]);
+            const input = form?.querySelector('[name="codigo_lido"]');
+            if (!form || !input) {
+                return;
+            }
+            state.stockWorkflow.scannerTarget = target;
+            const scannedValue = window.prompt("Leia ou informe o QR Code / codigo de barras do produto:", input.value || "");
+            if (!scannedValue) {
+                return;
+            }
+            input.value = scannedValue;
+            await resolveStockCodeIntoForm(form, scannedValue);
+        });
+    });
+
+    document.querySelectorAll('#stock-movement-form [name="codigo_lido"], #stock-balance-form [name="codigo_lido"], #stock-transfer-form [name="codigo_lido"]').forEach((input) => {
+        if (input.dataset.bound === "true") {
+            return;
+        }
+        input.dataset.bound = "true";
+        input.addEventListener("change", async (event) => {
+            const form = event.target.closest("form");
+            await resolveStockCodeIntoForm(form, event.target.value);
+        });
+    });
+}
+
+function bindStockStructureForms() {
+    const warehouseForm = document.getElementById("stock-warehouse-form");
+    if (warehouseForm && warehouseForm.dataset.bound !== "true") {
+        warehouseForm.dataset.bound = "true";
+        warehouseForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const payload = objectFromForm(warehouseForm);
+            payload.ativo = payload.ativo === "true";
+            payload.padrao = payload.padrao === "true";
+            await apiFetch("/api/v1/produtos/estoque/armazens", {
+                method: "POST",
+                body: JSON.stringify(payload),
+            });
+            warehouseForm.reset();
+            await afterMutation("Armazem salvo com sucesso.");
+        });
+    }
+
+    const locationForm = document.getElementById("stock-location-form");
+    if (locationForm && locationForm.dataset.bound !== "true") {
+        locationForm.dataset.bound = "true";
+        locationForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const payload = objectFromForm(locationForm);
+            payload.armazem_id = Number(payload.armazem_id || 0);
+            payload.ativo = payload.ativo === "true";
+            payload.padrao = payload.padrao === "true";
+            if (!payload.armazem_id) {
+                toast("Selecione um armazem para cadastrar o local.");
+                return;
+            }
+            await apiFetch("/api/v1/produtos/estoque/locais", {
+                method: "POST",
+                body: JSON.stringify(payload),
+            });
+            locationForm.reset();
+            await afterMutation("Local fisico salvo com sucesso.");
+        });
+    }
+
+    const labelsButton = document.getElementById("stock-generate-labels-button");
+    if (labelsButton && labelsButton.dataset.bound !== "true") {
+        labelsButton.dataset.bound = "true";
+        labelsButton.addEventListener("click", async () => {
+            const selectedIds = getFilteredStockPositions().map((item) => item.produto_id);
+            if (!selectedIds.length) {
+                toast("Nao ha produtos no filtro atual para gerar etiquetas.");
+                return;
+            }
+            const response = await fetch("/api/v1/produtos/estoque/etiquetas/pdf", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${state.token}`,
+                },
+                body: JSON.stringify({ produto_ids: selectedIds }),
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || "Falha ao gerar etiquetas.");
+            }
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            window.open(url, "_blank", "noopener");
+            setTimeout(() => URL.revokeObjectURL(url), 10_000);
+        });
+    }
+}
+
+function bindStockInventoryForms(activeInventory) {
+    const inventoryForm = document.getElementById("stock-inventory-form");
+    if (inventoryForm && inventoryForm.dataset.bound !== "true") {
+        inventoryForm.dataset.bound = "true";
+        inventoryForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const payload = objectFromForm(inventoryForm);
+            payload.armazem_id = Number(payload.armazem_id || 0);
+            payload.local_id = Number(payload.local_id || 0);
+            if (!payload.armazem_id || !payload.local_id) {
+                toast("Selecione armazem e local para abrir o inventario.");
+                return;
+            }
+            await apiFetch("/api/v1/produtos/estoque/inventarios", {
+                method: "POST",
+                body: JSON.stringify(payload),
+            });
+            await afterMutation("Inventario aberto com sucesso.");
+        });
+    }
+
+    const countForm = document.getElementById("stock-inventory-count-form");
+    if (countForm && activeInventory && countForm.dataset.bound !== "true") {
+        countForm.dataset.bound = "true";
+        countForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const payload = objectFromForm(countForm);
+            payload.quantidade = String(payload.quantidade || "").trim();
+            payload.codigo = payload.codigo || null;
+            if (!payload.codigo) {
+                toast("Leia ou informe um codigo para registrar a contagem.");
+                return;
+            }
+            await apiFetch(`/api/v1/produtos/estoque/inventarios/${activeInventory.id}/contagens`, {
+                method: "POST",
+                body: JSON.stringify(payload),
+            });
+            await afterMutation("Leitura do inventario registrada com sucesso.");
+        });
+    }
+
+    const finalizeButton = document.getElementById("stock-inventory-finalize-button");
+    if (finalizeButton && activeInventory && finalizeButton.dataset.bound !== "true") {
+        finalizeButton.dataset.bound = "true";
+        finalizeButton.addEventListener("click", async () => {
+            await apiFetch(`/api/v1/produtos/estoque/inventarios/${activeInventory.id}/finalizar`, {
+                method: "POST",
+                body: JSON.stringify({
+                    aplicar_ajustes: true,
+                    motivo_ajuste: `Ajuste do inventario ${activeInventory.id}`,
+                }),
+            });
+            await afterMutation("Inventario finalizado com ajuste aplicado.");
+        });
+    }
+
+    const inventoryScanButton = document.querySelector('[data-stock-scan="inventory"]');
+    if (inventoryScanButton && inventoryScanButton.dataset.bound !== "true") {
+        inventoryScanButton.dataset.bound = "true";
+        inventoryScanButton.addEventListener("click", () => {
+            const input = document.querySelector('#stock-inventory-count-form [name="codigo"]');
+            const scannedValue = window.prompt("Leia ou informe o QR Code / codigo de barras do produto:", input?.value || "");
+            if (!scannedValue || !input) {
+                return;
+            }
+            input.value = scannedValue;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+    }
 }
 
 function currentContractCustomer() {
@@ -6943,6 +7242,10 @@ function getFilteredStockPositions() {
                 item.empresa_prestadora_nome,
                 item.categoria,
                 item.registro_ms,
+                item.codigo_barras,
+                item.qr_code_value,
+                item.armazem_nome,
+                item.local_nome,
             ].join(" ").toLowerCase();
             if (!haystack.includes(search)) {
                 return false;
@@ -6977,7 +7280,7 @@ function renderStockModule() {
     const ownProductIds = new Set(state.products.map((item) => item.id));
     setTableContent(
         "stock-positions-table",
-        ["Produto", "Empresa", "Categoria", "Saldo", "Minimo", "Status", "Acoes"],
+        ["Produto", "Empresa", "Armazem / local", "Categoria", "Saldo", "Minimo", "Status", "Acoes"],
         getFilteredStockPositions().map((item) => {
             const actions = ownProductIds.has(item.produto_id)
                 ? `
@@ -6989,8 +7292,9 @@ function renderStockModule() {
                 `
                 : '<span class="origin-note">Visualizacao compartilhada</span>';
             return [
-                `<div>${escapeHtml(item.produto_nome)}<div class="origin-note">Registro ${escapeHtml(item.registro_ms || "-")} | ${escapeHtml(item.unidade_medida || "UN")}</div></div>`,
+                `<div>${escapeHtml(item.produto_nome)}<div class="origin-note">Registro ${escapeHtml(item.registro_ms || "-")} | ${escapeHtml(item.unidade_medida || "UN")} | ${escapeHtml(item.codigo_barras || item.qr_code_value || "-")}</div></div>`,
                 escapeHtml(item.empresa_prestadora_nome || "-"),
+                `${escapeHtml(item.armazem_nome || "Armazem padrao")}<div class="origin-note">${escapeHtml(item.local_nome || "Local padrao")}</div>`,
                 escapeHtml(item.categoria || "-"),
                 `${escapeHtml(String(item.estoque_atual))} ${escapeHtml(item.unidade_medida || "UN")}`,
                 `${escapeHtml(String(item.estoque_minimo))} ${escapeHtml(item.unidade_medida || "UN")}`,
@@ -6999,10 +7303,12 @@ function renderStockModule() {
             ];
         }),
         "Nenhuma posicao de estoque encontrada para os filtros aplicados.",
-        { nonSortableTargets: [6], pageLength: 8 },
+        { nonSortableTargets: [7], pageLength: 8 },
     );
     renderStockMovementHistory();
     renderStockImportHistory();
+    renderStockStructureSummary();
+    renderStockInventoryPanel();
     bindStockActionButtons();
 }
 
@@ -7027,6 +7333,14 @@ function openStockAction(action, productId = 0) {
             form.querySelector('[name="produto_id"]').value = productId ? String(productId) : "";
             form.querySelector('[name="tipo_movimento"]').value = action === "saida" ? "saida" : "entrada";
             form.querySelector('[name="unidade_medida"]').value = product?.unidade_medida || "UN";
+            const warehouseField = form.querySelector('[name="armazem_id"]');
+            const locationField = form.querySelector('[name="local_id"]');
+            if (warehouseField) {
+                warehouseField.value = product?.armazem_id ? String(product.armazem_id) : "";
+            }
+            if (locationField) {
+                locationField.value = product?.local_id ? String(product.local_id) : "";
+            }
             form.querySelector('[name="quantidade"]').focus();
         }
         document.getElementById("stock-section-movement")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -7037,6 +7351,14 @@ function openStockAction(action, productId = 0) {
         if (form) {
             form.querySelector('[name="produto_id"]').value = productId ? String(productId) : "";
             form.querySelector('[name="unidade_medida"]').value = product?.unidade_medida || "UN";
+            const warehouseField = form.querySelector('[name="armazem_id"]');
+            const locationField = form.querySelector('[name="local_id"]');
+            if (warehouseField) {
+                warehouseField.value = product?.armazem_id ? String(product.armazem_id) : "";
+            }
+            if (locationField) {
+                locationField.value = product?.local_id ? String(product.local_id) : "";
+            }
             form.querySelector('[name="saldo_contado"]').focus();
         }
         document.getElementById("stock-section-balance")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -7084,13 +7406,17 @@ function renderStockMovementHistory() {
                 .map((item) => {
                     const relatedCompany = item.empresa_relacionada_nome ? ` | relacao: ${escapeHtml(item.empresa_relacionada_nome)}` : "";
                     const reference = item.referencia ? ` | ref. ${escapeHtml(item.referencia)}` : "";
+                    const structure = item.armazem_nome || item.local_nome
+                        ? ` | ${escapeHtml(item.armazem_nome || "Armazem padrao")} > ${escapeHtml(item.local_nome || "Local padrao")}`
+                        : "";
+                    const scannedCode = item.codigo_lido ? ` | leitura ${escapeHtml(item.codigo_lido)}` : "";
                     const notes = item.observacoes ? `<div class="origin-note">${escapeHtml(item.observacoes)}</div>` : "";
                     return `
                     <article class="list-card">
                         <strong>${escapeHtml(item.produto_nome)}</strong>
                         <div class="origin-note">${escapeHtml(item.empresa_prestadora_nome || "-")} | ${escapeHtml(item.tipo_movimento)} ${escapeHtml(String(item.quantidade))} ${escapeHtml(item.unidade_medida || "UN")}${relatedCompany}${reference}</div>
                         <div>${escapeHtml(item.motivo)}</div>
-                        <div class="origin-note">Origem ${escapeHtml(item.origem)} | saldo ${escapeHtml(String(item.saldo_anterior))} -> ${escapeHtml(String(item.saldo_posterior))} | ${escapeHtml(formatDateTime(item.created_at))}</div>
+                        <div class="origin-note">Origem ${escapeHtml(item.origem)}${structure}${scannedCode} | saldo ${escapeHtml(String(item.saldo_anterior))} -> ${escapeHtml(String(item.saldo_posterior))} | ${escapeHtml(formatDateTime(item.created_at))}</div>
                         ${notes}
                     </article>`;
                 })
@@ -7132,6 +7458,64 @@ function renderStockImportHistory() {
                 .join("")}
         </div>
     `;
+}
+
+function renderStockStructureSummary() {
+    const target = document.getElementById("stock-structure-panel");
+    if (!target) {
+        return;
+    }
+    target.innerHTML = `
+        <div class="section-heading compact">
+            <h4>Estrutura operacional do estoque</h4>
+            <p>${escapeHtml(String(state.stockWarehouses.length))} armazem(ns), ${escapeHtml(String(state.stockLocations.length))} local(is) e etiquetas PDF prontas para impressao.</p>
+        </div>
+        <div class="stack-list">
+            ${state.stockWarehouses.slice(0, 6).map((item) => `
+                <article class="list-card">
+                    <strong>${escapeHtml(item.nome)}</strong>
+                    <div class="origin-note">${escapeHtml(item.codigo)} | ${escapeHtml(item.empresa_prestadora_nome || "-")} | ${escapeHtml(item.tipo || "armazem")}</div>
+                </article>
+            `).join("") || '<div class="empty-state">Nenhum armazem cadastrado ainda.</div>'}
+        </div>
+    `;
+}
+
+function renderStockInventoryPanel() {
+    const target = document.getElementById("stock-inventory-panel");
+    if (!target) {
+        return;
+    }
+    const activeInventory = state.stockInventories.find((item) => item.status === "aberto") || null;
+    target.innerHTML = `
+        <div class="section-heading compact">
+            <h4>Inventarios por leitura</h4>
+            <p>Abra um inventario no armazem/local, some leituras automaticamente e finalize com ou sem ajuste.</p>
+        </div>
+        <form id="stock-inventory-form" class="form-grid data-form">
+            <label><span>Armazem</span><select name="armazem_id" required><option value="">Selecione</option>${state.stockWarehouses.map((item) => `<option value="${item.id}">${escapeHtml(item.nome)}</option>`).join("")}</select></label>
+            <label><span>Local fisico</span><select name="local_id" required><option value="">Selecione</option>${state.stockLocations.map((item) => `<option value="${item.id}">${escapeHtml(item.nome)} | ${escapeHtml(item.armazem_nome || "-")}</option>`).join("")}</select></label>
+            <label class="full-width"><span>Observacoes</span><input name="observacoes" placeholder="Contexto do inventario"></label>
+            <div class="inline-actions ui-form-actions"><button type="submit" class="btn btn-default">Abrir inventario</button></div>
+        </form>
+        ${activeInventory ? `
+            <form id="stock-inventory-count-form" class="form-grid data-form">
+                <label class="full-width"><span>Leitura continua</span><div class="scanner-inline"><input name="codigo" placeholder="Leia QR Code, codigo de barras ou codigo interno"><button type="button" class="btn btn-default ghost-button" data-stock-scan="inventory">Ler codigo</button></div></label>
+                <label><span>Quantidade lida</span><input name="quantidade" type="number" min="0.01" step="0.01" value="1" required></label>
+                <label><span>Unidade</span><select name="unidade_medida"><option value="UN">UN</option><option value="ML">ML</option><option value="L">L</option><option value="G">G</option><option value="KG">KG</option></select></label>
+                <div class="inline-actions ui-form-actions"><button type="submit" class="btn btn-primary">Registrar leitura</button><button type="button" class="btn btn-secondary" id="stock-inventory-finalize-button">Finalizar com ajuste</button></div>
+            </form>
+            <div class="stack-list">
+                ${activeInventory.itens.map((item) => `
+                    <article class="list-card">
+                        <strong>${escapeHtml(item.produto_nome)}</strong>
+                        <div class="origin-note">Sistema ${escapeHtml(String(item.quantidade_sistema))} | Contado ${escapeHtml(String(item.quantidade_contada))} | Divergencia ${escapeHtml(String(item.divergencia))}</div>
+                    </article>
+                `).join("") || '<div class="empty-state">Nenhuma leitura registrada neste inventario.</div>'}
+            </div>
+        ` : '<div class="empty-state">Nenhum inventario aberto. Abra um inventario para usar leitura continua.</div>'}
+    `;
+    bindStockInventoryForms(activeInventory);
 }
 
 function renderPests() {

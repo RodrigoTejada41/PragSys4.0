@@ -195,6 +195,7 @@ class ProductBase(BaseModel):
     registro_ms: str
     categoria: Optional[str] = None
     unidade_medida: str = Field(default="UN", min_length=1, max_length=10)
+    codigo_barras: Optional[str] = Field(default=None, max_length=80)
     ncm: Optional[str] = None
     ncm_descricao: Optional[str] = None
     aliquota_icms: Decimal = Field(default=Decimal("0.0000"), ge=0)
@@ -220,10 +221,12 @@ class ProductRead(ProductBase):
     id: int
     empresa_prestadora_id: Optional[int] = None
     empresa_prestadora_nome: Optional[str] = None
+    codigo_interno: Optional[str] = None
+    qr_code_value: Optional[str] = None
 
 
 class StockMovementCreate(BaseModel):
-    produto_id: int
+    produto_id: Optional[int] = None
     tipo_movimento: str = Field(min_length=1, max_length=30)
     quantidade: Decimal = Field(gt=0)
     unidade_medida: Optional[str] = Field(default=None, min_length=1, max_length=10)
@@ -232,25 +235,36 @@ class StockMovementCreate(BaseModel):
     referencia: Optional[str] = Field(default=None, max_length=120)
     empresa_prestadora_id: Optional[int] = None
     empresa_relacionada_id: Optional[int] = None
+    armazem_id: Optional[int] = None
+    local_id: Optional[int] = None
+    codigo_lido: Optional[str] = Field(default=None, max_length=120)
 
 
 class StockTransferCreate(BaseModel):
-    produto_id: int
+    produto_id: Optional[int] = None
     empresa_destino_id: int
     quantidade: Decimal = Field(gt=0)
     unidade_medida: Optional[str] = Field(default=None, min_length=1, max_length=10)
     motivo: str = Field(min_length=3, max_length=255)
     observacoes: Optional[str] = None
     referencia: Optional[str] = Field(default=None, max_length=120)
+    armazem_origem_id: Optional[int] = None
+    local_origem_id: Optional[int] = None
+    armazem_destino_id: Optional[int] = None
+    local_destino_id: Optional[int] = None
+    codigo_lido: Optional[str] = Field(default=None, max_length=120)
 
 
 class StockBalanceCreate(BaseModel):
-    produto_id: int
+    produto_id: Optional[int] = None
     saldo_contado: Decimal = Field(ge=0)
     unidade_medida: Optional[str] = Field(default=None, min_length=1, max_length=10)
     motivo: str = Field(min_length=3, max_length=255)
     observacoes: Optional[str] = None
     referencia: Optional[str] = Field(default=None, max_length=120)
+    armazem_id: Optional[int] = None
+    local_id: Optional[int] = None
+    codigo_lido: Optional[str] = Field(default=None, max_length=120)
 
 
 class StockMovementRead(BaseModel):
@@ -263,6 +277,14 @@ class StockMovementRead(BaseModel):
     empresa_prestadora_nome: Optional[str] = None
     empresa_relacionada_id: Optional[int] = None
     empresa_relacionada_nome: Optional[str] = None
+    armazem_id: Optional[int] = None
+    armazem_nome: Optional[str] = None
+    local_id: Optional[int] = None
+    local_nome: Optional[str] = None
+    armazem_relacionado_id: Optional[int] = None
+    armazem_relacionado_nome: Optional[str] = None
+    local_relacionado_id: Optional[int] = None
+    local_relacionado_nome: Optional[str] = None
     usuario_id: Optional[int] = None
     usuario_nome: Optional[str] = None
     tipo_movimento: str
@@ -273,6 +295,7 @@ class StockMovementRead(BaseModel):
     saldo_anterior: Decimal
     saldo_posterior: Decimal
     referencia: Optional[str] = None
+    codigo_lido: Optional[str] = None
     observacoes: Optional[str] = None
     created_at: datetime
 
@@ -288,6 +311,131 @@ class StockPositionRead(BaseModel):
     estoque_minimo: Decimal
     registro_ms: str
     estoque_baixo: bool = False
+    armazem_id: Optional[int] = None
+    armazem_nome: Optional[str] = None
+    local_id: Optional[int] = None
+    local_nome: Optional[str] = None
+    codigo_barras: Optional[str] = None
+    qr_code_value: Optional[str] = None
+
+
+class StockWarehouseBase(BaseModel):
+    nome: str
+    codigo: str = Field(min_length=1, max_length=40)
+    descricao: Optional[str] = None
+    tipo: str = Field(default="armazem", min_length=1, max_length=30)
+    ativo: bool = True
+    padrao: bool = False
+
+
+class StockWarehouseCreate(StockWarehouseBase):
+    empresa_prestadora_id: Optional[int] = None
+
+
+class StockWarehouseUpdate(StockWarehouseBase):
+    empresa_prestadora_id: Optional[int] = None
+
+
+class StockWarehouseRead(StockWarehouseBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    empresa_prestadora_id: int
+    empresa_prestadora_nome: Optional[str] = None
+
+
+class StockLocationBase(BaseModel):
+    armazem_id: int
+    nome: str
+    codigo: str = Field(min_length=1, max_length=40)
+    descricao: Optional[str] = None
+    ativo: bool = True
+    padrao: bool = False
+
+
+class StockLocationCreate(StockLocationBase):
+    pass
+
+
+class StockLocationUpdate(StockLocationBase):
+    pass
+
+
+class StockLocationRead(StockLocationBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    empresa_prestadora_id: int
+    empresa_prestadora_nome: Optional[str] = None
+    armazem_nome: Optional[str] = None
+
+
+class StockCodeLookupRead(BaseModel):
+    produto_id: int
+    produto_nome: str
+    codigo_interno: str
+    codigo_barras: Optional[str] = None
+    qr_code_value: Optional[str] = None
+    unidade_medida: str
+    empresa_prestadora_id: int
+    empresa_prestadora_nome: Optional[str] = None
+    armazem_id: Optional[int] = None
+    armazem_nome: Optional[str] = None
+    local_id: Optional[int] = None
+    local_nome: Optional[str] = None
+    estoque_atual: Decimal
+
+
+class StockInventorySessionCreate(BaseModel):
+    armazem_id: int
+    local_id: int
+    observacoes: Optional[str] = None
+
+
+class StockInventoryCountCreate(BaseModel):
+    produto_id: Optional[int] = None
+    codigo: Optional[str] = Field(default=None, max_length=120)
+    quantidade: Decimal = Field(gt=0)
+    unidade_medida: Optional[str] = Field(default=None, min_length=1, max_length=10)
+
+
+class StockInventoryFinalizeCreate(BaseModel):
+    aplicar_ajustes: bool = False
+    motivo_ajuste: Optional[str] = Field(default=None, max_length=255)
+
+
+class StockInventoryItemRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    produto_id: int
+    produto_nome: str
+    unidade_medida: str
+    quantidade_sistema: Decimal
+    quantidade_contada: Decimal
+    divergencia: Decimal
+    ultimo_codigo_lido: Optional[str] = None
+
+
+class StockInventorySessionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    empresa_prestadora_id: int
+    empresa_prestadora_nome: Optional[str] = None
+    armazem_id: int
+    armazem_nome: Optional[str] = None
+    local_id: int
+    local_nome: Optional[str] = None
+    status: str
+    observacoes: Optional[str] = None
+    created_at: datetime
+    finished_at: Optional[datetime] = None
+    itens: List[StockInventoryItemRead] = Field(default_factory=list)
+
+
+class StockLabelRequest(BaseModel):
+    produto_ids: List[int] = Field(default_factory=list)
 
 
 class NcmTaxProfileRead(BaseModel):
