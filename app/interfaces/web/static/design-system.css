@@ -776,12 +776,18 @@ textarea.ui-control {
 .app-sidebar-user-panel .info {
     display: grid;
     gap: var(--ds-space-2);
+    min-width: 0;
 }
 
 .app-sidebar-user-panel #current-user-name {
+    display: block;
+    max-width: 100%;
     color: #f2f6f1;
     font-weight: 700;
     line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .user-avatar {
@@ -825,9 +831,13 @@ textarea.ui-control {
 }
 
 .app-sidebar-nav .nav-link p {
+    min-width: 0;
+    flex: 1 1 auto;
     margin: 0;
     font-weight: 600;
     letter-spacing: 0.01em;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .app-sidebar-nav .nav-link:hover,
