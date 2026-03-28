@@ -48,6 +48,46 @@ class AssistantChatResponse(BaseModel):
     suggestions: list[str] = Field(default_factory=list)
 
 
+class AssistantTopicSectionRead(BaseModel):
+    title: str
+    body: str
+    items: list[str] = Field(default_factory=list)
+
+
+class AssistantTopicSummaryRead(BaseModel):
+    key: str
+    title: str
+
+
+class AssistantModuleCardRead(BaseModel):
+    key: str
+    title: str
+    description: str
+    icon: str
+    is_contextual: bool = False
+    topic_count: int = 0
+    topics: list[AssistantTopicSummaryRead] = Field(default_factory=list)
+
+
+class AssistantBootstrapResponse(BaseModel):
+    panel_title: str
+    panel_subtitle: str
+    current_module: Optional[str] = None
+    current_module_title: Optional[str] = None
+    contextual_message: str
+    cards: list[AssistantModuleCardRead] = Field(default_factory=list)
+    contextual_topics: list[AssistantTopicSummaryRead] = Field(default_factory=list)
+
+
+class AssistantTopicRead(BaseModel):
+    module_key: str
+    topic_key: str
+    module_title: str
+    title: str
+    sections: list[AssistantTopicSectionRead] = Field(default_factory=list)
+    related_topics: list[AssistantTopicSummaryRead] = Field(default_factory=list)
+
+
 class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
