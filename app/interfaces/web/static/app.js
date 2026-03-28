@@ -222,6 +222,7 @@ const viewTitles = {
     clientes: "Clientes",
     produtos: "Produtos",
     estoque: "Estoque",
+    "estoque-importacoes": "Importacoes de estoque",
     "estoque-balanco": "Balanco de estoque",
     "estoque-inventario": "Inventario de estoque",
     "estoque-transferencias": "Transferencias de estoque",
@@ -2085,56 +2086,12 @@ function buildForms() {
     `;
 
     const stockActionsPanel = document.getElementById("stock-actions-panel");
+    const stockImportPanel = document.getElementById("stock-import-panel");
     const stockBalancePanel = document.getElementById("stock-balance-panel");
     const stockInventoryWorkspacePanel = document.getElementById("stock-inventory-workspace-panel");
     const stockTransferPanel = document.getElementById("stock-transfer-panel");
     if (stockActionsPanel) {
         stockActionsPanel.innerHTML = `
-            <section class="stock-section-block" id="stock-section-import">
-                <div class="section-heading">
-                    <h3>Importacoes de estoque</h3>
-                    <p>Use XML, CSV ou planilha para dar entrada em produtos e registrar despesa no financeiro quando necessario.</p>
-                </div>
-                <div class="form-grid">
-                    <label class="full-width">
-                        <span>Modelos de importacao</span>
-                        <div class="inline-actions">
-                            <a class="btn btn-default ghost-button" href="/static/import_templates/modelo_importacao_produtos_v3_1.csv" target="_blank" rel="noreferrer">Baixar CSV modelo</a>
-                            <a class="btn btn-default ghost-button" href="/static/import_templates/modelo_importacao_produtos_v3_1.xlsx" target="_blank" rel="noreferrer">Baixar planilha modelo</a>
-                        </div>
-                    </label>
-                    <label class="full-width"><span>Arquivo XML</span><input id="product-xml-file" type="file" accept=".xml,application/xml"></label>
-                    <label><span>Registrar no financeiro</span>
-                        <select id="product-xml-finance">
-                            <option value="true">Sim</option>
-                            <option value="false">Nao</option>
-                        </select>
-                    </label>
-                    <div class="inline-actions ui-form-actions">
-                        <button type="button" class="btn btn-default ghost-button" id="product-xml-import-button">Importar XML</button>
-                    </div>
-                    <label class="full-width"><span>Arquivo CSV</span><input id="product-csv-file" type="file" accept=".csv,text/csv"></label>
-                    <label><span>Registrar no financeiro</span>
-                        <select id="product-csv-finance">
-                            <option value="true">Sim</option>
-                            <option value="false">Nao</option>
-                        </select>
-                    </label>
-                    <div class="inline-actions ui-form-actions">
-                        <button type="button" class="btn btn-default ghost-button" id="product-csv-import-button">Importar CSV</button>
-                    </div>
-                    <label class="full-width"><span>Arquivo XLSX</span><input id="product-xlsx-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
-                    <label><span>Registrar no financeiro</span>
-                        <select id="product-xlsx-finance">
-                            <option value="true">Sim</option>
-                            <option value="false">Nao</option>
-                        </select>
-                    </label>
-                    <div class="inline-actions ui-form-actions">
-                        <button type="button" class="btn btn-default ghost-button" id="product-xlsx-import-button">Importar planilha</button>
-                    </div>
-                </div>
-            </section>
             <section class="stock-section-block" id="stock-section-movement">
                 <div class="section-heading">
                     <h3>Movimentacao manual</h3>
@@ -2196,6 +2153,55 @@ function buildForms() {
                     <button type="button" class="btn btn-default ghost-button" id="stock-generate-labels-button">Gerar etiquetas PDF</button>
                 </div>
                 <div id="stock-structure-panel" class="inline-details-panel"></div>
+            </section>
+        `;
+    }
+    if (stockImportPanel) {
+        stockImportPanel.innerHTML = `
+            <section class="stock-section-block" id="stock-section-import">
+                <div class="section-heading">
+                    <h3>Importacoes de estoque</h3>
+                    <p>Use XML, CSV ou planilha para dar entrada em produtos e registrar despesa no financeiro quando necessario.</p>
+                </div>
+                <div class="form-grid">
+                    <label class="full-width">
+                        <span>Modelos de importacao</span>
+                        <div class="inline-actions">
+                            <a class="btn btn-default ghost-button" href="/static/import_templates/modelo_importacao_produtos_v3_1.csv" target="_blank" rel="noreferrer">Baixar CSV modelo</a>
+                            <a class="btn btn-default ghost-button" href="/static/import_templates/modelo_importacao_produtos_v3_1.xlsx" target="_blank" rel="noreferrer">Baixar planilha modelo</a>
+                        </div>
+                    </label>
+                    <label class="full-width"><span>Arquivo XML</span><input id="product-xml-file" type="file" accept=".xml,application/xml"></label>
+                    <label><span>Registrar no financeiro</span>
+                        <select id="product-xml-finance">
+                            <option value="true">Sim</option>
+                            <option value="false">Nao</option>
+                        </select>
+                    </label>
+                    <div class="inline-actions ui-form-actions">
+                        <button type="button" class="btn btn-default ghost-button" id="product-xml-import-button">Importar XML</button>
+                    </div>
+                    <label class="full-width"><span>Arquivo CSV</span><input id="product-csv-file" type="file" accept=".csv,text/csv"></label>
+                    <label><span>Registrar no financeiro</span>
+                        <select id="product-csv-finance">
+                            <option value="true">Sim</option>
+                            <option value="false">Nao</option>
+                        </select>
+                    </label>
+                    <div class="inline-actions ui-form-actions">
+                        <button type="button" class="btn btn-default ghost-button" id="product-csv-import-button">Importar CSV</button>
+                    </div>
+                    <label class="full-width"><span>Arquivo XLSX</span><input id="product-xlsx-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+                    <label><span>Registrar no financeiro</span>
+                        <select id="product-xlsx-finance">
+                            <option value="true">Sim</option>
+                            <option value="false">Nao</option>
+                        </select>
+                    </label>
+                    <div class="inline-actions ui-form-actions">
+                        <button type="button" class="btn btn-default ghost-button" id="product-xlsx-import-button">Importar planilha</button>
+                    </div>
+                </div>
             </section>
         `;
     }
@@ -6893,10 +6899,12 @@ function bindStockTransferForm() {
 }
 
 function setStockWorkspaceView(view) {
-    const allowedViews = new Set(["operations", "balance", "inventory", "transfer"]);
+    const allowedViews = new Set(["operations", "imports", "balance", "inventory", "transfer"]);
     state.stockScreen = allowedViews.has(view) ? view : "operations";
     document.querySelectorAll("[data-stock-view]").forEach((button) => {
-        const mapped = button.dataset.stockView === "estoque-balanco"
+        const mapped = button.dataset.stockView === "estoque-importacoes"
+            ? "imports"
+            : button.dataset.stockView === "estoque-balanco"
             ? "balance"
             : button.dataset.stockView === "estoque-inventario"
                 ? "inventory"
@@ -6918,6 +6926,10 @@ function setStockWorkspaceView(view) {
             operations: {
                 title: "Operacao atual do estoque",
                 description: "Visualize saldo atual, importacoes, estrutura e historico operacional.",
+            },
+            imports: {
+                title: "Importacoes de estoque",
+                description: "Use esta tela apenas para XML, CSV, planilhas e auditoria das cargas em massa.",
             },
             balance: {
                 title: "Balanco e inventario",
@@ -6942,6 +6954,9 @@ function resolveStockScreenFromView(view) {
         return rawView === "estoque" ? state.stockScreen || "operations" : null;
     }
     const mapped = rawView.replace("estoque-", "");
+    if (mapped === "importacoes") {
+        return "imports";
+    }
     if (mapped === "balanco") {
         return "balance";
     }
@@ -6957,6 +6972,7 @@ function resolveStockScreenFromView(view) {
 function openStockView(screen = "operations") {
     const mapped = {
         operations: "estoque",
+        imports: "estoque-importacoes",
         balance: "estoque-balanco",
         inventory: "estoque-inventario",
         transfer: "estoque-transferencias",
@@ -7494,6 +7510,8 @@ function renderStockMovementHistory() {
     }
     const filteredMovements = state.stockScreen === "balance"
         ? state.stockMovements.filter((item) => item.origem === "inventario_balanco" || item.origem === "inventario_leitura")
+        : state.stockScreen === "imports"
+            ? state.stockMovements.filter((item) => ["importacao_xml", "importacao_csv", "importacao_xlsx"].includes(item.origem))
         : state.stockScreen === "inventory"
             ? state.stockMovements.filter((item) => item.origem === "inventario_leitura")
         : state.stockScreen === "transfer"
@@ -7503,6 +7521,8 @@ function renderStockMovementHistory() {
     if (!recentItems.length) {
         const emptyCopy = state.stockScreen === "balance"
             ? "Nenhum balanco ou inventario registrado ainda."
+            : state.stockScreen === "imports"
+                ? "Nenhuma importacao com movimentacao registrada ainda."
             : state.stockScreen === "inventory"
                 ? "Nenhum inventario por leitura registrado ainda."
             : state.stockScreen === "transfer"
@@ -7513,6 +7533,8 @@ function renderStockMovementHistory() {
     }
     const title = state.stockScreen === "balance"
         ? "Historico de balancos e inventarios"
+        : state.stockScreen === "imports"
+            ? "Movimentacoes geradas por importacao"
         : state.stockScreen === "inventory"
             ? "Historico de inventarios por leitura"
         : state.stockScreen === "transfer"
@@ -7520,6 +7542,8 @@ function renderStockMovementHistory() {
             : "Historico recente de estoque";
     const description = state.stockScreen === "balance"
         ? "Conferencias, leituras e ajustes aplicados no inventario."
+        : state.stockScreen === "imports"
+            ? "Entradas criadas por XML, CSV e planilhas importadas."
         : state.stockScreen === "inventory"
             ? "Leituras continuas, divergencias e ajustes de encerramento."
         : state.stockScreen === "transfer"
@@ -7559,7 +7583,7 @@ function renderStockImportHistory() {
     if (!target) {
         return;
     }
-    if (state.stockScreen !== "operations") {
+    if (state.stockScreen !== "imports") {
         target.innerHTML = "";
         target.hidden = true;
         return;

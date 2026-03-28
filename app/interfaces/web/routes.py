@@ -23,6 +23,7 @@ NAV_ITEMS = [
     {"view": "clientes", "label": "Clientes", "icon": "fas fa-address-book", "classes": ""},
     {"view": "produtos", "label": "Produtos", "icon": "fas fa-box-open", "classes": "stock-only"},
     {"view": "estoque", "label": "Estoque", "icon": "fas fa-warehouse", "classes": "stock-only"},
+    {"view": "estoque-importacoes", "label": "Importacoes", "icon": "fas fa-file-import", "classes": "stock-only"},
     {"view": "estoque-balanco", "label": "Balanco", "icon": "fas fa-clipboard-check", "classes": "stock-only"},
     {"view": "estoque-inventario", "label": "Inventario", "icon": "fas fa-qrcode", "classes": "stock-only"},
     {"view": "estoque-transferencias", "label": "Transferencias", "icon": "fas fa-exchange-alt", "classes": "stock-only"},
