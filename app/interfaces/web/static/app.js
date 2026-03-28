@@ -7470,7 +7470,106 @@ function renderStockModule() {
     renderStockStructureSummary();
     renderStockInventoryPanel();
     renderStockLabelsSummary();
+    renderStockWorkspaceOverview();
     bindStockActionButtons();
+}
+
+function renderStockWorkspaceOverview() {
+    const target = document.getElementById("stock-workspace-overview");
+    if (!target) {
+        return;
+    }
+    const currentScreen = state.stockScreen || "operations";
+    const labels = {
+        operations: {
+            eyebrow: "Operacao",
+            title: "Fluxo operacional do estoque",
+            description: "Entrada, saida, consulta de saldo e historico rapido na mesma trilha operacional.",
+            metrics: [
+                ["Posicoes visiveis", String(getFilteredStockPositions().length)],
+                ["Movimentacoes recentes", String(state.stockMovements.slice(0, 12).length)],
+                ["Alertas de minimo", String(getFilteredStockPositions().filter((item) => item.estoque_baixo).length)],
+            ],
+        },
+        imports: {
+            eyebrow: "Importacoes",
+            title: "Cargas em massa com rastreabilidade",
+            description: "XML, CSV e planilhas com log por arquivo, erros claros e trilha operacional completa.",
+            metrics: [
+                ["Arquivos recentes", String(state.stockImportLogs.slice(0, 8).length)],
+                ["Empresas no filtro", String(state.stockCompanies.length)],
+                ["Produtos visiveis", String(getFilteredStockPositions().length)],
+            ],
+        },
+        structure: {
+            eyebrow: "Estrutura",
+            title: "Organizacao fisica do estoque",
+            description: "Cadastre depositos, veiculos, equipes, locais internos e mantenha a operacao rastreavel.",
+            metrics: [
+                ["Armazens", String(state.stockWarehouses.length)],
+                ["Locais", String(state.stockLocations.length)],
+                ["Empresas", String(state.stockCompanies.length)],
+            ],
+        },
+        balance: {
+            eyebrow: "Balanco",
+            title: "Ajuste manual e conferencia imediata",
+            description: "Use quando a contagem ja esta pronta e voce quer registrar o saldo correto sem abrir inventario.",
+            metrics: [
+                ["Produtos no filtro", String(getFilteredStockPositions().length)],
+                ["Ajustes recentes", String(state.stockMovements.filter((item) => item.origem === "inventario_balanco").length)],
+                ["Itens zerados", String(getFilteredStockPositions().filter((item) => Number(item.estoque_atual || 0) === 0).length)],
+            ],
+        },
+        inventory: {
+            eyebrow: "Inventario",
+            title: "Leitura continua com divergencias",
+            description: "Abra sessoes por armazem/local, some leituras e feche o inventario com seguranca.",
+            metrics: [
+                ["Inventarios", String(state.stockInventories.length)],
+                ["Inventarios abertos", String(state.stockInventories.filter((item) => item.status === "aberto").length)],
+                ["Produtos no filtro", String(getFilteredStockPositions().length)],
+            ],
+        },
+        labels: {
+            eyebrow: "Etiquetas",
+            title: "Identificacao pronta para campo",
+            description: "Revise codigos, gere PDF em lote e prepare o uso com leitor ou celular.",
+            metrics: [
+                ["Produtos etiquetaveis", String(getFilteredStockPositions().length)],
+                ["Com codigo de barras", String(getFilteredStockPositions().filter((item) => item.codigo_barras).length)],
+                ["Com QR Code", String(getFilteredStockPositions().filter((item) => item.qr_code_value).length)],
+            ],
+        },
+        transfer: {
+            eyebrow: "Transferencias",
+            title: "Reposicao entre unidades vinculadas",
+            description: "Mantenha saldos separados entre matriz, filial, veiculo ou equipe, com rastreio completo.",
+            metrics: [
+                ["Empresas acessiveis", String(state.stockCompanies.length)],
+                ["Transferencias recentes", String(state.stockMovements.filter((item) => item.origem === "transferencia").length)],
+                ["Produtos no filtro", String(getFilteredStockPositions().length)],
+            ],
+        },
+    };
+    const content = labels[currentScreen] || labels.operations;
+    target.innerHTML = `
+        <div class="stock-overview-shell">
+            <div class="stock-overview-copy">
+                <p class="eyebrow">${escapeHtml(content.eyebrow)}</p>
+                <h3>${escapeHtml(content.title)}</h3>
+                <p>${escapeHtml(content.description)}</p>
+            </div>
+            <div class="stock-overview-metrics">
+                ${content.metrics.map(([label, value]) => `
+                    <article class="stock-overview-metric">
+                        <span>${escapeHtml(label)}</span>
+                        <strong>${escapeHtml(value)}</strong>
+                    </article>
+                `).join("")}
+            </div>
+        </div>
+    `;
 }
 
 function bindStockActionButtons() {
