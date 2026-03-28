@@ -66,6 +66,7 @@
                     <div class="inline-actions ui-form-actions stock-quick-actions">
                         <button type="button" class="btn btn-primary" data-stock-view="estoque">Operacao</button>
                         <button type="button" class="btn btn-secondary" data-stock-view="estoque-balanco">Balanco</button>
+                        <button type="button" class="btn btn-secondary" data-stock-view="estoque-inventario">Inventario</button>
                         <button type="button" class="btn btn-secondary" data-stock-view="estoque-transferencias">Transferencias</button>
                     </div>
                 </div>
@@ -119,6 +120,13 @@
                     hidden
                 >
                     <div class="card-body" id="stock-balance-panel"></div>
+                </section>
+                <section
+                    class="card panel form-panel stock-screen-panel"
+                    data-stock-screen-panel="inventory"
+                    hidden
+                >
+                    <div class="card-body" id="stock-inventory-workspace-panel"></div>
                 </section>
                 <section
                     class="card panel form-panel stock-screen-panel"

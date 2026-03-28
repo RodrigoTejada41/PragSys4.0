@@ -223,6 +223,7 @@ const viewTitles = {
     produtos: "Produtos",
     estoque: "Estoque",
     "estoque-balanco": "Balanco de estoque",
+    "estoque-inventario": "Inventario de estoque",
     "estoque-transferencias": "Transferencias de estoque",
     pragas: "Pragas",
     tecnicos: "Tecnicos",
@@ -2085,6 +2086,7 @@ function buildForms() {
 
     const stockActionsPanel = document.getElementById("stock-actions-panel");
     const stockBalancePanel = document.getElementById("stock-balance-panel");
+    const stockInventoryWorkspacePanel = document.getElementById("stock-inventory-workspace-panel");
     const stockTransferPanel = document.getElementById("stock-transfer-panel");
     if (stockActionsPanel) {
         stockActionsPanel.innerHTML = `
@@ -2226,6 +2228,16 @@ function buildForms() {
                         <button type="submit" class="btn btn-secondary">Registrar balanco</button>
                     </div>
                 </form>
+            </section>
+        `;
+    }
+    if (stockInventoryWorkspacePanel) {
+        stockInventoryWorkspacePanel.innerHTML = `
+            <section class="stock-section-block" id="stock-section-inventory">
+                <div class="section-heading">
+                    <h3>Inventario por leitura</h3>
+                    <p>Abra uma sessao de inventario, leia os produtos em sequencia e finalize com ajuste automatico quando necessario.</p>
+                </div>
                 <div id="stock-inventory-panel" class="inline-details-panel"></div>
             </section>
         `;
@@ -6881,11 +6893,13 @@ function bindStockTransferForm() {
 }
 
 function setStockWorkspaceView(view) {
-    const allowedViews = new Set(["operations", "balance", "transfer"]);
+    const allowedViews = new Set(["operations", "balance", "inventory", "transfer"]);
     state.stockScreen = allowedViews.has(view) ? view : "operations";
     document.querySelectorAll("[data-stock-view]").forEach((button) => {
         const mapped = button.dataset.stockView === "estoque-balanco"
             ? "balance"
+            : button.dataset.stockView === "estoque-inventario"
+                ? "inventory"
             : button.dataset.stockView === "estoque-transferencias"
                 ? "transfer"
                 : "operations";
@@ -6907,7 +6921,11 @@ function setStockWorkspaceView(view) {
             },
             balance: {
                 title: "Balanco e inventario",
-                description: "Use esta tela apenas para contagem, conferencias e ajustes de inventario.",
+                description: "Use esta tela apenas para saldo contado e ajuste manual imediato.",
+            },
+            inventory: {
+                title: "Inventario por leitura",
+                description: "Use esta tela apenas para abrir inventarios, registrar leituras continuas e fechar divergencias.",
             },
             transfer: {
                 title: "Transferencias entre unidades",
@@ -6927,6 +6945,9 @@ function resolveStockScreenFromView(view) {
     if (mapped === "balanco") {
         return "balance";
     }
+    if (mapped === "inventario") {
+        return "inventory";
+    }
     if (mapped === "transferencias") {
         return "transfer";
     }
@@ -6937,6 +6958,7 @@ function openStockView(screen = "operations") {
     const mapped = {
         operations: "estoque",
         balance: "estoque-balanco",
+        inventory: "estoque-inventario",
         transfer: "estoque-transferencias",
     };
     switchView(mapped[screen] || "estoque");
@@ -7472,6 +7494,8 @@ function renderStockMovementHistory() {
     }
     const filteredMovements = state.stockScreen === "balance"
         ? state.stockMovements.filter((item) => item.origem === "inventario_balanco" || item.origem === "inventario_leitura")
+        : state.stockScreen === "inventory"
+            ? state.stockMovements.filter((item) => item.origem === "inventario_leitura")
         : state.stockScreen === "transfer"
             ? state.stockMovements.filter((item) => item.origem === "transferencia")
             : state.stockMovements;
@@ -7479,6 +7503,8 @@ function renderStockMovementHistory() {
     if (!recentItems.length) {
         const emptyCopy = state.stockScreen === "balance"
             ? "Nenhum balanco ou inventario registrado ainda."
+            : state.stockScreen === "inventory"
+                ? "Nenhum inventario por leitura registrado ainda."
             : state.stockScreen === "transfer"
                 ? "Nenhuma transferencia registrada ainda."
                 : "Nenhuma movimentacao de estoque registrada ainda.";
@@ -7487,11 +7513,15 @@ function renderStockMovementHistory() {
     }
     const title = state.stockScreen === "balance"
         ? "Historico de balancos e inventarios"
+        : state.stockScreen === "inventory"
+            ? "Historico de inventarios por leitura"
         : state.stockScreen === "transfer"
             ? "Historico de transferencias"
             : "Historico recente de estoque";
     const description = state.stockScreen === "balance"
         ? "Conferencias, leituras e ajustes aplicados no inventario."
+        : state.stockScreen === "inventory"
+            ? "Leituras continuas, divergencias e ajustes de encerramento."
         : state.stockScreen === "transfer"
             ? "Saidas e entradas entre matriz, filial, veiculo ou equipe."
             : "Entradas, saidas, ajustes, balancos e transferencias por empresa/unidade.";
@@ -7594,6 +7624,11 @@ function renderStockStructureSummary() {
 function renderStockInventoryPanel() {
     const target = document.getElementById("stock-inventory-panel");
     if (!target) {
+        return;
+    }
+    target.hidden = state.stockScreen !== "inventory";
+    if (state.stockScreen !== "inventory") {
+        target.innerHTML = "";
         return;
     }
     const activeInventory = state.stockInventories.find((item) => item.status === "aberto") || null;

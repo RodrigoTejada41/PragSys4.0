@@ -70,7 +70,7 @@
 - docker compose up --build -d
 - health check em /health
 
-## Navegacao por paginas
+## Navegacao por paginas`n- Estoque: operacao geral, importacoes, estrutura e etiquetas`n- Balanco: saldo contado e ajuste manual imediato`n- Inventario: abertura de sessao, leitura continua e fechamento com divergencias`n- Transferencias: movimentacoes entre unidades vinculadas`n- cada tela mostra apenas o contexto operacional correspondente
 - Estoque: operacao geral, importacoes, estrutura e etiquetas
 - Balanco: contagem, conferencias e inventario
 - Transferencias: movimentacoes entre unidades vinculadas
