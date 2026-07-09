@@ -61,6 +61,10 @@ def test_static_app_js_includes_appointment_availability_feedback(client):
     assert "Certificado garantia" in response.text
     assert "Moldura recomendada" in response.text
     assert "Sanitario padrao" in response.text
+    assert "Orquestrador de servicos" in response.text
+    assert "/api/v1/orchestrator/services" in response.text
+    assert "/api/v1/orchestrator/diagnostics" in response.text
+    assert "Executar diagnostico" in response.text
 
 
 def test_static_ui_js_exposes_design_system_helpers(client):

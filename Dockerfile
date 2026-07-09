@@ -7,6 +7,9 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY app ./app
+COPY modelos ./modelos
+COPY modelo ./modelo
+COPY assinaturas_tecnicas ./assinaturas_tecnicas
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir .

@@ -7,6 +7,11 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - `architecture-v4.0.0.md`: arquitetura alvo da remodelacao 4.0.0, com foco em operacao local/rede e multempresa.
 - `functional-specification.md`: escopo funcional, modulos e regras de negocio.
 - `architecture.md`: arquitetura atual, limites entre camadas, decisoes e principios SOLID.
+- `ESTADO_ATUAL_PROJETO.md`: checkpoint atual para retomada do projeto.
+- `decisions/2026-07-09-spec-driven-development.md`: decisao de Spec-Driven Development na raiz do projeto.
+- `organograma-corporativo-agentes.md`: governanca corporativa dos agentes Codex, departamentos, revisores e Quality Gate.
+- `decisions/2026-07-09-central-api-orchestrator.md`: decisao proposta para API Central Orchestrator / Service Manager.
+- `central-api-orchestrator.md`: endpoints, permissoes, tabelas e limites do MVP da API Central.
 - `api-reference.md`: contratos principais da API REST, autenticacao e convencoes.
 - `code-standards.md`: padroes de clean code, organizacao de codigo, testes e refatoracao.
 - `delivery-process.md`: versionamento, fluxo de PR e operacao em Agile/Scrum.
@@ -32,6 +37,11 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - consulte `functional-specification.md` antes de alterar regras de negocio;
 - consulte `architecture-v4.0.0.md` ao planejar refactor estrutural, operacao em rede ou multempresa;
 - consulte `architecture.md` antes de mover responsabilidades entre modulos;
+- consulte `ESTADO_ATUAL_PROJETO.md` e `../RETOMADA_EXATA.md` antes de retomar trabalho pausado;
+- consulte `../specs/README.md` antes de iniciar nova implementacao;
+- consulte `organograma-corporativo-agentes.md` e `../AGENTS.md` para regras de atuacao dos agentes;
+- consulte `../specs/central-api-orchestrator/` antes de implementar API Central, service discovery, health check ou gerenciamento de servicos;
+- consulte `central-api-orchestrator.md` antes de operar ou evoluir o MVP da API Central;
 - consulte `api-reference.md` antes de mudar contratos HTTP;
 - consulte `installation-local.md` e `installation-network.md` antes de subir ambientes;
 - consulte `multitenancy-architecture.md` antes de tocar em isolamento por empresa;

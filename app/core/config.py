@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     sefaz_nfe_xsd_dir: Optional[str] = None
     sefaz_nfe_ws_urls_json: Optional[str] = None
     sefaz_nfe_verify_tls: bool = True
+    nfe_danfe_storage_dir: str = "runtime/nfe_danfe"
     company_ie: Optional[str] = None
     company_im: Optional[str] = None
     company_cnae: Optional[str] = None
@@ -135,6 +136,10 @@ class Settings(BaseSettings):
     @property
     def legacy_certificate_models_path(self) -> Optional[Path]:
         return self.resolve_project_path(self.legacy_certificate_models_dir, default="modelo")
+
+    @property
+    def nfe_danfe_storage_path(self) -> Path:
+        return self.resolve_project_path(self.nfe_danfe_storage_dir, default="runtime/nfe_danfe")
 
     @property
     def effective_host(self) -> str:

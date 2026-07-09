@@ -110,3 +110,37 @@ class NfeProcessingStatus(str, Enum):
     REJEITADO = "rejeitado"
     CANCELADO = "cancelado"
     ERRO_INTEGRACAO = "erro_integracao"
+
+
+class ManagedServiceStatus(str, Enum):
+    REGISTERED = "registered"
+    HEALTHY = "healthy"
+    UNHEALTHY = "unhealthy"
+    DEGRADED = "degraded"
+    STOPPED = "stopped"
+    STARTING = "starting"
+    STOPPING = "stopping"
+
+
+class ManagedServiceType(str, Enum):
+    API = "api"
+    DATABASE = "database"
+    WORKER = "worker"
+    CACHE = "cache"
+    QUEUE = "queue"
+    LOCAL_AGENT = "local_agent"
+    FISCAL_ENGINE = "fiscal_engine"
+    EXTERNAL = "external"
+
+
+class ServiceExecutorType(str, Enum):
+    EXTERNAL = "external"
+    LOCAL_WINDOWS = "local_windows"
+    DOCKER = "docker"
+    PYTHON_PROCESS = "python_process"
+
+
+class ServiceRecoveryPolicy(str, Enum):
+    MANUAL = "manual"
+    RESTART_ON_FAILURE = "restart_on_failure"
+    DISABLED = "disabled"

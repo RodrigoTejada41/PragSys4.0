@@ -41,6 +41,12 @@ const state = {
         whatsappQr: null,
         google: null,
     },
+    orchestrator: {
+        services: [],
+        diagnostics: null,
+        loading: false,
+        loaded: false,
+    },
     stockWorkflow: {
         lastLookup: null,
         activeInventoryId: null,
@@ -176,6 +182,11 @@ const permissionCatalog = {
         ["fiscal.view", "Ver fiscal e NF-e"],
         ["fiscal.manage", "Emitir e gerenciar NF-e"],
         ["integrations.manage", "Gerenciar integracoes"],
+        ["orchestrator.view", "Ver orquestrador de servicos"],
+        ["orchestrator.manage", "Gerenciar servicos orquestrados"],
+        ["orchestrator.command", "Executar comandos do orquestrador"],
+        ["orchestrator.logs", "Ver logs do orquestrador"],
+        ["orchestrator.audit", "Ver auditoria do orquestrador"],
     ],
 };
 
@@ -204,6 +215,11 @@ const defaultPermissionsByRole = {
         "fiscal.view": true,
         "fiscal.manage": true,
         "integrations.manage": true,
+        "orchestrator.view": true,
+        "orchestrator.manage": true,
+        "orchestrator.command": true,
+        "orchestrator.logs": true,
+        "orchestrator.audit": true,
     },
     operador: {
         "customers.view": true,
@@ -228,6 +244,11 @@ const defaultPermissionsByRole = {
         "fiscal.view": true,
         "fiscal.manage": false,
         "integrations.manage": false,
+        "orchestrator.view": false,
+        "orchestrator.manage": false,
+        "orchestrator.command": false,
+        "orchestrator.logs": false,
+        "orchestrator.audit": false,
     },
 };
 
@@ -2519,6 +2540,7 @@ function renderSettingsLoadingState() {
     const integrations = document.getElementById("settings-integrations-panel");
     const admin = document.getElementById("settings-admin-panel");
     const environment = document.getElementById("settings-environment-panel");
+    const orchestrator = document.getElementById("settings-orchestrator-panel");
     if (summary) {
         summary.innerHTML = `<div class="empty-state">As configuracoes carregam apos o login com perfil administrativo.</div>`;
     }
@@ -2534,6 +2556,9 @@ function renderSettingsLoadingState() {
     if (environment) {
         environment.innerHTML = "";
     }
+    if (orchestrator) {
+        orchestrator.innerHTML = "";
+    }
 }
 
 function renderSettings() {
@@ -2542,7 +2567,8 @@ function renderSettings() {
     const integrations = document.getElementById("settings-integrations-panel");
     const admin = document.getElementById("settings-admin-panel");
     const environment = document.getElementById("settings-environment-panel");
-    if (!summary || !form || !integrations || !admin || !environment) {
+    const orchestrator = document.getElementById("settings-orchestrator-panel");
+    if (!summary || !form || !integrations || !admin || !environment || !orchestrator) {
         return;
     }
 
@@ -2558,6 +2584,7 @@ function renderSettings() {
     const whatsappConfig = state.integrations.whatsappConfig || {};
     const whatsappQr = state.integrations.whatsappQr || {};
     const isMaster = state.user?.role === "master";
+    ensureOrchestratorPanelData();
     const multiempresaBadge = settingsState.system.multiempresa_enabled ? "Ativo" : "Unificado";
     const operationModeLabel = settingsState.system.operation_mode === "rede" ? "Rede interna" : "Local";
     const notificationsLabel = settingsState.system.notifications_enabled ? "Ativas" : "Desativadas";
@@ -2930,6 +2957,148 @@ function settingsSummaryCard(label, value, description) {
             <p>${escapeHtml(description)}</p>
         </article>
     `;
+
+    renderOrchestratorPanel(orchestrator);
+}
+
+async function ensureOrchestratorPanelData(force = false) {
+    if (!hasPermission("orchestrator.view")) {
+        return;
+    }
+    if (state.orchestrator.loading || (state.orchestrator.loaded && !force)) {
+        return;
+    }
+    state.orchestrator.loading = true;
+    try {
+        const [services, diagnostics] = await Promise.all([
+            apiFetch("/api/v1/orchestrator/services"),
+            apiFetch("/api/v1/orchestrator/diagnostics", { method: "POST" }),
+        ]);
+        state.orchestrator.services = services;
+        state.orchestrator.diagnostics = diagnostics;
+        state.orchestrator.loaded = true;
+    } catch (error) {
+        state.orchestrator.diagnostics = {
+            status: "warning",
+            issue_count: 1,
+            issues: [{ service: "orchestrator", code: "load_failed", severity: "error", message: error.message || "Falha ao carregar orquestrador." }],
+        };
+    } finally {
+        state.orchestrator.loading = false;
+        const target = document.getElementById("settings-orchestrator-panel");
+        if (target) {
+            renderOrchestratorPanel(target);
+        }
+    }
+}
+
+function renderOrchestratorPanel(target) {
+    if (!target) {
+        return;
+    }
+    if (!hasPermission("orchestrator.view")) {
+        target.innerHTML = "";
+        return;
+    }
+    const services = state.orchestrator.services || [];
+    const diagnostics = state.orchestrator.diagnostics;
+    const issues = diagnostics?.issues || [];
+    const canCommand = hasPermission("orchestrator.command");
+    target.innerHTML = `
+        <section class="settings-form-section orchestrator-admin-panel">
+            <div class="section-heading compact">
+                <p class="eyebrow">Orquestrador de servicos</p>
+                <h4>API Central Orchestrator</h4>
+                <p>Monitore servicos, execute diagnostico e registre comandos administrativos auditados.</p>
+            </div>
+            <div class="inline-actions ui-form-actions">
+                <button type="button" class="btn btn-default ghost-button" data-orchestrator-action="refresh">Atualizar status</button>
+                <button type="button" class="btn btn-primary" data-orchestrator-action="diagnostics">Executar diagnostico</button>
+                <button type="button" class="btn btn-default ghost-button" data-orchestrator-action="recovery" ${canCommand ? "" : "disabled"}>Executar recuperacao</button>
+            </div>
+            <div class="settings-side-list">
+                ${settingsInfoRow("Servicos cadastrados", String(services.length))}
+                ${settingsInfoRow("Status do diagnostico", diagnostics ? `${escapeHtml(diagnostics.status)} | ${diagnostics.issue_count} ocorrencias` : "Nao executado")}
+            </div>
+            <div class="data-table-wrapper">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Servico</th>
+                            <th>Tipo</th>
+                            <th>Status</th>
+                            <th>Porta</th>
+                            <th>Comandos</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${services.length ? services.map((service) => `
+                            <tr>
+                                <td>${escapeHtml(service.display_name || service.name)}</td>
+                                <td>${escapeHtml(service.service_type || "-")}</td>
+                                <td>${escapeHtml(service.status || "-")}</td>
+                                <td>${escapeHtml(String(service.port || "-"))}</td>
+                                <td>
+                                    <button type="button" class="btn btn-sm ghost-button" data-orchestrator-command="restart" data-service-id="${service.id}" ${canCommand ? "" : "disabled"}>Reiniciar</button>
+                                    <button type="button" class="btn btn-sm ghost-button" data-orchestrator-command="reload" data-service-id="${service.id}" ${canCommand ? "" : "disabled"}>Recarregar</button>
+                                </td>
+                            </tr>
+                        `).join("") : `<tr><td colspan="5">Nenhum servico cadastrado no orquestrador.</td></tr>`}
+                    </tbody>
+                </table>
+            </div>
+            ${issues.length ? `
+                <div class="settings-side-list">
+                    ${issues.slice(0, 6).map((issue) => settingsInfoRow(`${issue.service} | ${issue.code}`, issue.message)).join("")}
+                </div>
+            ` : ""}
+        </section>
+    `;
+    bindOrchestratorPanelActions(target);
+}
+
+function bindOrchestratorPanelActions(root) {
+    root.querySelectorAll("[data-orchestrator-action]").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", async () => {
+            const action = button.dataset.orchestratorAction;
+            button.disabled = true;
+            try {
+                if (action === "recovery") {
+                    const result = await apiFetch("/api/v1/orchestrator/recovery/run", { method: "POST" });
+                    toast(`Recuperacao: ${result.status}`);
+                } else {
+                    await ensureOrchestratorPanelData(true);
+                    toast(action === "diagnostics" ? "Diagnostico executado." : "Orquestrador atualizado.");
+                }
+            } catch (error) {
+                toast(error.message || "Falha na acao do orquestrador.");
+            } finally {
+                button.disabled = false;
+            }
+        });
+    });
+    root.querySelectorAll("[data-orchestrator-command]").forEach((button) => {
+        if (button.dataset.bound === "true") {
+            return;
+        }
+        button.dataset.bound = "true";
+        button.addEventListener("click", async () => {
+            button.disabled = true;
+            try {
+                const result = await apiFetch(`/api/v1/orchestrator/services/${button.dataset.serviceId}/${button.dataset.orchestratorCommand}`, { method: "POST" });
+                toast(`${result.command}: ${result.status}`);
+                await ensureOrchestratorPanelData(true);
+            } catch (error) {
+                toast(error.message || "Falha no comando do orquestrador.");
+            } finally {
+                button.disabled = false;
+            }
+        });
+    });
 }
 
 function settingsInfoRow(label, value) {
@@ -5844,7 +6013,7 @@ function renderNfeEmissionFeedback() {
             <div class="work-order-save-actions">
                 <button type="button" class="btn btn-success nfe-sync-status" data-id="${invoice.id}">Consultar status</button>
                 <button type="button" class="btn btn-default ghost-button nfe-download-xml" data-id="${invoice.id}">Baixar XML</button>
-                <button type="button" class="btn btn-default ghost-button nfe-open-pdf" data-id="${invoice.id}">Abrir DANFE</button>
+                <button type="button" class="btn btn-default ghost-button nfe-open-pdf" data-id="${invoice.id}" ${canOpenNfeDanfe(invoice) ? "" : "disabled"}>Abrir DANFE</button>
             </div>
         </section>
     `;
@@ -10244,7 +10413,7 @@ function renderNfeInvoices() {
 
 function renderNfeActionPanel(item) {
     const canCancel = item.status !== "cancelada";
-    const hasPdf = Boolean(item.pdf_url);
+    const hasPdf = canOpenNfeDanfe(item);
     const hasXml = Boolean(item.xml_url || item.xml_autorizado || item.xml_enviado);
     return `
         <div class="nfe-action-panel">
@@ -10538,7 +10707,7 @@ function bindNfeActions() {
             return;
         }
         button.dataset.bound = "true";
-        button.addEventListener("click", () => {
+        button.addEventListener("click", async () => {
             if (button.disabled) {
                 return;
             }
@@ -10546,7 +10715,12 @@ function bindNfeActions() {
             if (!invoice) {
                 return;
             }
-            openNfePdf(invoice);
+            button.disabled = true;
+            try {
+                await openNfePdf(invoice);
+            } finally {
+                button.disabled = false;
+            }
         });
     });
 }
@@ -10565,12 +10739,57 @@ function openNfeXml(invoice) {
     downloadBlob(blob, buildNfeXmlFilename(invoice));
 }
 
-function openNfePdf(invoice) {
-    if (!invoice.pdf_url) {
+function canOpenNfeDanfe(invoice) {
+    return Boolean(invoice?.pdf_url) || (
+        invoice?.status_processamento === "autorizado" && Boolean(invoice?.xml_autorizado)
+    );
+}
+
+async function openNfePdf(invoice) {
+    if (invoice.pdf_url) {
+        window.open(invoice.pdf_url, "_blank", "noopener");
+        return;
+    }
+    if (!canOpenNfeDanfe(invoice)) {
         toast("Nenhum DANFE disponivel para esta NF-e.");
         return;
     }
-    window.open(invoice.pdf_url, "_blank", "noopener");
+    const previewWindow = window.open("", "_blank");
+    if (previewWindow) {
+        previewWindow.opener = null;
+        previewWindow.document.write("<title>DANFE NF-e</title><p>Carregando DANFE...</p>");
+    }
+    try {
+        const result = await apiFetch(`/api/v1/nfe/${invoice.id}/danfe/pdf`);
+        const blob = base64ToBlob(result.pdf_base64, result.mime_type || "application/pdf");
+        const filename = result.filename || buildNfePdfFilename(invoice);
+        if (!previewWindow) {
+            downloadBlob(blob, filename);
+            return;
+        }
+        const url = URL.createObjectURL(blob);
+        previewWindow.location.href = url;
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (error) {
+        if (previewWindow) {
+            previewWindow.close();
+        }
+        toast(error.message || "Nao foi possivel abrir o DANFE.");
+    }
+}
+
+function base64ToBlob(base64, mimeType) {
+    const binary = atob(base64 || "");
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mimeType });
+}
+
+function buildNfePdfFilename(invoice) {
+    const number = sanitizeFilenamePart(invoice?.numero_nfe || invoice?.id || "danfe");
+    return `danfe_nfe_${number}.pdf`;
 }
 
 function buildNfeXmlFilename(invoice) {

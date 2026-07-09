@@ -51,6 +51,7 @@ TEST_MARKERS_BY_FILE = {
     "test_documents.py": ("integration", "documents"),
     "test_appointments.py": ("integration",),
     "test_auth.py": ("integration",),
+    "test_central_api_orchestrator.py": ("integration",),
     "test_contracts.py": ("integration",),
     "test_database_admin.py": ("integration",),
     "test_crud_operations.py": ("integration",),

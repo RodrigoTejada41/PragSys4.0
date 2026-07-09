@@ -5,3 +5,7 @@ __pycache__
 *.pyc
 *.db
 tests
+release
+movisys_motor_fiscal_completo
+certificado
+XSD

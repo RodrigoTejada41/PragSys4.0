@@ -27,6 +27,7 @@ from app.interfaces.api.routes import (
     google_calendar,
     licenses,
     nfe,
+    orchestrator,
     pests,
     products,
     provider_companies,
@@ -144,6 +145,7 @@ app.include_router(receipts.router, prefix=settings.api_v1_prefix)
 app.include_router(finance.router, prefix=settings.api_v1_prefix)
 app.include_router(fiscal.router, prefix=settings.api_v1_prefix)
 app.include_router(nfe.router, prefix=settings.api_v1_prefix)
+app.include_router(orchestrator.router, prefix=settings.api_v1_prefix)
 app.include_router(sefaz_nfe_routes.router, prefix=settings.api_v1_prefix)
 app.include_router(work_orders.router, prefix=settings.api_v1_prefix)
 app.include_router(appointments.router, prefix=settings.api_v1_prefix)

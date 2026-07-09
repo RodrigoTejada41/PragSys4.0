@@ -1021,6 +1021,99 @@ def _migration_20260327_007_stock_traceability(engine: Engine) -> None:
     _create_index_if_missing(engine, "estoque_inventario_itens", "ix_estoque_inventario_itens_produto", ["produto_id"])
 
 
+def _migration_20260709_001_nfe_danfe_metadata(engine: Engine) -> None:
+    _add_column_if_missing(engine, "notas_fiscais", "danfe_pdf_path", "danfe_pdf_path VARCHAR(500)")
+    _add_column_if_missing(engine, "notas_fiscais", "danfe_pdf_generated_at", "danfe_pdf_generated_at DATETIME")
+
+
+def _migration_20260709_002_central_orchestrator(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS managed_services (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(80) NOT NULL UNIQUE,
+                    display_name VARCHAR(120) NOT NULL,
+                    service_type VARCHAR(40) NOT NULL DEFAULT 'api',
+                    executor_type VARCHAR(40) NOT NULL DEFAULT 'external',
+                    base_url VARCHAR(255),
+                    health_url VARCHAR(255),
+                    port INTEGER,
+                    startup_order INTEGER NOT NULL DEFAULT 100,
+                    shutdown_order INTEGER NOT NULL DEFAULT 100,
+                    startup_timeout_seconds INTEGER NOT NULL DEFAULT 30,
+                    response_timeout_seconds INTEGER NOT NULL DEFAULT 5,
+                    max_restart_attempts INTEGER NOT NULL DEFAULT 3,
+                    recovery_policy VARCHAR(40) NOT NULL DEFAULT 'manual',
+                    status VARCHAR(40) NOT NULL DEFAULT 'registered',
+                    last_health_at DATETIME,
+                    last_error TEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS service_dependencies (
+                    id INTEGER PRIMARY KEY,
+                    service_id INTEGER NOT NULL,
+                    dependency_id INTEGER NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT uq_service_dependency UNIQUE (service_id, dependency_id),
+                    FOREIGN KEY(service_id) REFERENCES managed_services (id),
+                    FOREIGN KEY(dependency_id) REFERENCES managed_services (id)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS service_health_checks (
+                    id INTEGER PRIMARY KEY,
+                    service_id INTEGER NOT NULL,
+                    status VARCHAR(40) NOT NULL,
+                    response_time_ms INTEGER,
+                    version VARCHAR(80),
+                    cpu_percent NUMERIC(8, 2),
+                    memory_percent NUMERIC(8, 2),
+                    disk_percent NUMERIC(8, 2),
+                    active_connections INTEGER,
+                    last_error TEXT,
+                    uptime_seconds INTEGER,
+                    checked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(service_id) REFERENCES managed_services (id)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS service_command_audit (
+                    id INTEGER PRIMARY KEY,
+                    service_id INTEGER NOT NULL,
+                    command VARCHAR(40) NOT NULL,
+                    status VARCHAR(40) NOT NULL,
+                    detail TEXT,
+                    requested_by_user_id INTEGER,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(service_id) REFERENCES managed_services (id),
+                    FOREIGN KEY(requested_by_user_id) REFERENCES users (id)
+                )
+                """
+            )
+        )
+    _create_index_if_missing(engine, "managed_services", "ix_managed_services_name", ["name"])
+    _create_index_if_missing(engine, "managed_services", "ix_managed_services_status", ["status"])
+    _create_index_if_missing(engine, "service_health_checks", "ix_service_health_checks_service_id", ["service_id"])
+    _create_index_if_missing(engine, "service_command_audit", "ix_service_command_audit_service_id", ["service_id"])
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
@@ -1037,6 +1130,8 @@ MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260327_005_cit_name", _migration_20260327_005_cit_name),
     ("20260327_006_stock_module_expansion", _migration_20260327_006_stock_module_expansion),
     ("20260327_007_stock_traceability", _migration_20260327_007_stock_traceability),
+    ("20260709_001_nfe_danfe_metadata", _migration_20260709_001_nfe_danfe_metadata),
+    ("20260709_002_central_orchestrator", _migration_20260709_002_central_orchestrator),
 ]
 
 

@@ -825,6 +825,8 @@ class NfeInvoice(Base):
     resposta_externa: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     xml_enviado: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     xml_autorizado: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    danfe_pdf_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    danfe_pdf_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     protocolo_autorizacao: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
     recibo_lote: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
     lote_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
@@ -843,6 +845,88 @@ class NfeInvoice(Base):
     @property
     def finance_entry_id(self) -> Optional[int]:
         return self.financeiro.id if self.financeiro else None
+
+
+class ManagedService(Base):
+    __tablename__ = "managed_services"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    service_type: Mapped[str] = mapped_column(String(40), nullable=False, default="api", index=True)
+    executor_type: Mapped[str] = mapped_column(String(40), nullable=False, default="external")
+    base_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    health_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    port: Mapped[Optional[int]] = mapped_column(nullable=True, index=True)
+    startup_order: Mapped[int] = mapped_column(nullable=False, default=100)
+    shutdown_order: Mapped[int] = mapped_column(nullable=False, default=100)
+    startup_timeout_seconds: Mapped[int] = mapped_column(nullable=False, default=30)
+    response_timeout_seconds: Mapped[int] = mapped_column(nullable=False, default=5)
+    max_restart_attempts: Mapped[int] = mapped_column(nullable=False, default=3)
+    recovery_policy: Mapped[str] = mapped_column(String(40), nullable=False, default="manual")
+    status: Mapped[str] = mapped_column(String(40), nullable=False, default="registered", index=True)
+    last_health_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
+
+    dependencies: Mapped[List["ServiceDependency"]] = relationship(
+        back_populates="service",
+        cascade="all, delete-orphan",
+        foreign_keys="ServiceDependency.service_id",
+    )
+    health_checks: Mapped[List["ServiceHealthCheck"]] = relationship(back_populates="service", cascade="all, delete-orphan")
+    command_audits: Mapped[List["ServiceCommandAudit"]] = relationship(back_populates="service", cascade="all, delete-orphan")
+
+
+class ServiceDependency(Base):
+    __tablename__ = "service_dependencies"
+    __table_args__ = (UniqueConstraint("service_id", "dependency_id", name="uq_service_dependency"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    service_id: Mapped[int] = mapped_column(ForeignKey("managed_services.id"), nullable=False, index=True)
+    dependency_id: Mapped[int] = mapped_column(ForeignKey("managed_services.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
+
+    service: Mapped["ManagedService"] = relationship(
+        back_populates="dependencies",
+        foreign_keys=[service_id],
+    )
+    dependency: Mapped["ManagedService"] = relationship(foreign_keys=[dependency_id])
+
+
+class ServiceHealthCheck(Base):
+    __tablename__ = "service_health_checks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    service_id: Mapped[int] = mapped_column(ForeignKey("managed_services.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    response_time_ms: Mapped[Optional[int]] = mapped_column(nullable=True)
+    version: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    cpu_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
+    memory_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
+    disk_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2), nullable=True)
+    active_connections: Mapped[Optional[int]] = mapped_column(nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    uptime_seconds: Mapped[Optional[int]] = mapped_column(nullable=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, index=True)
+
+    service: Mapped["ManagedService"] = relationship(back_populates="health_checks")
+
+
+class ServiceCommandAudit(Base):
+    __tablename__ = "service_command_audit"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    service_id: Mapped[int] = mapped_column(ForeignKey("managed_services.id"), nullable=False, index=True)
+    command: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    requested_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, index=True)
+
+    service: Mapped["ManagedService"] = relationship(back_populates="command_audits")
+    requested_by: Mapped[Optional["User"]] = relationship()
 
 
 class SimplesNationalConfig(Base):

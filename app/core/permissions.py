@@ -40,6 +40,11 @@ PERMISSION_CATALOG: dict[str, list[tuple[str, str]]] = {
         ("fiscal.view", "Ver fiscal e NF-e"),
         ("fiscal.manage", "Emitir e gerenciar NF-e"),
         ("integrations.manage", "Gerenciar integracoes"),
+        ("orchestrator.view", "Ver orquestrador de servicos"),
+        ("orchestrator.manage", "Gerenciar servicos orquestrados"),
+        ("orchestrator.command", "Executar comandos do orquestrador"),
+        ("orchestrator.logs", "Ver logs do orquestrador"),
+        ("orchestrator.audit", "Ver auditoria do orquestrador"),
     ],
 }
 
@@ -74,6 +79,11 @@ ROLE_DEFAULT_PERMISSIONS: dict[str, dict[str, bool]] = {
         "fiscal.view",
         "fiscal.manage",
         "integrations.manage",
+        "orchestrator.view",
+        "orchestrator.manage",
+        "orchestrator.command",
+        "orchestrator.logs",
+        "orchestrator.audit",
     ),
     UserRole.OPERADOR.value: _build_defaults(
         "customers.view",

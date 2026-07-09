@@ -16,8 +16,12 @@ from app.domain.enums import (
     NfeEnvironment,
     NfeProcessingStatus,
     LicenseStatus,
+    ManagedServiceStatus,
+    ManagedServiceType,
     NfeStatus,
     ReceiptPaymentMethod,
+    ServiceExecutorType,
+    ServiceRecoveryPolicy,
     UserRole,
     WhatsAppDeliveryStatus,
     WorkOrderType,
@@ -842,6 +846,14 @@ class NfeInvoiceRead(NfeInvoiceBase):
     updated_at: datetime
 
 
+class NfeDanfePdfRead(BaseModel):
+    id: int
+    access_key: Optional[str] = None
+    filename: str
+    mime_type: str = "application/pdf"
+    pdf_base64: str
+
+
 class SefazDirectReadinessRead(BaseModel):
     ready: bool
     provider: str
@@ -852,6 +864,122 @@ class SefazDirectReadinessRead(BaseModel):
     required_items: List[str] = Field(default_factory=list)
     missing_items: List[str] = Field(default_factory=list)
     notes: List[str] = Field(default_factory=list)
+
+
+class ManagedServiceBase(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    display_name: str = Field(min_length=2, max_length=120)
+    service_type: ManagedServiceType = ManagedServiceType.API
+    executor_type: ServiceExecutorType = ServiceExecutorType.EXTERNAL
+    base_url: Optional[str] = Field(default=None, max_length=255)
+    health_url: Optional[str] = Field(default=None, max_length=255)
+    port: Optional[int] = Field(default=None, ge=1, le=65535)
+    startup_order: int = Field(default=100, ge=0)
+    shutdown_order: int = Field(default=100, ge=0)
+    startup_timeout_seconds: int = Field(default=30, ge=1, le=600)
+    response_timeout_seconds: int = Field(default=5, ge=1, le=120)
+    max_restart_attempts: int = Field(default=3, ge=0, le=20)
+    recovery_policy: ServiceRecoveryPolicy = ServiceRecoveryPolicy.MANUAL
+
+
+class ManagedServiceCreate(ManagedServiceBase):
+    dependencies: List[str] = Field(default_factory=list)
+
+
+class ManagedServiceUpdate(BaseModel):
+    display_name: Optional[str] = Field(default=None, min_length=2, max_length=120)
+    service_type: Optional[ManagedServiceType] = None
+    executor_type: Optional[ServiceExecutorType] = None
+    base_url: Optional[str] = Field(default=None, max_length=255)
+    health_url: Optional[str] = Field(default=None, max_length=255)
+    port: Optional[int] = Field(default=None, ge=1, le=65535)
+    startup_order: Optional[int] = Field(default=None, ge=0)
+    shutdown_order: Optional[int] = Field(default=None, ge=0)
+    startup_timeout_seconds: Optional[int] = Field(default=None, ge=1, le=600)
+    response_timeout_seconds: Optional[int] = Field(default=None, ge=1, le=120)
+    max_restart_attempts: Optional[int] = Field(default=None, ge=0, le=20)
+    recovery_policy: Optional[ServiceRecoveryPolicy] = None
+    dependencies: Optional[List[str]] = None
+
+
+class ManagedServiceRead(ManagedServiceBase):
+    id: int
+    status: ManagedServiceStatus
+    dependencies: List[str] = Field(default_factory=list)
+    last_health_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ServiceHealthRead(BaseModel):
+    service_id: int
+    status: ManagedServiceStatus
+    response_time_ms: Optional[int] = None
+    version: Optional[str] = None
+    cpu_percent: Optional[float] = None
+    memory_percent: Optional[float] = None
+    disk_percent: Optional[float] = None
+    active_connections: Optional[int] = None
+    last_error: Optional[str] = None
+    uptime_seconds: Optional[int] = None
+    checked_at: datetime
+
+
+class ServiceDependencyRead(BaseModel):
+    service: str
+    depends_on: str
+
+
+class ServiceCommandResult(BaseModel):
+    service_id: int
+    command: str
+    status: str
+    message: str
+    audited: bool = True
+
+
+class ServiceCommandAuditRead(BaseModel):
+    command: str
+    status: str
+    detail: Optional[str] = None
+    created_at: datetime
+
+
+class ServiceHistoryRead(BaseModel):
+    service_id: int
+    health_checks: List[ServiceHealthRead] = Field(default_factory=list)
+    commands: List[ServiceCommandAuditRead] = Field(default_factory=list)
+
+
+class ServiceRecoveryActionRead(BaseModel):
+    service_id: int
+    service: str
+    action: str
+    status: str
+    attempts_used: int
+    max_attempts: int
+    message: str
+
+
+class ServiceRecoveryReport(BaseModel):
+    status: str
+    action_count: int
+    actions: List[ServiceRecoveryActionRead] = Field(default_factory=list)
+
+
+class ServiceDiagnosticIssue(BaseModel):
+    service: str
+    code: str
+    severity: str
+    message: str
+
+
+class ServiceDiagnosticReport(BaseModel):
+    status: str
+    service_count: int
+    issue_count: int
+    issues: List[ServiceDiagnosticIssue] = Field(default_factory=list)
 
 
 class FinancePaymentRequest(BaseModel):

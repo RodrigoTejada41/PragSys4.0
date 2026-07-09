@@ -1,9 +1,15 @@
+from datetime import date
+from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
+from app.application.nfe_danfe_service import NfeDanfeUnavailableError, generate_nfe_danfe_pdf
+from app.infrastructure.db import get_session_local
+from app.infrastructure.models import NfeInvoice
 from app.modules.sefaz_nfe.sefaz_client import SefazSoapClient
 from app.modules.sefaz_nfe.xml_generator import build_nfe_xml
 from app.modules.sefaz_nfe.services import get_direct_sefaz_readiness
@@ -283,3 +289,132 @@ def test_sefaz_parse_response_prefers_protocol_status_for_processed_batch(monkey
     assert response.x_motivo == "Rejeição: Mensagem SOAP inválida"
     assert response.access_key == "35260362028102000172550010802251271835074000"
     get_settings.cache_clear()
+AUTHORIZED_NFE_XML = """<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe35260712345678000199550010000000011000000016" versao="4.00">
+      <ide>
+        <natOp>Venda</natOp><mod>55</mod><serie>1</serie><nNF>1</nNF>
+        <dhEmi>2026-07-08T10:00:00-03:00</dhEmi>
+      </ide>
+      <emit>
+        <CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome><IE>123456789</IE>
+        <enderEmit><xLgr>Rua Um</xLgr><nro>100</nro><xBairro>Centro</xBairro><xMun>Sao Paulo</xMun><UF>SP</UF><CEP>01001000</CEP></enderEmit>
+      </emit>
+      <dest>
+        <CNPJ>11222333000144</CNPJ><xNome>Cliente Teste</xNome><indIEDest>9</indIEDest>
+        <enderDest><xLgr>Rua Dois</xLgr><nro>200</nro><xBairro>Centro</xBairro><xMun>Sao Paulo</xMun><UF>SP</UF><CEP>01002000</CEP></enderDest>
+      </dest>
+      <det nItem="1">
+        <prod><cProd>1</cProd><xProd>Servico Controle</xProd><NCM>38089199</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>1.0000</qCom><vUnCom>100.00</vUnCom><vProd>100.00</vProd></prod>
+        <imposto><ICMS><ICMSSN102><CSOSN>102</CSOSN></ICMSSN102></ICMS><PIS><PISAliq><vPIS>0.00</vPIS></PISAliq></PIS><COFINS><COFINSAliq><vCOFINS>0.00</vCOFINS></COFINSAliq></COFINS></imposto>
+      </det>
+      <total><ICMSTot><vBC>0.00</vBC><vICMS>0.00</vICMS><vBCST>0.00</vBCST><vST>0.00</vST><vProd>100.00</vProd><vFrete>0.00</vFrete><vSeg>0.00</vSeg><vDesc>0.00</vDesc><vIPI>0.00</vIPI><vPIS>0.00</vPIS><vCOFINS>0.00</vCOFINS><vOutro>0.00</vOutro><vNF>100.00</vNF></ICMSTot></total>
+      <transp><modFrete>9</modFrete></transp>
+      <infAdic><infCpl>Teste DANFE NF-e</infCpl></infAdic>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><chNFe>35260712345678000199550010000000011000000016</chNFe><nProt>135260000000001</nProt></infProt></protNFe>
+</nfeProc>"""
+
+
+def test_generate_nfe_danfe_pdf_accepts_only_authorized_model_55():
+    result = generate_nfe_danfe_pdf(
+        AUTHORIZED_NFE_XML,
+        access_key="35260712345678000199550010000000011000000016",
+        protocol="135260000000001",
+    )
+
+    assert result.filename == "35260712345678000199550010000000011000000016-DANFE-NFE.pdf"
+    assert result.pdf_bytes.startswith(b"%PDF-")
+
+
+def test_generate_nfe_danfe_pdf_rejects_nfce_model_65():
+    nfce_xml = AUTHORIZED_NFE_XML.replace("<mod>55</mod>", "<mod>65</mod>")
+
+    with pytest.raises(NfeDanfeUnavailableError, match="modelo 55"):
+        generate_nfe_danfe_pdf(nfce_xml)
+
+
+def test_get_nfe_danfe_pdf_endpoint_returns_base64(client, auth_headers):
+    customer = create_customer(client, auth_headers, "973")
+    session = get_session_local()()
+    try:
+        invoice = NfeInvoice(
+            numero_nfe="DANFE-001",
+            cliente_id=customer["id"],
+            valor_total=Decimal("100.00"),
+            data_emissao=date(2026, 7, 8),
+            data_vencimento=date(2026, 7, 9),
+            status="emitida",
+            referencia_externa="DANFE001",
+            ambiente="homologacao",
+            provedor="sefaz_direct",
+            status_processamento="autorizado",
+            chave_nfe="35260712345678000199550010000000011000000016",
+            protocolo_autorizacao="135260000000001",
+            xml_autorizado=AUTHORIZED_NFE_XML,
+        )
+        session.add(invoice)
+        session.commit()
+        invoice_id = invoice.id
+    finally:
+        session.close()
+
+    response = client.get(f"/api/v1/nfe/{invoice_id}/danfe/pdf", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filename"].endswith("-DANFE-NFE.pdf")
+    assert payload["mime_type"] == "application/pdf"
+    assert payload["pdf_base64"]
+
+
+def test_get_nfe_danfe_pdf_endpoint_persists_pdf_without_exposing_path(client, auth_headers, monkeypatch, tmp_path):
+    monkeypatch.setenv("NFE_DANFE_STORAGE_DIR", str(tmp_path))
+    get_settings.cache_clear()
+    customer = create_customer(client, auth_headers, "974")
+    session = get_session_local()()
+    try:
+        invoice = NfeInvoice(
+            numero_nfe="DANFE-002",
+            cliente_id=customer["id"],
+            valor_total=Decimal("100.00"),
+            data_emissao=date(2026, 7, 8),
+            data_vencimento=date(2026, 7, 9),
+            status="emitida",
+            referencia_externa="DANFE002",
+            ambiente="homologacao",
+            provedor="sefaz_direct",
+            status_processamento="autorizado",
+            chave_nfe="35260712345678000199550010000000011000000016",
+            protocolo_autorizacao="135260000000001",
+            xml_autorizado=AUTHORIZED_NFE_XML,
+        )
+        session.add(invoice)
+        session.commit()
+        invoice_id = invoice.id
+    finally:
+        session.close()
+
+    try:
+        response = client.get(f"/api/v1/nfe/{invoice_id}/danfe/pdf", headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert "path" not in payload
+        assert "danfe_pdf_path" not in payload
+
+        session = get_session_local()()
+        try:
+            stored = session.get(NfeInvoice, invoice_id)
+            pdf_path = getattr(stored, "danfe_pdf_path", None)
+            assert pdf_path
+            assert getattr(stored, "danfe_pdf_generated_at", None) is not None
+        finally:
+            session.close()
+
+        saved_path = Path(pdf_path)
+        assert saved_path.parent == tmp_path
+        assert saved_path.read_bytes().startswith(b"%PDF-")
+    finally:
+        get_settings.cache_clear()

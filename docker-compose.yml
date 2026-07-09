@@ -1,15 +1,17 @@
 services:
   syspragas:
     build: .
-    container_name: syspragas
+    container_name: CONTRLE_DE_PRAGAS_4.0
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
+      APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: sqlite:////data/syspragas.db
-      JWT_SECRET: <SECRET>
-      DEFAULT_ADMIN_USERNAME: admin
-      DEFAULT_ADMIN_PASSWORD: syspragas123
+      JWT_SECRET: ${JWT_SECRET:?Configure JWT_SECRET no arquivo .env}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
+      DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME:-admin}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:?Configure DEFAULT_ADMIN_PASSWORD no arquivo .env}
       GOOGLE_CALENDAR_ENABLED: ${GOOGLE_CALENDAR_ENABLED:-false}
       GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-primary}
       GOOGLE_CALENDAR_ACCESS_TOKEN: ${GOOGLE_CALENDAR_ACCESS_TOKEN:-}
@@ -43,6 +45,7 @@ services:
       SEFAZ_NFE_XSD_DIR: /run/sefaz/xsd
       SEFAZ_NFE_WS_URLS_JSON: ${SEFAZ_NFE_WS_URLS_JSON:-}
       SEFAZ_NFE_VERIFY_TLS: ${SEFAZ_NFE_VERIFY_TLS:-true}
+      NFE_DANFE_STORAGE_DIR: ${NFE_DANFE_STORAGE_DIR:-/data/nfe_danfe}
       COMPANY_CNPJ: ${COMPANY_CNPJ:-}
       COMPANY_IE: ${COMPANY_IE:-}
       COMPANY_IM: ${COMPANY_IM:-}
@@ -61,9 +64,18 @@ services:
       COMPANY_PHONE: ${COMPANY_PHONE:-}
     volumes:
       - syspragas_data:/data
+      - ./modelos:/app/modelos:ro
+      - ./modelo:/app/modelo:ro
+      - ./assinaturas_tecnicas:/app/assinaturas_tecnicas
       # Example mounts for direct SEFAZ NF-e usage:
       # - ./certificado/certificado_a1.pfx:/run/sefaz/certificado/certificado_a1.pfx:ro
       # - ./XSD/Schemas:/run/sefaz/xsd:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   whatsapp-bridge:
     profiles: ["whatsapp-bridge"]
