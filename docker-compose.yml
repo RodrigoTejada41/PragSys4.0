@@ -1,12 +1,13 @@
 services:
   syspragas:
     build: .
-    container_name: CONTRLE_DE_PRAGAS_4.0
+    container_name: ${SYS_PRAGAS_CONTAINER_NAME:-syspragas}
     restart: unless-stopped
     ports:
-      - "8001:8000"
+      - "${APP_HOST_PORT:-8001}:8000"
     environment:
       APP_ENV: ${APP_ENV:-development}
+      APP_BASE_PATH: ${APP_BASE_PATH:-}
       DATABASE_URL: sqlite:////data/syspragas.db
       JWT_SECRET: ${JWT_SECRET:?Configure JWT_SECRET no arquivo .env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
@@ -81,10 +82,10 @@ services:
     profiles: ["whatsapp-bridge"]
     build:
       context: ./services/whatsapp-bridge
-    container_name: syspragas-whatsapp-bridge
+    container_name: ${WHATSAPP_BRIDGE_CONTAINER_NAME:-syspragas-whatsapp-bridge}
     restart: unless-stopped
     ports:
-      - "${WHATSAPP_BRIDGE_PORT:-3100}:3100"
+      - "${WHATSAPP_BRIDGE_HOST_BIND:-127.0.0.1}:${WHATSAPP_BRIDGE_HOST_PORT:-3100}:3100"
     environment:
       WHATSAPP_BRIDGE_HOST: 0.0.0.0
       WHATSAPP_BRIDGE_PORT: 3100
@@ -93,6 +94,12 @@ services:
       WHATSAPP_BRIDGE_SESSION_DIR: /bridge/sessions
     volumes:
       - whatsapp_bridge_sessions:/bridge/sessions
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   syspragas_data:

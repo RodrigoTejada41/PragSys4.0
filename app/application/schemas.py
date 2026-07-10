@@ -1262,7 +1262,24 @@ class GoogleCalendarAppointmentSyncRead(BaseModel):
 
 class SettingsIntegrationsRead(BaseModel):
     google_calendar_enabled: bool
+    google_oauth_configured: bool = False
+    google_oauth_client_id: Optional[str] = None
+    google_oauth_client_secret_configured: bool = False
+    google_oauth_redirect_uri: Optional[str] = None
+    google_calendar_id: Optional[str] = None
     whatsapp_enabled: bool
+    whatsapp_provider: str = "custom"
+    whatsapp_api_base_url: Optional[str] = None
+    whatsapp_message_api_url: Optional[str] = None
+    whatsapp_api_key_configured: bool = False
+    whatsapp_auth_token_configured: bool = False
+    whatsapp_sender_id: Optional[str] = None
+    whatsapp_instance_name: Optional[str] = None
+    whatsapp_status_api_url: Optional[str] = None
+    whatsapp_qr_api_url: Optional[str] = None
+    whatsapp_connect_api_url: Optional[str] = None
+    whatsapp_logout_api_url: Optional[str] = None
+    whatsapp_timeout_seconds: float = 15.0
     whatsapp_auto_send: bool
     whatsapp_default_message: str
 
@@ -1346,7 +1363,23 @@ class SystemSettingsRead(BaseModel):
 
 class SettingsIntegrationsUpdate(BaseModel):
     google_calendar_enabled: Optional[bool] = None
+    google_oauth_client_id: Optional[str] = None
+    google_oauth_client_secret: Optional[str] = None
+    google_oauth_redirect_uri: Optional[str] = None
+    google_calendar_id: Optional[str] = None
     whatsapp_enabled: Optional[bool] = None
+    whatsapp_provider: Optional[str] = None
+    whatsapp_api_base_url: Optional[str] = None
+    whatsapp_message_api_url: Optional[str] = None
+    whatsapp_api_key: Optional[str] = None
+    whatsapp_auth_token: Optional[str] = None
+    whatsapp_sender_id: Optional[str] = None
+    whatsapp_instance_name: Optional[str] = None
+    whatsapp_status_api_url: Optional[str] = None
+    whatsapp_qr_api_url: Optional[str] = None
+    whatsapp_connect_api_url: Optional[str] = None
+    whatsapp_logout_api_url: Optional[str] = None
+    whatsapp_timeout_seconds: Optional[float] = Field(default=None, ge=1, le=120)
     whatsapp_auto_send: Optional[bool] = None
     whatsapp_default_message: Optional[str] = None
 

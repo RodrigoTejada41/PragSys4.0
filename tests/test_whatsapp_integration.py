@@ -155,6 +155,53 @@ def test_whatsapp_status_respects_persisted_system_toggle_over_env_default(clien
     assert payload["configured"] is True
 
 
+def test_whatsapp_status_uses_persisted_connector_settings_without_env(client, auth_headers, monkeypatch):
+    monkeypatch.delenv("WHATSAPP_ENABLED", raising=False)
+    monkeypatch.delenv("WHATSAPP_PROVIDER", raising=False)
+    monkeypatch.delenv("WHATSAPP_API_BASE_URL", raising=False)
+    monkeypatch.delenv("WHATSAPP_API_KEY", raising=False)
+    monkeypatch.delenv("WHATSAPP_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("WHATSAPP_INSTANCE_NAME", raising=False)
+    monkeypatch.delenv("WHATSAPP_STATUS_API_URL", raising=False)
+    get_settings.cache_clear()
+
+    settings_response = client.put(
+        "/api/v1/settings",
+        headers=auth_headers,
+        json={
+            "integrations": {
+                "whatsapp_enabled": True,
+                "whatsapp_provider": "evolution",
+                "whatsapp_api_base_url": "https://whatsapp.example.test",
+                "whatsapp_api_key": "api-key-persistida",
+                "whatsapp_instance_name": "instancia-db",
+            }
+        },
+    )
+    assert settings_response.status_code == 200
+
+    class FakeResponse:
+        status_code = 200
+        content = b'{"instance":{"instanceName":"instancia-db","state":"open"}}'
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"instance": {"instanceName": "instancia-db", "state": "open"}}
+
+    monkeypatch.setattr("app.modules.whatsapp.service.httpx.get", lambda *args, **kwargs: FakeResponse())
+
+    response = client.get("/api/v1/whatsapp/status", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ativo"
+    assert payload["provider"] == "evolution"
+    assert payload["instance_name"] == "instancia-db"
+    assert payload["configured"] is True
+
+
 def test_whatsapp_status_endpoint_reports_qr_connector_details(client, auth_headers, monkeypatch):
     configure_whatsapp_qr(monkeypatch)
 

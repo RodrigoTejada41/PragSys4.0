@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SysPragas 3.1</title>
+    <title>SysPragas 4.1</title>
+    <link rel="icon" href="{{ base_path }}/favicon.ico" type="image/svg+xml">
     {% include "components/head_assets.html" %}
 </head>
 <body class="hold-transition sidebar-mini layout-fixed layout-navbar-fixed">
@@ -140,13 +141,18 @@
 
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/vendor/jquery/jquery.min.js"></script>
-    <script src="/static/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-    <script src="/static/vendor/datatables/js/jquery.dataTables.min.js"></script>
-    <script src="/static/vendor/datatables/js/dataTables.bootstrap4.min.js"></script>
-    <script src="/static/vendor/chart.js/chart.min.js"></script>
-    <script src="/static/vendor/adminlte/js/adminlte.min.js"></script>
-    <script src="/static/ui.js?v={{ app_js_version }}"></script>
-    <script src="/static/app.js?v={{ app_js_version }}"></script>
+    <script nonce="{{ csp_nonce }}">
+        window.SysPragasConfig = {
+            basePath: "{{ base_path }}",
+        };
+    </script>
+    <script src="{{ base_path }}/static/vendor/jquery/jquery.min.js"></script>
+    <script src="{{ base_path }}/static/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ base_path }}/static/vendor/datatables/js/jquery.dataTables.min.js"></script>
+    <script src="{{ base_path }}/static/vendor/datatables/js/dataTables.bootstrap4.min.js"></script>
+    <script src="{{ base_path }}/static/vendor/chart.js/chart.min.js"></script>
+    <script src="{{ base_path }}/static/vendor/adminlte/js/adminlte.min.js"></script>
+    <script src="{{ base_path }}/static/ui.js?v={{ app_js_version }}"></script>
+    <script src="{{ base_path }}/static/app.js?v={{ app_js_version }}"></script>
 </body>
 </html>

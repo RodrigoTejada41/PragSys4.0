@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     app_name: str = "SysPragas API"
     app_version: str = "4.1.0"
     api_v1_prefix: str = "/api/v1"
+    app_base_path: str = ""
     database_url: str = "sqlite:///./syspragas.db"
     app_host: str = "127.0.0.1"
     app_port: int = 8000
@@ -146,6 +147,13 @@ class Settings(BaseSettings):
         if self.allow_remote_access and self.app_host == "127.0.0.1":
             return "0.0.0.0"
         return self.app_host
+
+    @property
+    def normalized_base_path(self) -> str:
+        value = (self.app_base_path or "").strip()
+        if not value or value == "/":
+            return ""
+        return "/" + value.strip("/")
 
     @property
     def is_production(self) -> bool:

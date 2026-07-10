@@ -95,6 +95,75 @@ def test_issue_nfe_calls_focus_and_persists_metadata(client, auth_headers, monke
     assert payload["pdf_url"].endswith("/download/pdf/danfe.pdf")
 
 
+def test_focus_webhook_requires_secret_when_configured(client, auth_headers, monkeypatch):
+    from app.core.config import get_settings
+    from app.infrastructure.external_api.focus_nfe import FocusNfeClient
+
+    customer = create_customer(client, auth_headers, "955")
+    product = create_product(client, auth_headers, "955")
+
+    monkeypatch.setattr(FocusNfeClient, "is_configured", lambda self: True)
+    monkeypatch.setattr(
+        FocusNfeClient,
+        "emit_invoice",
+        lambda self, reference, payload: {
+            "status": "processando_autorizacao",
+            "referencia": reference,
+        },
+    )
+
+    invoice = client.post(
+        "/api/v1/nfe",
+        headers=auth_headers,
+        json={
+            "numero_nfe": "NFE-EXT-004",
+            "cliente_id": customer["id"],
+            "valor_total": "100.00",
+            "data_emissao": "2026-03-21",
+            "data_vencimento": "2026-03-28",
+            "status": "emitida",
+            "gerar_financeiro": True,
+            "natureza_operacao": "Venda",
+            "ambiente": "homologacao",
+            "referencia_externa": "EXT004",
+            "cnpj_emitente": "12345678000199",
+            "nome_emitente": "Emitente Teste Ltda",
+            "itens": [
+                {
+                    "descricao": "Produto Teste 4",
+                    "produto_id": product["id"],
+                    "ncm": "38089199",
+                    "quantidade": "1.00",
+                    "valor_unitario": "100.00",
+                }
+            ],
+        },
+    ).json()
+
+    monkeypatch.setenv("FOCUS_NFE_WEBHOOK_SECRET", "segredo-fiscal")
+    get_settings.cache_clear()
+
+    try:
+        payload = {
+            "referencia": invoice["referencia_externa"],
+            "status": "autorizado",
+            "chave_nfe": "35260312345678000199550010000000041000000040",
+        }
+
+        rejected = client.post("/api/v1/nfe/webhooks/focus", json=payload)
+        assert rejected.status_code == 401
+
+        accepted = client.post(
+            "/api/v1/nfe/webhooks/focus",
+            headers={"X-Focus-Nfe-Webhook-Secret": "segredo-fiscal"},
+            json=payload,
+        )
+        assert accepted.status_code == 202
+        assert accepted.json()["status_processamento"] == "autorizado"
+    finally:
+        get_settings.cache_clear()
+
+
 def test_get_nfe_by_id_syncs_authorized_status(client, auth_headers, monkeypatch):
     from app.infrastructure.external_api.focus_nfe import FocusNfeClient
 

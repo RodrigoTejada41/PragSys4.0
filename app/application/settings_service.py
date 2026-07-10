@@ -30,13 +30,34 @@ from app.infrastructure.models import SystemSetting, User
 from app.infrastructure.models import CompanyTechnicalData, ProviderCompany
 
 LOGGER = logging.getLogger(__name__)
-SENSITIVE_SETTINGS = {"smtp_password"}
+SENSITIVE_SETTINGS = {
+    "smtp_password",
+    "google_oauth_client_secret",
+    "whatsapp_api_key",
+    "whatsapp_auth_token",
+}
 ENCRYPTED_SETTING_PREFIX = "enc:v1:"
 
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "google_calendar_enabled": False,
+    "google_oauth_client_id": None,
+    "google_oauth_client_secret": None,
+    "google_oauth_redirect_uri": "https://movisystecnologia.com.br/PragSys/api/v1/google-calendar/oauth/callback",
+    "google_calendar_id": "primary",
     "whatsapp_enabled": False,
+    "whatsapp_provider": "custom",
+    "whatsapp_api_base_url": None,
+    "whatsapp_message_api_url": None,
+    "whatsapp_api_key": None,
+    "whatsapp_auth_token": None,
+    "whatsapp_sender_id": None,
+    "whatsapp_instance_name": None,
+    "whatsapp_status_api_url": None,
+    "whatsapp_qr_api_url": None,
+    "whatsapp_connect_api_url": None,
+    "whatsapp_logout_api_url": None,
+    "whatsapp_timeout_seconds": 15.0,
     "whatsapp_auto_send": True,
     "whatsapp_default_message": "Ola {nome_cliente}, tudo bem?\n\nSeu agendamento foi confirmado com sucesso!\n\nData: {data}\nHora: {hora}\nTecnico: {tecnico}\nServico: {servico}\n\nQualquer duvida estamos a disposicao.",
     "contract_alert_days": 15,
@@ -59,7 +80,23 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 
 RUNTIME_FALLBACK_KEYS = {
     "google_calendar_enabled",
+    "google_oauth_client_id",
+    "google_oauth_client_secret",
+    "google_oauth_redirect_uri",
+    "google_calendar_id",
     "whatsapp_enabled",
+    "whatsapp_provider",
+    "whatsapp_api_base_url",
+    "whatsapp_message_api_url",
+    "whatsapp_api_key",
+    "whatsapp_auth_token",
+    "whatsapp_sender_id",
+    "whatsapp_instance_name",
+    "whatsapp_status_api_url",
+    "whatsapp_qr_api_url",
+    "whatsapp_connect_api_url",
+    "whatsapp_logout_api_url",
+    "whatsapp_timeout_seconds",
     "smtp_host",
     "smtp_port",
     "smtp_username",
@@ -153,7 +190,13 @@ def set_setting_value(db: Session, key: str, value: Any, updated_by_user_id: Opt
 def update_system_settings(db: Session, payload: SystemSettingsUpdate, current_user: User) -> SystemSettingsRead:
     updates: dict[str, Any] = {}
     if payload.integrations:
-        updates.update({key: value for key, value in payload.integrations.model_dump().items() if value is not None})
+        integrations_payload = payload.integrations.model_dump()
+        for key, value in integrations_payload.items():
+            if value is None:
+                continue
+            if key in {"google_oauth_client_secret", "whatsapp_api_key", "whatsapp_auth_token"} and value == "":
+                continue
+            updates[key] = value
     if payload.contracts:
         updates.update(
             {
@@ -199,10 +242,37 @@ def get_system_settings(db: Session, current_user: Optional[User] = None) -> Sys
     settings = get_settings()
     ensure_system_settings_seed(db)
     company_settings = _read_company_technical_data(db, current_user)
+    google_client_id = _clean_optional_setting_text(get_setting_value(db, "google_oauth_client_id", settings.google_oauth_client_id))
+    google_client_secret = _clean_optional_setting_text(
+        get_setting_value(db, "google_oauth_client_secret", settings.google_oauth_client_secret)
+    )
+    google_redirect_uri = _clean_optional_setting_text(
+        get_setting_value(db, "google_oauth_redirect_uri", settings.google_oauth_redirect_uri)
+    )
+    google_calendar_id = _clean_optional_setting_text(get_setting_value(db, "google_calendar_id", settings.google_calendar_id or "primary"))
+    whatsapp_api_key = _clean_optional_setting_text(get_setting_value(db, "whatsapp_api_key", settings.whatsapp_api_key))
+    whatsapp_auth_token = _clean_optional_setting_text(get_setting_value(db, "whatsapp_auth_token", settings.whatsapp_auth_token))
     return SystemSettingsRead(
         integrations=SettingsIntegrationsRead(
             google_calendar_enabled=get_boolean_setting(db, "google_calendar_enabled", fallback=settings.google_calendar_enabled),
+            google_oauth_configured=bool(google_client_id and google_client_secret and google_redirect_uri),
+            google_oauth_client_id=google_client_id,
+            google_oauth_client_secret_configured=bool(google_client_secret),
+            google_oauth_redirect_uri=google_redirect_uri,
+            google_calendar_id=google_calendar_id,
             whatsapp_enabled=get_boolean_setting(db, "whatsapp_enabled", fallback=settings.whatsapp_enabled),
+            whatsapp_provider=str(get_setting_value(db, "whatsapp_provider", settings.whatsapp_provider or "custom")),
+            whatsapp_api_base_url=_clean_optional_setting_text(get_setting_value(db, "whatsapp_api_base_url", settings.whatsapp_api_base_url)),
+            whatsapp_message_api_url=_clean_optional_setting_text(get_setting_value(db, "whatsapp_message_api_url", settings.whatsapp_message_api_url)),
+            whatsapp_api_key_configured=bool(whatsapp_api_key),
+            whatsapp_auth_token_configured=bool(whatsapp_auth_token),
+            whatsapp_sender_id=_clean_optional_setting_text(get_setting_value(db, "whatsapp_sender_id", settings.whatsapp_sender_id)),
+            whatsapp_instance_name=_clean_optional_setting_text(get_setting_value(db, "whatsapp_instance_name", settings.whatsapp_instance_name)),
+            whatsapp_status_api_url=_clean_optional_setting_text(get_setting_value(db, "whatsapp_status_api_url", settings.whatsapp_status_api_url)),
+            whatsapp_qr_api_url=_clean_optional_setting_text(get_setting_value(db, "whatsapp_qr_api_url", settings.whatsapp_qr_api_url)),
+            whatsapp_connect_api_url=_clean_optional_setting_text(get_setting_value(db, "whatsapp_connect_api_url", settings.whatsapp_connect_api_url)),
+            whatsapp_logout_api_url=_clean_optional_setting_text(get_setting_value(db, "whatsapp_logout_api_url", settings.whatsapp_logout_api_url)),
+            whatsapp_timeout_seconds=float(get_setting_value(db, "whatsapp_timeout_seconds", settings.whatsapp_timeout_seconds)),
             whatsapp_auto_send=get_boolean_setting(db, "whatsapp_auto_send", fallback=True),
             whatsapp_default_message=str(get_setting_value(db, "whatsapp_default_message", DEFAULT_SETTINGS["whatsapp_default_message"])),
         ),

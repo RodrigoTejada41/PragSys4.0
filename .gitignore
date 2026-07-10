@@ -13,6 +13,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 tmp/
+tools/
 runtime/
 movisys_motor_fiscal_completo/
 syspragas-homologacao-*.png

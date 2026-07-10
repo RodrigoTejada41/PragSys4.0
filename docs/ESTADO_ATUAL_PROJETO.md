@@ -77,3 +77,24 @@ Para continuar, abrir primeiro:
 - `specs/README.md`
 - `specs/module-map.md`
 
+## Atualizacao operacional 2026-07-10
+
+Ambientes publicados na VPS Movis Tecnologia:
+
+- Producao: `https://www.movisystecnologia.com.br/PragSys/app`
+- Dev/teste: `https://www.movisystecnologia.com.br/dev/app`
+
+Documento operacional:
+
+- `docs/operacao-vps-movisys.md`
+
+Estado validado:
+
+- DNS publico aponta para `172.233.177.135`.
+- Nginx com HTTPS ativo via Let's Encrypt.
+- Containers `syspragas-prod`, `syspragas-dev`, `syspragas-whatsapp-bridge-prod` e `syspragas-whatsapp-bridge-dev` saudaveis.
+- Google OAuth configurado em producao e dev.
+- WhatsApp QR via bridge Baileys configurado em producao e dev.
+- Teste focado: `pytest tests/test_whatsapp_integration.py -q` -> `15 passed`.
+
+Segredos e senhas nao foram registrados em documentacao versionada.

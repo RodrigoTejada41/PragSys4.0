@@ -2,8 +2,10 @@ from pathlib import Path
 import sys
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
+
+from app.core.config import get_settings
 
 router = APIRouter(tags=["web"])
 
@@ -15,6 +17,11 @@ else:
 STATIC_DIR = _BASE_DIR / "static"
 TEMPLATES_DIR = _BASE_DIR / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<rect width="64" height="64" rx="12" fill="#0f766e"/>
+<path d="M18 34c0-9 6-16 14-16s14 7 14 16-6 16-14 16-14-7-14-16Z" fill="#ecfeff"/>
+<path d="M24 34h16M32 20v28M22 26l20 16M42 26 22 42" stroke="#0f766e" stroke-width="4" stroke-linecap="round"/>
+</svg>"""
 
 NAV_ITEMS = [
     {"kind": "header", "label": "Painel", "classes": ""},
@@ -53,6 +60,7 @@ NAV_ITEMS = [
 
 @router.get("/app", response_class=HTMLResponse)
 def web_app(request: Request) -> HTMLResponse:
+    settings = get_settings()
     app_js_version = str(int((STATIC_DIR / "app.js").stat().st_mtime))
     return templates.TemplateResponse(
         request=request,
@@ -60,5 +68,12 @@ def web_app(request: Request) -> HTMLResponse:
         context={
             "nav_items": NAV_ITEMS,
             "app_js_version": app_js_version,
+            "base_path": settings.normalized_base_path,
+            "csp_nonce": getattr(request.state, "csp_nonce", ""),
         },
     )
+
+
+@router.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(content=FAVICON_SVG, media_type="image/svg+xml")

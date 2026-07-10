@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from app.core.config import Settings, get_settings
 
@@ -39,20 +39,33 @@ class WhatsAppIntegrationConfig:
         )
 
 
-def load_whatsapp_config(settings: Optional[Settings] = None) -> WhatsAppIntegrationConfig:
+def _clean_text(value: Any) -> Optional[str]:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _setting_from_db(db, key: str, fallback: Any) -> Any:
+    if db is None:
+        return fallback
+    from app.application.settings_service import get_setting_value
+
+    return get_setting_value(db, key, fallback)
+
+
+def load_whatsapp_config(settings: Optional[Settings] = None, db=None) -> WhatsAppIntegrationConfig:
     runtime_settings = settings or get_settings()
     return WhatsAppIntegrationConfig(
-        enabled=runtime_settings.whatsapp_enabled,
-        provider=str(runtime_settings.whatsapp_provider or "custom").strip().lower(),
-        api_base_url=(runtime_settings.whatsapp_api_base_url or "").strip() or None,
-        message_api_url=(runtime_settings.whatsapp_message_api_url or "").strip() or None,
-        api_key=(runtime_settings.whatsapp_api_key or "").strip() or None,
-        auth_token=(runtime_settings.whatsapp_auth_token or "").strip() or None,
-        sender_id=(runtime_settings.whatsapp_sender_id or "").strip() or None,
-        instance_name=(runtime_settings.whatsapp_instance_name or "").strip() or None,
-        status_api_url=(runtime_settings.whatsapp_status_api_url or "").strip() or None,
-        qr_api_url=(runtime_settings.whatsapp_qr_api_url or "").strip() or None,
-        connect_api_url=(runtime_settings.whatsapp_connect_api_url or "").strip() or None,
-        logout_api_url=(runtime_settings.whatsapp_logout_api_url or "").strip() or None,
-        timeout_seconds=runtime_settings.whatsapp_timeout_seconds,
+        enabled=bool(_setting_from_db(db, "whatsapp_enabled", runtime_settings.whatsapp_enabled)),
+        provider=str(_setting_from_db(db, "whatsapp_provider", runtime_settings.whatsapp_provider or "custom") or "custom").strip().lower(),
+        api_base_url=_clean_text(_setting_from_db(db, "whatsapp_api_base_url", runtime_settings.whatsapp_api_base_url)),
+        message_api_url=_clean_text(_setting_from_db(db, "whatsapp_message_api_url", runtime_settings.whatsapp_message_api_url)),
+        api_key=_clean_text(_setting_from_db(db, "whatsapp_api_key", runtime_settings.whatsapp_api_key)),
+        auth_token=_clean_text(_setting_from_db(db, "whatsapp_auth_token", runtime_settings.whatsapp_auth_token)),
+        sender_id=_clean_text(_setting_from_db(db, "whatsapp_sender_id", runtime_settings.whatsapp_sender_id)),
+        instance_name=_clean_text(_setting_from_db(db, "whatsapp_instance_name", runtime_settings.whatsapp_instance_name)),
+        status_api_url=_clean_text(_setting_from_db(db, "whatsapp_status_api_url", runtime_settings.whatsapp_status_api_url)),
+        qr_api_url=_clean_text(_setting_from_db(db, "whatsapp_qr_api_url", runtime_settings.whatsapp_qr_api_url)),
+        connect_api_url=_clean_text(_setting_from_db(db, "whatsapp_connect_api_url", runtime_settings.whatsapp_connect_api_url)),
+        logout_api_url=_clean_text(_setting_from_db(db, "whatsapp_logout_api_url", runtime_settings.whatsapp_logout_api_url)),
+        timeout_seconds=float(_setting_from_db(db, "whatsapp_timeout_seconds", runtime_settings.whatsapp_timeout_seconds)),
     )

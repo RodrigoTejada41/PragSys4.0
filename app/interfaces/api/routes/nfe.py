@@ -1,9 +1,10 @@
 from datetime import date
+import hmac
 from typing import List, Optional
 
 from xml.etree import ElementTree as ET
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.application.fiscal_services import delete_nfe_invoice
@@ -24,10 +25,30 @@ from app.application.schemas import (
     NfeInvoiceUpdate,
     NfeWebhookEvent,
 )
+from app.core.config import get_settings
 from app.infrastructure.db import get_db
 from app.interfaces.api.deps import require_access
 
 router = APIRouter(prefix="/nfe", tags=["nfe"])
+
+
+def validate_focus_webhook_secret(
+    x_focus_nfe_webhook_secret: Optional[str] = Header(default=None, alias="X-Focus-Nfe-Webhook-Secret"),
+    x_webhook_secret: Optional[str] = Header(default=None, alias="X-Webhook-Secret"),
+) -> None:
+    settings = get_settings()
+    expected = (settings.focus_nfe_webhook_secret or "").strip()
+    if not expected:
+        if settings.is_production:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Webhook NF-e sem segredo configurado.",
+            )
+        return
+
+    provided = (x_focus_nfe_webhook_secret or x_webhook_secret or "").strip()
+    if not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Segredo do webhook NF-e invalido.")
 
 
 @router.get(
@@ -129,5 +150,9 @@ def hard_remove_nfe_invoice(nfe_id: int, db: Session = Depends(get_db)) -> Respo
     response_model=NfeInvoiceRead,
     status_code=status.HTTP_202_ACCEPTED,
 )
-def receive_focus_nfe_webhook(payload: NfeWebhookEvent, db: Session = Depends(get_db)) -> NfeInvoiceRead:
+def receive_focus_nfe_webhook(
+    payload: NfeWebhookEvent,
+    _: None = Depends(validate_focus_webhook_secret),
+    db: Session = Depends(get_db),
+) -> NfeInvoiceRead:
     return process_nfe_webhook(db, payload)

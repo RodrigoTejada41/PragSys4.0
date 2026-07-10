@@ -387,7 +387,7 @@ def _append_history(
 
 
 def get_whatsapp_configuration_status(db: Session) -> dict:
-    config = load_whatsapp_config()
+    config = load_whatsapp_config(db=db)
     enabled = get_boolean_setting(db, "whatsapp_enabled", fallback=config.enabled)
     return {
         "enabled": enabled,
@@ -454,8 +454,8 @@ def _normalize_connection_status(payload: Optional[dict], config: WhatsAppIntegr
 
 class WhatsAppService:
     @staticmethod
-    def get_status(*, enabled_override: Optional[bool] = None) -> WhatsAppConnectionStatus:
-        config = load_whatsapp_config()
+    def get_status(*, enabled_override: Optional[bool] = None, db: Optional[Session] = None) -> WhatsAppConnectionStatus:
+        config = load_whatsapp_config(db=db)
         instance_name = config.instance_name or config.sender_id
         effective_enabled = config.enabled if enabled_override is None else enabled_override
 
@@ -529,8 +529,14 @@ class WhatsAppService:
             )
 
 
-def send_whatsapp_message(destination_phone: str, message: str) -> WhatsAppSendResult:
-    config = load_whatsapp_config()
+def send_whatsapp_message(
+    destination_phone: str,
+    message: str,
+    *,
+    config: Optional[WhatsAppIntegrationConfig] = None,
+    db: Optional[Session] = None,
+) -> WhatsAppSendResult:
+    config = config or load_whatsapp_config(db=db)
     client = _build_client(config)
     return client.send_message(destination_phone, message)
 
@@ -540,8 +546,8 @@ def enviar_mensagem_whatsapp(numero: str, mensagem: str) -> WhatsAppSendResult:
 
 
 def get_whatsapp_connection_status(db: Session) -> dict:
-    enabled = get_boolean_setting(db, "whatsapp_enabled", fallback=load_whatsapp_config().enabled)
-    status = WhatsAppService.get_status(enabled_override=enabled).__dict__
+    enabled = get_boolean_setting(db, "whatsapp_enabled", fallback=load_whatsapp_config(db=db).enabled)
+    status = WhatsAppService.get_status(enabled_override=enabled, db=db).__dict__
     if not enabled:
         status["status"] = "desconectado"
         status["configured"] = False
@@ -550,7 +556,7 @@ def get_whatsapp_connection_status(db: Session) -> dict:
 
 
 def request_whatsapp_qr_session(db: Session) -> dict:
-    config = load_whatsapp_config()
+    config = load_whatsapp_config(db=db)
     if not get_boolean_setting(db, "whatsapp_enabled", fallback=config.enabled):
         raise BusinessRuleViolation("Ative o WhatsApp nas configuracoes do sistema antes de conectar via QR.")
     if not config.supports_qr:
@@ -590,7 +596,7 @@ def request_whatsapp_qr_session(db: Session) -> dict:
 
 
 def logout_whatsapp_session(db: Session) -> dict:
-    config = load_whatsapp_config()
+    config = load_whatsapp_config(db=db)
     if not config.supports_qr:
         raise BusinessRuleViolation("O provedor atual nao suporta logout de sessao por QR Code.")
     logout_url = _resolve_logout_url(config)
@@ -630,7 +636,7 @@ def send_appointment_whatsapp_message(
     raise_on_error: bool = False,
 ):
     appointment = _get_appointment_or_fail(db, appointment_id)
-    config = load_whatsapp_config()
+    config = load_whatsapp_config(db=db)
     effective_enabled = get_boolean_setting(db, "whatsapp_enabled", fallback=config.enabled)
     destination_phone = appointment.telefone or ""
     rendered_message = ""
@@ -664,7 +670,7 @@ def send_appointment_whatsapp_message(
             raise BusinessRuleViolation("Integracao WhatsApp desabilitada nas configuracoes do sistema.")
         if not config.is_ready:
             raise BusinessRuleViolation("Configuracao da integracao WhatsApp incompleta.")
-        result = send_whatsapp_message(normalized_phone, rendered_message)
+        result = send_whatsapp_message(normalized_phone, rendered_message, config=config)
         logger.info(
             "WhatsApp send succeeded appointment_id=%s automatic=%s provider=%s destination=%s external_message_id=%s",
             appointment.id,

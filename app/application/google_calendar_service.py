@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import secrets
 import json
+import inspect
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote, urlencode
@@ -12,12 +14,48 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
-from app.application.settings_service import get_boolean_setting, set_setting_value
+from app.application.settings_service import get_boolean_setting, get_setting_value, set_setting_value
 from app.infrastructure.models import ProviderCompany, User
 
 GOOGLE_OAUTH_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_OAUTH_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
+
+
+@dataclass(frozen=True)
+class GoogleRuntimeConfig:
+    client_id: Optional[str]
+    client_secret: Optional[str]
+    redirect_uri: Optional[str]
+    scopes: str
+    calendar_id: Optional[str]
+    access_token: Optional[str]
+
+
+def _clean_text(value: Optional[str]) -> Optional[str]:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _load_google_runtime_config(db: Optional[Session] = None) -> GoogleRuntimeConfig:
+    settings = get_settings()
+    if db is None:
+        return GoogleRuntimeConfig(
+            client_id=_clean_text(settings.google_oauth_client_id),
+            client_secret=_clean_text(settings.google_oauth_client_secret),
+            redirect_uri=_clean_text(settings.google_oauth_redirect_uri),
+            scopes=settings.google_oauth_scopes,
+            calendar_id=_clean_text(settings.google_calendar_id),
+            access_token=_clean_text(settings.google_calendar_access_token),
+        )
+    return GoogleRuntimeConfig(
+        client_id=_clean_text(get_setting_value(db, "google_oauth_client_id", settings.google_oauth_client_id)),
+        client_secret=_clean_text(get_setting_value(db, "google_oauth_client_secret", settings.google_oauth_client_secret)),
+        redirect_uri=_clean_text(get_setting_value(db, "google_oauth_redirect_uri", settings.google_oauth_redirect_uri)),
+        scopes=str(get_setting_value(db, "google_oauth_scopes", settings.google_oauth_scopes) or settings.google_oauth_scopes),
+        calendar_id=_clean_text(get_setting_value(db, "google_calendar_id", settings.google_calendar_id or "primary")),
+        access_token=_clean_text(get_setting_value(db, "google_calendar_access_token", settings.google_calendar_access_token)),
+    )
 
 
 def _now_utc() -> datetime:
@@ -70,21 +108,17 @@ def _get_company_or_fail(
 
 
 def _resolve_calendar_id(company: Optional[ProviderCompany]) -> str:
-    settings = get_settings()
+    config = _load_google_runtime_config()
     return (
         (company.google_calendar_id if company else None)
-        or settings.google_calendar_id
+        or config.calendar_id
         or "primary"
     )
 
 
-def _oauth_is_configured() -> bool:
-    settings = get_settings()
-    return bool(
-        settings.google_oauth_client_id
-        and settings.google_oauth_client_secret
-        and settings.google_oauth_redirect_uri
-    )
+def _oauth_is_configured(db: Optional[Session] = None) -> bool:
+    config = _load_google_runtime_config(db)
+    return bool(config.client_id and config.client_secret and config.redirect_uri)
 
 
 def _build_oauth_state(user_id: int, company_id: int, appointment_id: Optional[int] = None) -> str:
@@ -117,20 +151,20 @@ def build_google_oauth_authorization_url(
     appointment_id: Optional[int] = None,
     provider_company_id: Optional[int] = None,
 ) -> str:
-    if not _oauth_is_configured():
+    if not _oauth_is_configured(db):
         raise BusinessRuleViolation(
             "OAuth do Google nao configurado. Defina GOOGLE_OAUTH_CLIENT_ID, "
             "GOOGLE_OAUTH_CLIENT_SECRET e GOOGLE_OAUTH_REDIRECT_URI."
         )
 
-    settings = get_settings()
+    config = _load_google_runtime_config(db)
     company = _get_company_or_fail(db, user_id, provider_company_id=provider_company_id)
     state = _build_oauth_state(user_id, company.id, appointment_id)
     params = {
-        "client_id": settings.google_oauth_client_id,
-        "redirect_uri": settings.google_oauth_redirect_uri,
+        "client_id": config.client_id,
+        "redirect_uri": config.redirect_uri,
         "response_type": "code",
-        "scope": settings.google_oauth_scopes,
+        "scope": config.scopes,
         "access_type": "offline",
         "include_granted_scopes": "true",
         "prompt": "consent",
@@ -139,9 +173,9 @@ def build_google_oauth_authorization_url(
     return f"{GOOGLE_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
 
 
-def _exchange_code_for_tokens(code: str) -> dict:
-    settings = get_settings()
-    if not _oauth_is_configured():
+def _exchange_code_for_tokens(code: str, db: Optional[Session] = None) -> dict:
+    config = _load_google_runtime_config(db)
+    if not _oauth_is_configured(db):
         raise BusinessRuleViolation(
             "OAuth do Google nao configurado. Defina GOOGLE_OAUTH_CLIENT_ID, "
             "GOOGLE_OAUTH_CLIENT_SECRET e GOOGLE_OAUTH_REDIRECT_URI."
@@ -149,9 +183,9 @@ def _exchange_code_for_tokens(code: str) -> dict:
 
     payload = {
         "code": code,
-        "client_id": settings.google_oauth_client_id,
-        "client_secret": settings.google_oauth_client_secret,
-        "redirect_uri": settings.google_oauth_redirect_uri,
+        "client_id": config.client_id,
+        "client_secret": config.client_secret,
+        "redirect_uri": config.redirect_uri,
         "grant_type": "authorization_code",
     }
     try:
@@ -176,7 +210,7 @@ def _fetch_google_account_email(access_token: str) -> Optional[str]:
         return None
 
 
-def _apply_company_token_payload(company: ProviderCompany, payload: dict) -> None:
+def _apply_company_token_payload(company: ProviderCompany, payload: dict, db: Optional[Session] = None) -> None:
     access_token = payload.get("access_token")
     if not access_token:
         raise BusinessRuleViolation("O Google nao retornou um access token valido.")
@@ -185,19 +219,26 @@ def _apply_company_token_payload(company: ProviderCompany, payload: dict) -> Non
     company.google_access_token = access_token
     if payload.get("refresh_token"):
         company.google_refresh_token = payload["refresh_token"]
-    company.google_calendar_id = company.google_calendar_id or get_settings().google_calendar_id or "primary"
+    company.google_calendar_id = company.google_calendar_id or _load_google_runtime_config(db).calendar_id or "primary"
     company.google_token_expires_at = _now_utc() + timedelta(seconds=max(expires_in - 60, 60))
     company.google_connected_at = _now_utc()
     company.google_account_email = _fetch_google_account_email(access_token) or company.google_account_email
 
 
-def _clear_company_google_session(company: ProviderCompany) -> None:
+def _clear_company_google_session(company: ProviderCompany, db: Optional[Session] = None) -> None:
     company.google_access_token = None
     company.google_refresh_token = None
     company.google_token_expires_at = None
     company.google_connected_at = None
     company.google_account_email = None
-    company.google_calendar_id = get_settings().google_calendar_id or "primary"
+    company.google_calendar_id = _load_google_runtime_config(db).calendar_id or "primary"
+
+
+def _exchange_code_for_tokens_compat(code: str, db: Session) -> dict:
+    params = inspect.signature(_exchange_code_for_tokens).parameters
+    if len(params) <= 1:
+        return _exchange_code_for_tokens(code)  # type: ignore[misc]
+    return _exchange_code_for_tokens(code, db)
 
 
 def handle_google_oauth_callback(db: Session, code: str, state_token: str) -> dict:
@@ -207,8 +248,8 @@ def handle_google_oauth_callback(db: Session, code: str, state_token: str) -> di
     if not company:
         raise BusinessRuleViolation("Empresa prestadora da integracao Google nao encontrada.")
 
-    tokens = _exchange_code_for_tokens(code)
-    _apply_company_token_payload(company, tokens)
+    tokens = _exchange_code_for_tokens_compat(code, db)
+    _apply_company_token_payload(company, tokens, db)
     set_setting_value(db, "google_calendar_enabled", True, updated_by_user_id=user_id)
     db.commit()
 
@@ -232,19 +273,19 @@ def handle_google_oauth_callback(db: Session, code: str, state_token: str) -> di
     }
 
 
-def _refresh_company_access_token(company: ProviderCompany) -> None:
-    settings = get_settings()
+def _refresh_company_access_token(company: ProviderCompany, db: Optional[Session] = None) -> None:
+    config = _load_google_runtime_config(db)
     if not company.google_refresh_token:
         raise BusinessRuleViolation("A conexao com Google Agenda expirou e nao possui refresh token. Conecte a conta novamente.")
-    if not _oauth_is_configured():
+    if not _oauth_is_configured(db):
         raise BusinessRuleViolation(
             "OAuth do Google nao configurado. Defina GOOGLE_OAUTH_CLIENT_ID, "
             "GOOGLE_OAUTH_CLIENT_SECRET e GOOGLE_OAUTH_REDIRECT_URI."
         )
 
     payload = {
-        "client_id": settings.google_oauth_client_id,
-        "client_secret": settings.google_oauth_client_secret,
+        "client_id": config.client_id,
+        "client_secret": config.client_secret,
         "refresh_token": company.google_refresh_token,
         "grant_type": "refresh_token",
     }
@@ -257,7 +298,7 @@ def _refresh_company_access_token(company: ProviderCompany) -> None:
         raise BusinessRuleViolation(f"Falha ao atualizar a sessao do Google Agenda: {detail}") from exc
 
     refreshed["refresh_token"] = refreshed.get("refresh_token") or company.google_refresh_token
-    _apply_company_token_payload(company, refreshed)
+    _apply_company_token_payload(company, refreshed, db)
 
 
 def _friendly_google_calendar_error(detail: str) -> str:
@@ -309,13 +350,14 @@ def _get_runtime_google_credentials(db: Session, user_id: Optional[int]) -> tupl
             or not expires_at
             or expires_at <= _now_utc()
         ):
-            _refresh_company_access_token(company)
+            _refresh_company_access_token(company, db)
             db.commit()
         return _resolve_calendar_id(company), company.google_access_token
 
     settings = get_settings()
-    if get_boolean_setting(db, "google_calendar_enabled", fallback=settings.google_calendar_enabled) and settings.google_calendar_access_token:
-        return settings.google_calendar_id or "primary", settings.google_calendar_access_token
+    config = _load_google_runtime_config(db)
+    if get_boolean_setting(db, "google_calendar_enabled", fallback=settings.google_calendar_enabled) and config.access_token:
+        return config.calendar_id or "primary", config.access_token
 
     raise BusinessRuleViolation(
         "Nenhuma conta Google conectada para esta operacao. Conecte uma conta Google antes de sincronizar."
@@ -374,7 +416,7 @@ def sync_appointment_with_google_or_request_oauth(db: Session, appointment_id: i
             "appointment": synced,
         }
     except BusinessRuleViolation as exc:
-        if not _oauth_is_configured() or not _should_offer_google_oauth_reconnect(exc.message):
+        if not _oauth_is_configured(db) or not _should_offer_google_oauth_reconnect(exc.message):
             raise
         authorization_url = build_google_oauth_authorization_url(db, current_user_id, appointment_id=appointment_id)
         return {
@@ -412,7 +454,7 @@ def get_google_connection_status(
     elif company.google_refresh_token or company.google_access_token:
         status = "ativo"
         message = "Conta Google conectada para sincronizacao de agenda."
-    elif _oauth_is_configured():
+    elif _oauth_is_configured(db):
         status = "aguardando_conexao"
         message = "Nenhuma conta Google conectada. Inicie a autenticacao para vincular uma conta."
     else:
@@ -436,7 +478,7 @@ def logout_google_calendar(
     provider_company_id: Optional[int] = None,
 ) -> dict:
     company = _get_company_or_fail(db, user_id, provider_company_id=provider_company_id)
-    _clear_company_google_session(company)
+    _clear_company_google_session(company, db)
     db.commit()
     return {
         "status": "desconectado",

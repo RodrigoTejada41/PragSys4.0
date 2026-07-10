@@ -4,8 +4,8 @@ WORKDIR /bridge
 
 RUN apk add --no-cache git
 
-COPY package.json ./
-RUN npm install --omit=dev
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 COPY src ./src
 

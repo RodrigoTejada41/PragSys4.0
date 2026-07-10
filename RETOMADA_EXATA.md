@@ -179,3 +179,48 @@ Resultado:
 2. Decidir proxima fase: painel administrativo, executor local Windows ou recuperacao automatica.
 3. Aprovar fase escolhida em `specs/central-api-orchestrator/tasks.md`.
 4. Implementar com testes antes do codigo.
+
+## Deploy VPS Movis em 2026-07-10
+
+Documento operacional principal:
+
+- `docs/operacao-vps-movisys.md`
+
+Ambientes publicados:
+
+- Producao: `https://www.movisystecnologia.com.br/PragSys/app`
+- Dev/teste: `https://www.movisystecnologia.com.br/dev/app`
+
+VPS:
+
+- IP: `172.233.177.135`
+- Usuario SSH atual: `root`
+- Diretorio producao: `/opt/syspragas/prod`
+- Diretorio dev: `/opt/syspragas/dev`
+
+Containers validados:
+
+- `syspragas-prod`: `8011 -> 8000`
+- `syspragas-dev`: `8012 -> 8000`
+- `syspragas-whatsapp-bridge-prod`: `127.0.0.1:3111 -> 3100`
+- `syspragas-whatsapp-bridge-dev`: `127.0.0.1:3112 -> 3100`
+
+Integracoes:
+
+- Google OAuth configurado em producao e dev.
+- WhatsApp QR configurado via `services/whatsapp-bridge`.
+- QR Code gerado com sucesso em prod e dev; status esperado antes da leitura: `aguardando_conexao`.
+
+Validacoes:
+
+- HTTPS publico com `www`: HTTP 200 em `/PragSys/app` e `/dev/app`.
+- `pytest tests/test_whatsapp_integration.py -q` -> `15 passed`.
+- `node --check app/interfaces/web/static/app.js` -> sem erros.
+- `node --check services/whatsapp-bridge/src/server.js` -> sem erros.
+- `docker compose --env-file deploy\env\.env.prod.example --profile whatsapp-bridge config --quiet` -> sem erros.
+
+Seguranca:
+
+- Senhas, tokens, OAuth secret e chaves nao foram registrados em docs versionados.
+- Arquivo local ignorado criado: `tools/local/ACESSOS_CRITICOS.local.md`.
+- Pendencia: trocar senha root enviada em chat e migrar SSH para usuario/chave de deploy.

@@ -22,6 +22,7 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - `database-admin.md`: backup, restauracao e limpeza operacional do banco SQLite com foco em uso local e offline.
 - `design-system.md`: tokens visuais, padronizacao de formularios e arquitetura de componentes de interface.
 - `cicd-linode.md`: pipeline GitHub Actions com deploy automatizado para `dev` e `production`, incluindo bootstrap da VPS, script remoto e operacao de rollback na Linode.
+- `operacao-vps-movisys.md`: estado operacional da VPS Movis Tecnologia, DNS, Nginx, HTTPS, containers, Google OAuth e WhatsApp QR sem segredos.
 - `backend-hardening-2026-03-27.md`: melhorias de seguranca e robustez aplicadas no backend em runtime, settings e scheduler.
 - `github-actions-secrets.md`: checklist de segredos e variaveis necessarios para o CI/CD remoto.
 - `whatsapp-qr-bridge.md`: execucao e configuracao do bridge local de WhatsApp com QR Code baseado em Baileys.
@@ -49,6 +50,7 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - consulte `database-admin.md` antes de alterar backup, restauracao ou limpeza operacional do banco;
 - consulte `design-system.md` antes de alterar formularios, campos e padroes visuais compartilhados;
 - consulte `cicd-linode.md` antes de alterar pipeline, deploy remoto ou estrutura de release operacional;
+- consulte `operacao-vps-movisys.md` antes de acessar a VPS, validar ambiente publicado ou alterar DNS/Nginx/containers;
 - consulte `backend-hardening-2026-03-27.md` antes de alterar bootstrap seguro, scheduler diario ou persistencia de secrets em settings;
 - consulte `github-actions-secrets.md` ao configurar GitHub Actions, SSH e variaveis por ambiente;
 - consulte `whatsapp-qr-bridge.md` antes de ativar ou manter a integracao de WhatsApp por QR Code;

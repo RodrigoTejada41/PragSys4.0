@@ -24,11 +24,17 @@ app.use(express.json({ limit: "1mb" }));
 const BRIDGE_PORT = Number(process.env.WHATSAPP_BRIDGE_PORT || 3100);
 const BRIDGE_HOST = process.env.WHATSAPP_BRIDGE_HOST || "0.0.0.0";
 const BRIDGE_API_KEY = String(process.env.WHATSAPP_BRIDGE_API_KEY || "").trim();
+const BRIDGE_ENV = String(process.env.NODE_ENV || process.env.APP_ENV || "development").trim().toLowerCase();
 const SESSION_ROOT = path.resolve(process.env.WHATSAPP_BRIDGE_SESSION_DIR || path.join(process.cwd(), "sessions"));
 const QR_WAIT_TIMEOUT_MS = Number(process.env.WHATSAPP_BRIDGE_QR_WAIT_TIMEOUT_MS || 8000);
 const QR_RETRY_WAIT_MS = Number(process.env.WHATSAPP_BRIDGE_QR_RETRY_WAIT_MS || 2500);
 const QR_TTL_MS = Number(process.env.WHATSAPP_BRIDGE_QR_TTL_MS || 60000);
 fs.mkdirSync(SESSION_ROOT, { recursive: true });
+
+if (["prod", "production"].includes(BRIDGE_ENV) && !BRIDGE_API_KEY) {
+  logger.error("WHATSAPP_BRIDGE_API_KEY obrigatoria em producao.");
+  process.exit(1);
+}
 
 const sessions = new Map();
 
@@ -41,6 +47,9 @@ function readApiKey(req) {
 }
 
 function requireApiKey(req, res, next) {
+  if (req.path === "/health") {
+    return next();
+  }
   if (!BRIDGE_API_KEY) {
     return next();
   }
@@ -67,12 +76,34 @@ function normalizePhone(input) {
   return `${digits}@s.whatsapp.net`;
 }
 
+function normalizeInstanceName(input) {
+  const value = String(input || "").trim();
+  if (!/^[A-Za-z0-9._-]{1,80}$/.test(value) || value === "." || value.includes("..")) {
+    const error = new Error("Nome de instancia invalido.");
+    error.statusCode = 400;
+    throw error;
+  }
+  return value;
+}
+
+function errorStatusCode(error) {
+  return error?.statusCode === 400 ? 400 : 500;
+}
+
 function getSessionState(instanceName) {
-  return sessions.get(instanceName);
+  return sessions.get(normalizeInstanceName(instanceName));
 }
 
 function getSessionPath(instanceName) {
-  return path.join(SESSION_ROOT, instanceName);
+  const safeName = normalizeInstanceName(instanceName);
+  const resolved = path.resolve(SESSION_ROOT, safeName);
+  const rootPrefix = `${SESSION_ROOT}${path.sep}`;
+  if (resolved === SESSION_ROOT || !resolved.startsWith(rootPrefix)) {
+    const error = new Error("Caminho de sessao invalido.");
+    error.statusCode = 400;
+    throw error;
+  }
+  return resolved;
 }
 
 function sleep(ms) {
@@ -136,6 +167,7 @@ function removeAuthFolder(authFolder) {
 }
 
 async function ensureSession(instanceName) {
+  instanceName = normalizeInstanceName(instanceName);
   const existing = getSessionState(instanceName);
   if (existing && existing.socket) {
     return existing;
@@ -269,6 +301,7 @@ function serializeStatus(session) {
 }
 
 async function destroySession(instanceName, options = {}) {
+  instanceName = normalizeInstanceName(instanceName);
   const { purgeAuth = false } = options;
   const session = getSessionState(instanceName);
   if (!session) {
@@ -331,18 +364,26 @@ app.get("/health", (_req, res) => {
 });
 
 app.get("/instance/connectionState/:instance", async (req, res) => {
-  const instanceName = req.params.instance;
-  const session = getSessionState(instanceName);
-  logger.info({ instanceName, state: session?.status || "closed" }, "WhatsApp Bridge status requested");
-  if (!session) {
-    return res.json(serializeStatus(null));
+  try {
+    const instanceName = normalizeInstanceName(req.params.instance);
+    const session = getSessionState(instanceName);
+    logger.info({ instanceName, state: session?.status || "closed" }, "WhatsApp Bridge status requested");
+    if (!session) {
+      return res.json(serializeStatus(null));
+    }
+    return res.json(serializeStatus(session));
+  } catch (error) {
+    return res.status(errorStatusCode(error)).json({
+      status: "ERROR",
+      error: true,
+      message: error.message || "Falha ao consultar a sessao do WhatsApp.",
+    });
   }
-  return res.json(serializeStatus(session));
 });
 
 app.get("/instance/connect/:instance", async (req, res) => {
   try {
-    const instanceName = req.params.instance;
+    const instanceName = normalizeInstanceName(req.params.instance);
     const forceRefresh = isTruthyFlag(req.query.refresh) || isTruthyFlag(req.query.regenerate);
     const session = await createOrRefreshSession(instanceName, { forceRefresh });
     if (session.qr && !session.qrImageDataUrl) {
@@ -360,7 +401,7 @@ app.get("/instance/connect/:instance", async (req, res) => {
     return res.json(serializeStatus(session));
   } catch (error) {
     logger.error({ err: error, instance: req.params.instance }, "Failed to create WhatsApp Bridge session");
-    return res.status(500).json({
+    return res.status(errorStatusCode(error)).json({
       status: "ERROR",
       error: true,
       message: error.message || "Nao foi possivel iniciar a sessao do WhatsApp.",
@@ -369,21 +410,29 @@ app.get("/instance/connect/:instance", async (req, res) => {
 });
 
 app.delete("/instance/logout/:instance", async (req, res) => {
-  const instanceName = req.params.instance;
-  logger.warn({ instanceName }, "WhatsApp Bridge logout requested");
-  await destroySession(instanceName, { purgeAuth: true });
-  return res.json({
-    status: "SUCCESS",
-    error: false,
-    response: {
-      message: "Instance logged out",
-    },
-  });
+  try {
+    const instanceName = normalizeInstanceName(req.params.instance);
+    logger.warn({ instanceName }, "WhatsApp Bridge logout requested");
+    await destroySession(instanceName, { purgeAuth: true });
+    return res.json({
+      status: "SUCCESS",
+      error: false,
+      response: {
+        message: "Instance logged out",
+      },
+    });
+  } catch (error) {
+    return res.status(errorStatusCode(error)).json({
+      status: "ERROR",
+      error: true,
+      message: error.message || "Falha ao encerrar a sessao do WhatsApp.",
+    });
+  }
 });
 
 app.post("/message/sendText/:instance", async (req, res) => {
   try {
-    const instanceName = req.params.instance;
+    const instanceName = normalizeInstanceName(req.params.instance);
     const session = await ensureSession(instanceName);
     if (session.status !== "open" || !session.socket) {
       logger.warn({ instanceName, state: session.status }, "WhatsApp Bridge send rejected because session is not connected");
@@ -415,7 +464,7 @@ app.post("/message/sendText/:instance", async (req, res) => {
     });
   } catch (error) {
     logger.error({ err: error, instance: req.params.instance }, "Failed to send WhatsApp message");
-    return res.status(500).json({
+    return res.status(errorStatusCode(error)).json({
       status: "ERROR",
       error: true,
       message: error.message || "Falha ao enviar mensagem pelo WhatsApp.",

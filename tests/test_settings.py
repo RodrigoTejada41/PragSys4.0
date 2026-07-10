@@ -73,7 +73,15 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
         json={
             "integrations": {
                 "google_calendar_enabled": True,
+                "google_oauth_client_id": "client-id.apps.googleusercontent.com",
+                "google_oauth_client_secret": "google-secret",
+                "google_oauth_redirect_uri": "http://127.0.0.1:8010/api/v1/google-calendar/oauth/callback",
+                "google_calendar_id": "primary",
                 "whatsapp_enabled": False,
+                "whatsapp_provider": "evolution",
+                "whatsapp_api_base_url": "https://whatsapp.example.test",
+                "whatsapp_api_key": "whatsapp-api-key",
+                "whatsapp_instance_name": "syspragas",
                 "whatsapp_auto_send": False,
                 "whatsapp_default_message": "Agendamento atualizado automaticamente.",
             },
@@ -124,7 +132,16 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert update_response.status_code == 200
     updated = update_response.json()
     assert updated["integrations"]["google_calendar_enabled"] is True
+    assert updated["integrations"]["google_oauth_configured"] is True
+    assert updated["integrations"]["google_oauth_client_id"] == "client-id.apps.googleusercontent.com"
+    assert updated["integrations"]["google_oauth_client_secret_configured"] is True
+    assert updated["integrations"]["google_oauth_redirect_uri"] == "http://127.0.0.1:8010/api/v1/google-calendar/oauth/callback"
+    assert updated["integrations"]["google_calendar_id"] == "primary"
     assert updated["integrations"]["whatsapp_enabled"] is False
+    assert updated["integrations"]["whatsapp_provider"] == "evolution"
+    assert updated["integrations"]["whatsapp_api_base_url"] == "https://whatsapp.example.test"
+    assert updated["integrations"]["whatsapp_api_key_configured"] is True
+    assert updated["integrations"]["whatsapp_instance_name"] == "syspragas"
     assert updated["integrations"]["whatsapp_auto_send"] is False
     assert updated["integrations"]["whatsapp_default_message"] == "Agendamento atualizado automaticamente."
     assert updated["contracts"]["alert_days"] == 30

@@ -77,6 +77,34 @@ E um checkout isolado para producao:
 /opt/syspragas/prod
 ```
 
+## Topologia ativa Movis Tecnologia
+
+VPS ativa:
+
+- IP: `172.233.177.135`
+- dominio: `movisystecnologia.com.br`
+- producao: `/opt/syspragas/prod`
+- dev/teste: `/opt/syspragas/dev`
+
+URLs:
+
+- Producao: `https://www.movisystecnologia.com.br/PragSys/app`
+- Dev/teste: `https://www.movisystecnologia.com.br/dev/app`
+
+Portas:
+
+- `8011`: app producao, proxy Nginx `/PragSys`;
+- `8012`: app dev, proxy Nginx `/dev`;
+- `3111`: WhatsApp Bridge producao, bind local;
+- `3112`: WhatsApp Bridge dev, bind local.
+
+Nginx:
+
+- referencia versionada: `deploy/nginx/movisystecnologia-pragsys.conf`;
+- ativo remoto: `/etc/nginx/sites-enabled/movisystecnologia-pragsys.conf`.
+
+Segredos permanecem nos `.env` remotos e nao devem ser versionados.
+
 Script remoto sugerido:
 
 ```bash

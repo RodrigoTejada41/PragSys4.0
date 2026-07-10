@@ -1,5 +1,8 @@
+const TOKEN_STORAGE_KEY = "syspragas_token";
+localStorage.removeItem(TOKEN_STORAGE_KEY);
+
 const state = {
-    token: localStorage.getItem("syspragas_token") || "",
+    token: sessionStorage.getItem(TOKEN_STORAGE_KEY) || "",
     user: null,
     customers: [],
     contracts: [],
@@ -189,6 +192,16 @@ const permissionCatalog = {
         ["orchestrator.audit", "Ver auditoria do orquestrador"],
     ],
 };
+
+const APP_BASE_PATH = String(window.SysPragasConfig?.basePath || "").replace(/\/+$/, "");
+
+function appUrl(path) {
+    const rawPath = String(path || "");
+    if (!APP_BASE_PATH || !rawPath.startsWith("/") || rawPath.startsWith(`${APP_BASE_PATH}/`)) {
+        return rawPath;
+    }
+    return `${APP_BASE_PATH}${rawPath}`;
+}
 
 const defaultPermissionsByRole = {
     master: Object.fromEntries(Object.values(permissionCatalog).flat().map(([key]) => [key, true])),
@@ -2045,7 +2058,7 @@ function bindAuth() {
                 false,
             );
             state.token = result.access_token;
-            localStorage.setItem("syspragas_token", state.token);
+            sessionStorage.setItem(TOKEN_STORAGE_KEY, state.token);
             await bootstrapApp();
             event.currentTarget.reset();
         } catch (error) {
@@ -2109,7 +2122,8 @@ function logout() {
     state.token = "";
     state.user = null;
     state.receiptPreview = null;
-    localStorage.removeItem("syspragas_token");
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
     showLogin();
 }
 
@@ -2265,7 +2279,7 @@ async function apiFetch(url, options = {}, withAuth = true) {
         headers.Authorization = `Bearer ${state.token}`;
     }
 
-    const response = await fetch(url, { ...options, headers });
+    const response = await fetch(appUrl(url), { ...options, headers });
     if (!response.ok) {
         const text = await response.text();
         let detail = "Nao foi possivel concluir a operacao.";
@@ -2296,7 +2310,7 @@ async function apiFetchResponse(url, options = {}, withAuth = true) {
     headers.Authorization = `Bearer ${state.token}`;
   }
 
-  const response = await fetch(url, { ...options, headers });
+  const response = await fetch(appUrl(url), { ...options, headers });
   if (!response.ok) {
     const text = await response.text();
     let detail = "Nao foi possivel concluir a operacao.";
@@ -2636,6 +2650,77 @@ function renderSettings() {
                 <span>Mensagem padrao do WhatsApp</span>
                 <textarea name="whatsapp_default_message" rows="4" placeholder="Mensagem automatica de agendamento">${escapeHtml(settingsState.integrations.whatsapp_default_message || "")}</textarea>
             </label>
+            <div class="settings-field-grid two-columns">
+                <label>
+                    <span>Google Client ID</span>
+                    <input name="google_oauth_client_id" value="${escapeHtml(settingsState.integrations.google_oauth_client_id || "")}" placeholder="client-id.apps.googleusercontent.com">
+                </label>
+                <label>
+                    <span>Google Client Secret</span>
+                    <input name="google_oauth_client_secret" type="password" placeholder="${settingsState.integrations.google_oauth_client_secret_configured ? "Secret ja configurado" : "Informe o client secret"}">
+                </label>
+                <label class="full-width">
+                    <span>Google Redirect URI</span>
+                    <input name="google_oauth_redirect_uri" value="${escapeHtml(settingsState.integrations.google_oauth_redirect_uri || "")}" placeholder="https://movisystecnologia.com.br/PragSys/api/v1/google-calendar/oauth/callback">
+                </label>
+                <label>
+                    <span>Google Calendar ID</span>
+                    <input name="google_calendar_id" value="${escapeHtml(settingsState.integrations.google_calendar_id || "primary")}" placeholder="primary">
+                </label>
+                <label>
+                    <span>Provedor WhatsApp</span>
+                    <select name="whatsapp_provider">
+                        <option value="custom" ${settingsState.integrations.whatsapp_provider === "custom" ? "selected" : ""}>Custom</option>
+                        <option value="evolution" ${settingsState.integrations.whatsapp_provider === "evolution" ? "selected" : ""}>WhatsApp Web QR</option>
+                        <option value="meta_cloud_api" ${settingsState.integrations.whatsapp_provider === "meta_cloud_api" ? "selected" : ""}>Meta Cloud API</option>
+                        <option value="twilio" ${settingsState.integrations.whatsapp_provider === "twilio" ? "selected" : ""}>Twilio</option>
+                    </select>
+                </label>
+                <label>
+                    <span>WhatsApp URL base</span>
+                    <input name="whatsapp_api_base_url" value="${escapeHtml(settingsState.integrations.whatsapp_api_base_url || "")}" placeholder="https://api.whatsapp.local">
+                </label>
+                <label>
+                    <span>WhatsApp API Key</span>
+                    <input name="whatsapp_api_key" type="password" placeholder="${settingsState.integrations.whatsapp_api_key_configured ? "API key ja configurada" : "Informe a API key"}">
+                </label>
+                <label>
+                    <span>WhatsApp Auth Token</span>
+                    <input name="whatsapp_auth_token" type="password" placeholder="${settingsState.integrations.whatsapp_auth_token_configured ? "Token ja configurado" : "Informe o token"}">
+                </label>
+                <label>
+                    <span>Sender ID</span>
+                    <input name="whatsapp_sender_id" value="${escapeHtml(settingsState.integrations.whatsapp_sender_id || "")}" placeholder="phone-number-id ou remetente">
+                </label>
+                <label>
+                    <span>Instancia</span>
+                    <input name="whatsapp_instance_name" value="${escapeHtml(settingsState.integrations.whatsapp_instance_name || "")}" placeholder="syspragas">
+                </label>
+                <label class="full-width">
+                    <span>Endpoint de envio</span>
+                    <input name="whatsapp_message_api_url" value="${escapeHtml(settingsState.integrations.whatsapp_message_api_url || "")}" placeholder="Opcional; vazio usa a URL padrao do provedor">
+                </label>
+                <label>
+                    <span>Endpoint de status</span>
+                    <input name="whatsapp_status_api_url" value="${escapeHtml(settingsState.integrations.whatsapp_status_api_url || "")}" placeholder="Opcional">
+                </label>
+                <label>
+                    <span>Endpoint de QR Code</span>
+                    <input name="whatsapp_qr_api_url" value="${escapeHtml(settingsState.integrations.whatsapp_qr_api_url || "")}" placeholder="Opcional">
+                </label>
+                <label>
+                    <span>Endpoint de conectar</span>
+                    <input name="whatsapp_connect_api_url" value="${escapeHtml(settingsState.integrations.whatsapp_connect_api_url || "")}" placeholder="Opcional">
+                </label>
+                <label>
+                    <span>Endpoint de logout</span>
+                    <input name="whatsapp_logout_api_url" value="${escapeHtml(settingsState.integrations.whatsapp_logout_api_url || "")}" placeholder="Opcional">
+                </label>
+                <label>
+                    <span>Timeout WhatsApp (s)</span>
+                    <input name="whatsapp_timeout_seconds" type="number" min="1" max="120" value="${escapeHtml(String(settingsState.integrations.whatsapp_timeout_seconds || 15))}">
+                </label>
+            </div>
         </section>
         <section class="settings-form-section">
             <div class="section-heading compact">
@@ -3314,7 +3399,23 @@ function getSystemSettingsPayload(form) {
     return {
         integrations: {
             google_calendar_enabled: form.querySelector('[name="google_calendar_enabled"]').checked,
+            google_oauth_client_id: form.querySelector('[name="google_oauth_client_id"]').value.trim() || null,
+            google_oauth_client_secret: form.querySelector('[name="google_oauth_client_secret"]').value,
+            google_oauth_redirect_uri: form.querySelector('[name="google_oauth_redirect_uri"]').value.trim() || null,
+            google_calendar_id: form.querySelector('[name="google_calendar_id"]').value.trim() || "primary",
             whatsapp_enabled: form.querySelector('[name="whatsapp_enabled"]').checked,
+            whatsapp_provider: form.querySelector('[name="whatsapp_provider"]').value,
+            whatsapp_api_base_url: form.querySelector('[name="whatsapp_api_base_url"]').value.trim() || null,
+            whatsapp_message_api_url: form.querySelector('[name="whatsapp_message_api_url"]').value.trim() || null,
+            whatsapp_api_key: form.querySelector('[name="whatsapp_api_key"]').value,
+            whatsapp_auth_token: form.querySelector('[name="whatsapp_auth_token"]').value,
+            whatsapp_sender_id: form.querySelector('[name="whatsapp_sender_id"]').value.trim() || null,
+            whatsapp_instance_name: form.querySelector('[name="whatsapp_instance_name"]').value.trim() || null,
+            whatsapp_status_api_url: form.querySelector('[name="whatsapp_status_api_url"]').value.trim() || null,
+            whatsapp_qr_api_url: form.querySelector('[name="whatsapp_qr_api_url"]').value.trim() || null,
+            whatsapp_connect_api_url: form.querySelector('[name="whatsapp_connect_api_url"]').value.trim() || null,
+            whatsapp_logout_api_url: form.querySelector('[name="whatsapp_logout_api_url"]').value.trim() || null,
+            whatsapp_timeout_seconds: Number(form.querySelector('[name="whatsapp_timeout_seconds"]').value || 15),
             whatsapp_auto_send: form.querySelector('[name="whatsapp_auto_send"]').checked,
             whatsapp_default_message: form.querySelector('[name="whatsapp_default_message"]').value.trim(),
         },
@@ -7842,19 +7943,49 @@ async function logoutWhatsApp() {
 }
 
 
-async function loginGoogle() {
-    const result = await apiFetch("/api/v1/google-calendar/login", { method: "POST" });
+function openPendingGoogleOAuthWindow() {
     const popup = window.open(
-        result.authorization_url,
+        "",
         "syspragas-google-calendar-oauth",
         "width=640,height=760,menubar=no,toolbar=no,location=yes,resizable=yes,scrollbars=yes,status=no",
     );
+    if (popup) {
+        popup.document.write("<!doctype html><html><head><title>Google Agenda</title></head><body style=\"font-family:Arial,sans-serif;padding:24px\"><h3>Preparando login Google...</h3><p>Aguarde enquanto o SysPragas gera a autenticacao.</p></body></html>");
+        popup.document.close();
+        popup.focus();
+    }
+    return popup;
+}
+
+function focusGoogleOAuthSettings() {
+    switchView("configuracoes");
+    window.setTimeout(() => {
+        const firstField = document.querySelector('[name="google_oauth_client_id"]');
+        firstField?.scrollIntoView({ behavior: "smooth", block: "center" });
+        firstField?.focus();
+    }, 100);
+}
+
+function redirectGoogleOAuthWindow(popup, url) {
     if (!popup) {
-        window.location.href = result.authorization_url;
+        window.location.href = url;
         return;
     }
+    popup.location.href = url;
     popup.focus();
-    toast(result.message || "Abra a autenticacao Google para conectar uma nova conta.");
+}
+
+async function loginGoogle() {
+    const popup = openPendingGoogleOAuthWindow();
+    try {
+        const result = await apiFetch("/api/v1/google-calendar/login", { method: "POST" });
+        redirectGoogleOAuthWindow(popup, result.authorization_url);
+        toast(result.message || "Abra a autenticacao Google para conectar uma nova conta.");
+    } catch (error) {
+        popup?.close();
+        focusGoogleOAuthSettings();
+        toast(error.message || "Configure o OAuth do Google antes de abrir o login.");
+    }
 }
 
 
@@ -8190,21 +8321,22 @@ function bindAppointmentActions() {
 }
 
 async function syncAppointmentWithGoogle(appointmentId) {
-    const result = await apiFetch(`/api/v1/google-calendar/appointments/${appointmentId}/sync`, { method: "POST" });
+    const popup = openPendingGoogleOAuthWindow();
+    let result;
+    try {
+        result = await apiFetch(`/api/v1/google-calendar/appointments/${appointmentId}/sync`, { method: "POST" });
+    } catch (error) {
+        popup?.close();
+        focusGoogleOAuthSettings();
+        toast(error.message || "Configure o OAuth do Google antes de sincronizar.");
+        return;
+    }
     if (result.mode === "oauth_required" && result.authorization_url) {
-        const popup = window.open(
-            result.authorization_url,
-            "syspragas-google-calendar-oauth",
-            "width=640,height=760,menubar=no,toolbar=no,location=yes,resizable=yes,scrollbars=yes,status=no",
-        );
-        if (!popup) {
-            window.location.href = result.authorization_url;
-            return;
-        }
-        popup.focus();
+        redirectGoogleOAuthWindow(popup, result.authorization_url);
         toast(result.message || "Conecte sua conta Google para concluir a sincronizacao.");
         return;
     }
+    popup?.close();
     await afterMutation(result.message || "Agendamento sincronizado com Google Agenda.");
     openAppointmentView("operational");
 }

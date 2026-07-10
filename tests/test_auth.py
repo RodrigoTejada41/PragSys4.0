@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app.core.security import get_password_hash
 from app.infrastructure.db import get_session_local
 from app.infrastructure.models import User
@@ -50,3 +52,38 @@ def test_docs_forbid_non_master_users(client):
 
     response = client.get("/docs", auth=("operador.docs", "Senha@123"))
     assert response.status_code == 403
+
+
+def test_security_headers_and_csp_nonce_on_web_app(client):
+    response = client.get("/app")
+
+    assert response.status_code == 200
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert response.headers["Referrer-Policy"] == "no-referrer"
+
+    csp = response.headers["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    assert "object-src 'none'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "'unsafe-inline'" not in csp.split("script-src", 1)[1].split(";", 1)[0]
+    assert "nonce-" in csp
+    assert '<script nonce="' in response.text
+    assert "SysPragas 4.1" in response.text
+    assert "Nova ordem de servico" in response.text
+    assert "Ordens cadastradas" in response.text
+
+
+def test_web_token_is_not_persisted_in_local_storage():
+    app_js = Path("app/interfaces/web/static/app.js").read_text(encoding="utf-8")
+
+    assert 'localStorage.setItem("syspragas_token"' not in app_js
+    assert 'localStorage.getItem("syspragas_token"' not in app_js
+    assert "sessionStorage.setItem(TOKEN_STORAGE_KEY" in app_js
+
+
+def test_favicon_is_served(client):
+    response = client.get("/favicon.ico")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")

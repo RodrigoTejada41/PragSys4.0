@@ -84,3 +84,29 @@ Subida:
 ```powershell
 docker compose --profile whatsapp-bridge up --build -d
 ```
+
+## Producao VPS Movis
+
+Em 2026-07-10 o bridge foi publicado em dois ambientes isolados na VPS:
+
+| Ambiente | App | Bridge |
+| --- | --- | --- |
+| Producao | `syspragas-prod` | `syspragas-whatsapp-bridge-prod` |
+| Dev | `syspragas-dev` | `syspragas-whatsapp-bridge-dev` |
+
+Portas internas:
+
+- producao: bridge em `127.0.0.1:3111`;
+- dev: bridge em `127.0.0.1:3112`;
+- nenhum bridge fica exposto publicamente.
+
+Validacao registrada:
+
+- `GET /health` do bridge retornou `ok`;
+- API do SysPragas gerou QR em producao e dev;
+- status apos gerar QR: `aguardando_conexao`;
+- testes locais: `pytest tests/test_whatsapp_integration.py -q` -> `15 passed`.
+
+Documento operacional completo:
+
+- `docs/operacao-vps-movisys.md`

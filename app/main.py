@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import secrets
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -46,6 +47,26 @@ configure_logging()
 docs_security = HTTPBasic(auto_error=False)
 
 
+def _security_policy_for_path(path: str, nonce: str) -> str:
+    script_src = f"'self' 'nonce-{nonce}'"
+    if path.rstrip("/") == "/docs":
+        script_src = "'self' 'unsafe-inline'"
+    return "; ".join(
+        [
+            "default-src 'self'",
+            f"script-src {script_src}",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob:",
+            "font-src 'self' data:",
+            "connect-src 'self'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "frame-ancestors 'none'",
+            "form-action 'self'",
+        ]
+    )
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
@@ -66,6 +87,19 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    nonce = secrets.token_urlsafe(16)
+    request.state.csp_nonce = nonce
+    response = await call_next(request)
+    response.headers.setdefault("Content-Security-Policy", _security_policy_for_path(request.url.path, nonce))
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    return response
+
+
 @app.exception_handler(BusinessRuleViolation)
 async def business_rule_handler(_: Request, exc: BusinessRuleViolation) -> JSONResponse:
     return JSONResponse(status_code=400, content={"detail": exc.message})
@@ -73,7 +107,7 @@ async def business_rule_handler(_: Request, exc: BusinessRuleViolation) -> JSONR
 
 @app.get("/")
 def root() -> RedirectResponse:
-    return RedirectResponse(url="/app")
+    return RedirectResponse(url=f"{settings.normalized_base_path}/app")
 
 
 @app.get("/health")
@@ -129,7 +163,7 @@ def openapi_schema(_: User = Depends(_get_docs_master_user)) -> dict:
 @app.get("/docs", include_in_schema=False)
 def swagger_docs(_: User = Depends(_get_docs_master_user)):
     return get_swagger_ui_html(
-        openapi_url="/openapi.json",
+        openapi_url=f"{settings.normalized_base_path}/openapi.json",
         title=f"{settings.app_name} - API Docs",
     )
 
