@@ -65,16 +65,22 @@ def _build_regulatory_pdf(*lines: str) -> bytes:
 
 def _build_test_pfx(password: str = "senha-pfx") -> bytes:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    subject = issuer = x509.Name(
+    subject = x509.Name(
         [
             x509.NameAttribute(NameOID.COMMON_NAME, "EMPRESA CERTIFICADA LTDA:12345678000190"),
-            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "EMPRESA CERTIFICADA LTDA"),
-            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "SysPragas Cert"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "ICP-Brasil"),
+            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "AC SOLUTI Multipla v5"),
             x509.NameAttribute(ICP_BRASIL_CNPJ_OID, "12345678000190"),
             x509.NameAttribute(NameOID.STREET_ADDRESS, "Rua do Certificado, 100"),
             x509.NameAttribute(NameOID.LOCALITY_NAME, "Sao Paulo"),
             x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "SP"),
             x509.NameAttribute(NameOID.POSTAL_CODE, "01001000"),
+        ]
+    )
+    issuer = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, "AC SOLUTI Multipla v5"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "ICP-Brasil"),
         ]
     )
     certificate = (
@@ -233,6 +239,7 @@ def test_admin_can_manage_digital_certificate_securely(client, auth_headers):
     validation_payload = validation_response.json()
     assert validation_payload["valid"] is True
     assert validation_payload["certificate"]["company"]["legal_name"] == "EMPRESA CERTIFICADA LTDA"
+    assert validation_payload["certificate"]["company"]["trade_name"] is None
     assert validation_payload["certificate"]["company"]["cnpj"] == "12345678000190"
 
     save_response = client.post(
@@ -254,6 +261,7 @@ def test_admin_can_manage_digital_certificate_securely(client, auth_headers):
     settings_payload = settings_response.json()
     assert settings_payload["digital_certificate"]["configured"] is True
     assert settings_payload["company"]["legal_name"] == "EMPRESA CERTIFICADA LTDA"
+    assert settings_payload["company"]["trade_name"] != "AC SOLUTI Multipla v5"
     assert settings_payload["company"]["cnpj"] == "12345678000190"
 
     test_response = client.post("/api/v1/settings/digital-certificate/test", headers=auth_headers)

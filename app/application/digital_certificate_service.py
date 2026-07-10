@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -52,6 +53,7 @@ def get_digital_certificate(db: Session, current_user: User) -> DigitalCertifica
     record = _get_company_certificate(db, current_user)
     if record is None:
         return DigitalCertificateInfoRead()
+    _refresh_certificate_company_metadata_if_needed(db, record)
     return _certificate_record_to_read(record)
 
 
@@ -175,6 +177,7 @@ def apply_certificate_company_data(
     commit: bool = True,
 ) -> DigitalCertificateInfoRead:
     record = _require_company_certificate(db, current_user)
+    _refresh_certificate_company_metadata_if_needed(db, record)
     info = _certificate_record_to_read(record)
     company = info.company
     address = info.address
@@ -189,6 +192,10 @@ def apply_certificate_company_data(
         technical.trade_name = company.trade_name
         if provider:
             provider.nome_fantasia = company.trade_name
+    elif company.legal_name and _looks_like_certifier_name(technical.trade_name):
+        technical.trade_name = company.legal_name
+        if provider and _looks_like_certifier_name(provider.nome_fantasia):
+            provider.nome_fantasia = company.legal_name
     if company.cnpj:
         technical.cnpj = company.cnpj
         if provider:
@@ -356,6 +363,21 @@ def _apply_loaded_certificate_to_record(
     record.encrypted_file_data = loaded.encrypted_file_data
     record.encrypted_password = loaded.encrypted_password
     record.file_sha256 = loaded.file_sha256
+    _apply_certificate_info_to_record(
+        record,
+        info=info,
+        current_user_id=current_user.id,
+        validated_at=now,
+    )
+
+
+def _apply_certificate_info_to_record(
+    record: DigitalCertificate,
+    *,
+    info: DigitalCertificateInfoRead,
+    current_user_id: Optional[int] = None,
+    validated_at: Optional[datetime] = None,
+) -> None:
     record.certificate_type = info.certificate_type or "A1"
     record.serial_number = info.serial_number
     record.thumbprint = info.thumbprint
@@ -371,8 +393,24 @@ def _apply_loaded_certificate_to_record(
     record.status = info.status
     record.last_validation_status = info.status
     record.last_validation_error = "; ".join(info.errors) if info.errors else None
-    record.last_validated_at = now
-    record.updated_by_user_id = current_user.id
+    if validated_at is not None:
+        record.last_validated_at = validated_at
+    if current_user_id is not None:
+        record.updated_by_user_id = current_user_id
+
+
+def _refresh_certificate_company_metadata_if_needed(db: Session, record: DigitalCertificate) -> None:
+    company = DigitalCertificateCompanyRead(**_json_dict(record.company_info_json))
+    if not _certificate_company_info_has_certifier_data(company):
+        return
+    loaded = _load_certificate_from_bytes(
+        filename=record.filename,
+        content=_decrypt_bytes(record.encrypted_file_data),
+        password=_decrypt_text(record.encrypted_password),
+        encrypt_payload=False,
+    )
+    _apply_certificate_info_to_record(record, info=loaded.info, validated_at=_utc_now())
+    db.flush()
 
 
 def _certificate_record_to_read(record: DigitalCertificate) -> DigitalCertificateInfoRead:
@@ -423,10 +461,10 @@ def _extract_company_info(certificate: x509.Certificate) -> DigitalCertificateCo
     cn = _name_attr(subject, NameOID.COMMON_NAME)
     organization = _name_attr(subject, NameOID.ORGANIZATION_NAME)
     cnpj = _name_attr(subject, ICP_BRASIL_CNPJ_OID) or _find_cnpj(_name_to_text(subject))
-    legal_name = organization or _strip_identifier_from_name(cn)
+    legal_name = _valid_company_name(_strip_identifier_from_name(cn)) or _valid_company_name(organization)
     return DigitalCertificateCompanyRead(
         legal_name=legal_name,
-        trade_name=_name_attr(subject, NameOID.ORGANIZATIONAL_UNIT_NAME),
+        trade_name=_extract_trade_name(subject, legal_name),
         cnpj=cnpj,
         state_registration=_name_attr(subject, ICP_BRASIL_IE_OID),
         municipal_registration=None,
@@ -448,6 +486,10 @@ def _name_attr(name: x509.Name, oid: ObjectIdentifier) -> Optional[str]:
     return str(values[0]).strip() if values else None
 
 
+def _name_attrs(name: x509.Name, oid: ObjectIdentifier) -> list[str]:
+    return [str(attribute.value).strip() for attribute in name.get_attributes_for_oid(oid) if str(attribute.value).strip()]
+
+
 def _name_to_text(name: x509.Name) -> str:
     return ", ".join(f"{attribute.oid._name}={attribute.value}" for attribute in name)
 
@@ -467,6 +509,64 @@ def _strip_identifier_from_name(value: Optional[str]) -> Optional[str]:
     if ":" in cleaned and _find_cnpj(cleaned):
         return cleaned.rsplit(":", 1)[0].strip() or cleaned
     return cleaned
+
+
+def _valid_company_name(value: Optional[str]) -> Optional[str]:
+    cleaned = str(value or "").strip()
+    if not cleaned or _looks_like_certifier_name(cleaned):
+        return None
+    return cleaned
+
+
+def _extract_trade_name(subject: x509.Name, legal_name: Optional[str]) -> Optional[str]:
+    legal_normalized = _normalize_text(legal_name)
+    for value in _name_attrs(subject, NameOID.ORGANIZATIONAL_UNIT_NAME):
+        normalized = _normalize_text(value)
+        if not normalized or normalized == legal_normalized:
+            continue
+        if _looks_like_certifier_name(value) or _looks_like_certificate_metadata(value):
+            continue
+        return value
+    return None
+
+
+def _certificate_company_info_has_certifier_data(company: DigitalCertificateCompanyRead) -> bool:
+    return _looks_like_certifier_name(company.legal_name) or _looks_like_certifier_name(company.trade_name)
+
+
+def _looks_like_certifier_name(value: Optional[str]) -> bool:
+    normalized = _normalize_text(value)
+    if not normalized:
+        return False
+    return (
+        normalized in {"ICP BRASIL", "ICP-BRASIL"}
+        or normalized.startswith("AC ")
+        or normalized.startswith("AC-")
+        or "AUTORIDADE CERTIFICADORA" in normalized
+        or "CERTIFICADORA" in normalized
+    )
+
+
+def _looks_like_certificate_metadata(value: Optional[str]) -> bool:
+    normalized = _normalize_text(value)
+    if not normalized:
+        return False
+    markers = (
+        "CERTIFICADO",
+        "CERTIFICATE",
+        "PRESENCIAL",
+        "VIDEOCONFERENCIA",
+        "RECEITA FEDERAL",
+        "SECRETARIA DA RECEITA",
+        "RFB",
+    )
+    return any(marker in normalized for marker in markers) or _find_cnpj(normalized) is not None
+
+
+def _normalize_text(value: Optional[str]) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return re.sub(r"\s+", " ", text).strip().upper()
 
 
 def _validate_upload(filename: str, content: bytes, password: str) -> None:
