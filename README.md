@@ -68,6 +68,8 @@ Acesse de outra maquina da rede:
 ## Documentacao obrigatoria da release
 
 - [Mapa da documentacao](docs/README.md)
+- [Organograma do estado atual](docs/organograma-estado-atual-projeto.md)
+- [Manual completo de instalacao](docs/manual-instalacao-completo.md)
 - [Arquitetura alvo 4.0.0](docs/architecture-v4.0.0.md)
 - [Relatorio de performance da suite](docs/performance-test-suite-report-2026-03-26.md)
 - [Instalacao local](docs/installation-local.md)

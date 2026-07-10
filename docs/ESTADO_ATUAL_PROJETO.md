@@ -3,8 +3,8 @@
 Data: 2026-07-09
 Projeto: SysPragas 4.1.0
 Raiz: `E:\Projetos\Controle_de_Pragas4.0`
-Branch: `main`
-HEAD: `8adeea1 docs: add dev demo seed handoff summary`
+Branch operacional: `main`
+Repositorio alvo: `git@github.com:RodrigoTejada41/PragSys4.0.git`
 
 ## Estado operacional
 
@@ -98,3 +98,16 @@ Estado validado:
 - Teste focado: `pytest tests/test_whatsapp_integration.py -q` -> `15 passed`.
 
 Segredos e senhas nao foram registrados em documentacao versionada.
+
+## Atualizacao documental 2026-07-10
+
+Documentos adicionados para retomada e instalacao:
+
+- `docs/organograma-estado-atual-projeto.md`
+- `docs/manual-instalacao-completo.md`
+
+Estado de publicacao planejado:
+
+- branch `main` do repositorio `PragSys4.0`;
+- historico atual sem o arquivo legado `teste.py` que bloqueava push por segredo antigo;
+- branch auxiliar `codex/central-api-orchestrator` mantida como origem do trabalho validado.
