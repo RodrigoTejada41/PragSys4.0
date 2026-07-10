@@ -26,10 +26,18 @@ Quando `NFE_PROVIDER=sefaz_direct`, a emissao passa pelo fluxo interno:
 
 ## Configuracao obrigatoria
 
+O certificado A1 deve ser cadastrado preferencialmente em:
+
+```text
+Configuracoes -> Certificado Digital
+```
+
+Com o certificado central cadastrado, `SEFAZ_NFE_CERTIFICATE_PATH` e `SEFAZ_NFE_CERTIFICATE_PASSWORD` deixam de ser obrigatorios para o assinador interno. Eles continuam aceitos como fallback para ambientes legados.
+
 - `NFE_PROVIDER=sefaz_direct`
 - `SEFAZ_NFE_UF`
-- `SEFAZ_NFE_CERTIFICATE_PATH`
-- `SEFAZ_NFE_CERTIFICATE_PASSWORD`
+- certificado central cadastrado ou `SEFAZ_NFE_CERTIFICATE_PATH`
+- certificado central cadastrado ou `SEFAZ_NFE_CERTIFICATE_PASSWORD`
 - `SEFAZ_NFE_XSD_DIR`
 - `COMPANY_CNPJ`
 - `COMPANY_IE`
@@ -57,6 +65,7 @@ A tabela `notas_fiscais` passou a armazenar:
 
 - a validacao XSD depende dos schemas oficiais da NF-e no diretorio configurado
 - a assinatura depende de `signxml`, `lxml`, `cryptography` e certificado A1 valido
+- o certificado central de `Configuracoes -> Certificado Digital` tem prioridade sobre o arquivo configurado no `.env`
 - as URLs SOAP por UF/ambiente podem ser configuradas via `SEFAZ_NFE_WS_URLS_JSON`
 - o codigo atual foi estruturado para homologacao e integracao direta, mas a operacao real depende de certificado, schemas e endpoints oficiais por UF
 

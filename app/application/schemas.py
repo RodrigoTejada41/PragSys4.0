@@ -1351,6 +1351,54 @@ class SettingsCompanyRead(BaseModel):
     technical_signature: SettingsAssetRead
 
 
+class DigitalCertificateCompanyRead(BaseModel):
+    legal_name: Optional[str] = None
+    trade_name: Optional[str] = None
+    cnpj: Optional[str] = None
+    state_registration: Optional[str] = None
+    municipal_registration: Optional[str] = None
+
+
+class DigitalCertificateAddressRead(BaseModel):
+    street: Optional[str] = None
+    number: Optional[str] = None
+    complement: Optional[str] = None
+    district: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+    city_code: Optional[str] = None
+
+
+class DigitalCertificateInfoRead(BaseModel):
+    configured: bool = False
+    status: str = "not_configured"
+    certificate_type: Optional[str] = None
+    filename: Optional[str] = None
+    serial_number: Optional[str] = None
+    authority: Optional[str] = None
+    issuer: Optional[str] = None
+    subject: Optional[str] = None
+    valid_from: Optional[datetime] = None
+    valid_to: Optional[datetime] = None
+    days_until_expiration: Optional[int] = None
+    thumbprint: Optional[str] = None
+    signature_algorithm: Optional[str] = None
+    chain_status: Optional[str] = None
+    company: DigitalCertificateCompanyRead = Field(default_factory=DigitalCertificateCompanyRead)
+    address: DigitalCertificateAddressRead = Field(default_factory=DigitalCertificateAddressRead)
+    last_used_at: Optional[datetime] = None
+    last_validated_at: Optional[datetime] = None
+    alerts: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+class DigitalCertificateValidationRead(BaseModel):
+    valid: bool
+    message: str
+    certificate: DigitalCertificateInfoRead
+
+
 class SystemSettingsRead(BaseModel):
     integrations: SettingsIntegrationsRead
     contracts: SettingsContractsRead
@@ -1359,6 +1407,7 @@ class SystemSettingsRead(BaseModel):
     database: SettingsDatabaseRead
     environment: SettingsEnvironmentRead
     company: SettingsCompanyRead
+    digital_certificate: DigitalCertificateInfoRead = Field(default_factory=DigitalCertificateInfoRead)
 
 
 class SettingsIntegrationsUpdate(BaseModel):

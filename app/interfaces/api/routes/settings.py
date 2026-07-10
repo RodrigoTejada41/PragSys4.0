@@ -9,9 +9,19 @@ from app.application.database_admin_service import (
     export_database_backup,
     restore_database_backup,
 )
+from app.application.digital_certificate_service import (
+    apply_certificate_company_data,
+    get_digital_certificate,
+    remove_digital_certificate,
+    save_digital_certificate,
+    test_stored_digital_certificate,
+    validate_digital_certificate_upload,
+)
 from app.application.schemas import (
     DatabaseCleanupRequest,
     DatabaseMaintenanceRead,
+    DigitalCertificateInfoRead,
+    DigitalCertificateValidationRead,
     SettingsCompanyRead,
     SystemSettingsRead,
     SystemSettingsUpdate,
@@ -45,6 +55,73 @@ def put_settings_view(
     current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
 ) -> SystemSettingsRead:
     return update_system_settings(db, payload, current_user)
+
+
+@router.get("/digital-certificate", response_model=DigitalCertificateInfoRead)
+def get_digital_certificate_view(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.view"])),
+) -> DigitalCertificateInfoRead:
+    return get_digital_certificate(db, current_user)
+
+
+@router.post("/digital-certificate/validate", response_model=DigitalCertificateValidationRead)
+async def validate_digital_certificate_view(
+    file: UploadFile = File(...),
+    password: str = Form(...),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
+) -> DigitalCertificateValidationRead:
+    _ = current_user
+    content = await file.read()
+    return validate_digital_certificate_upload(
+        filename=file.filename or "certificado.pfx",
+        content=content,
+        password=password,
+    )
+
+
+@router.post("/digital-certificate", response_model=DigitalCertificateInfoRead)
+async def save_digital_certificate_view(
+    file: UploadFile = File(...),
+    password: str = Form(...),
+    apply_company_data: bool = Form(False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
+) -> DigitalCertificateInfoRead:
+    content = await file.read()
+    return save_digital_certificate(
+        db,
+        current_user=current_user,
+        filename=file.filename or "certificado.pfx",
+        content_type=file.content_type or "application/x-pkcs12",
+        content=content,
+        password=password,
+        apply_company_data=apply_company_data,
+    )
+
+
+@router.post("/digital-certificate/test", response_model=DigitalCertificateValidationRead)
+def test_digital_certificate_view(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
+) -> DigitalCertificateValidationRead:
+    return test_stored_digital_certificate(db, current_user)
+
+
+@router.post("/digital-certificate/apply-company", response_model=DigitalCertificateInfoRead)
+def apply_digital_certificate_company_view(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
+) -> DigitalCertificateInfoRead:
+    return apply_certificate_company_data(db, current_user=current_user)
+
+
+@router.delete("/digital-certificate", response_model=DigitalCertificateInfoRead)
+def delete_digital_certificate_view(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_access(["master", "admin"], ["settings.manage"])),
+) -> DigitalCertificateInfoRead:
+    return remove_digital_certificate(db, current_user)
 
 
 @router.post("/technical-documents/assets/{asset_kind}", response_model=SettingsCompanyRead)

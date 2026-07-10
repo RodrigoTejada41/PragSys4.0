@@ -291,6 +291,7 @@ const viewTitles = {
     "financeiro-caixa": "Fluxo de caixa",
     "financeiro-relatorios": "Relatorios financeiros",
     configuracoes: "Configuracoes do sistema",
+    "certificado-digital": "Certificado Digital",
     empresas: "Cadastrar empresas",
     usuarios: "Usuarios",
     licencas: "Licencas",
@@ -877,6 +878,7 @@ const dataTableLanguage = {
 
 document.addEventListener("DOMContentLoaded", () => {
     renderSettingsLoadingState();
+    renderDigitalCertificateLoadingState();
     buildForms();
     window.SysPragasUI?.enhanceAllForms();
     bindNavigation();
@@ -886,6 +888,7 @@ document.addEventListener("DOMContentLoaded", () => {
     bindNfeTabNavigation();
     bindGoogleCalendarOAuth();
     bindSettingsActions();
+    bindDigitalCertificateActions();
     bindAuth();
     bindDashboardFilters();
     bindStockFilters();
@@ -2575,6 +2578,59 @@ function renderSettingsLoadingState() {
     }
 }
 
+function bindDigitalCertificateActions() {
+    const root = document.getElementById("digital-certificate-root");
+    if (!root) {
+        return;
+    }
+    root.addEventListener("click", async (event) => {
+        const button = event.target instanceof Element ? event.target.closest("[data-certificate-action]") : null;
+        if (!(button instanceof HTMLButtonElement)) {
+            return;
+        }
+        const form = document.getElementById("digital-certificate-form");
+        const errorBox = form?.querySelector(".form-error");
+        errorBox?.classList.add("hidden");
+        button.disabled = true;
+        const originalLabel = button.textContent;
+        button.textContent = "Processando...";
+        try {
+            const action = button.dataset.certificateAction;
+            if (action === "validate-upload") {
+                await validateDigitalCertificateUpload(form);
+            } else if (action === "save") {
+                await saveDigitalCertificate(form);
+            } else if (action === "test-stored") {
+                await testStoredDigitalCertificate();
+            } else if (action === "apply-company") {
+                await applyDigitalCertificateCompanyData();
+            } else if (action === "remove") {
+                await removeDigitalCertificate();
+            }
+        } catch (error) {
+            if (errorBox) {
+                errorBox.textContent = error.message || "Nao foi possivel processar o certificado digital.";
+                errorBox.classList.remove("hidden");
+            }
+            toast(error.message || "Nao foi possivel processar o certificado digital.");
+        } finally {
+            button.disabled = false;
+            button.textContent = originalLabel;
+        }
+    });
+}
+
+function renderDigitalCertificateLoadingState() {
+    const panel = document.getElementById("digital-certificate-panel");
+    const details = document.getElementById("digital-certificate-details");
+    if (panel) {
+        panel.innerHTML = `<div class="empty-state">Entre com um usuario admin ou master para gerenciar o certificado digital.</div>`;
+    }
+    if (details) {
+        details.innerHTML = "";
+    }
+}
+
 function renderSettings() {
     const summary = document.getElementById("settings-summary-grid");
     const form = document.getElementById("system-settings-form");
@@ -3046,6 +3102,121 @@ function settingsSummaryCard(label, value, description) {
     renderOrchestratorPanel(orchestrator);
 }
 
+function renderDigitalCertificateSettings() {
+    const panel = document.getElementById("digital-certificate-panel");
+    const details = document.getElementById("digital-certificate-details");
+    if (!panel || !details) {
+        return;
+    }
+    if (!hasPermission("settings.view") || !state.settings) {
+        renderDigitalCertificateLoadingState();
+        return;
+    }
+    const cert = state.settings.digital_certificate || {};
+    const canManage = hasPermission("settings.manage");
+    const statusLabel = formatDigitalCertificateStatus(cert.status || "not_configured");
+    const daysText = cert.days_until_expiration === null || cert.days_until_expiration === undefined
+        ? "-"
+        : `${cert.days_until_expiration} dias`;
+    const alerts = Array.isArray(cert.alerts) ? cert.alerts : [];
+    const errors = Array.isArray(cert.errors) ? cert.errors : [];
+
+    panel.innerHTML = `
+        <section class="settings-form-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Status</p>
+                <h4>${escapeHtml(statusLabel)}</h4>
+                <p>${cert.configured ? "Certificado central cadastrado para esta empresa." : "Nenhum certificado central cadastrado."}</p>
+            </div>
+            <div class="settings-summary-grid">
+                ${settingsSummaryCard("Empresa vinculada", cert.company?.legal_name || "-", "Razao social extraida do certificado.")}
+                ${settingsSummaryCard("CNPJ", cert.company?.cnpj || "-", "Documento identificado no subject do certificado.")}
+                ${settingsSummaryCard("Validade", cert.valid_to ? formatIsoDateTime(cert.valid_to) : "-", "Data final de validade do certificado A1.")}
+                ${settingsSummaryCard("Dias restantes", daysText, "Contagem usada para alertas automaticos.")}
+            </div>
+            ${alerts.length ? `<div class="settings-side-list">${alerts.map((item) => settingsInfoRow("Alerta", item)).join("")}</div>` : ""}
+            ${errors.length ? `<div class="form-error">${errors.map(escapeHtml).join("<br>")}</div>` : ""}
+        </section>
+        <section class="settings-form-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Arquivo A1</p>
+                <h4>${cert.configured ? "Substituir certificado" : "Cadastrar certificado"}</h4>
+                <p>Selecione um arquivo .pfx ou .p12. A senha e usada apenas para validar e criptografar o certificado.</p>
+            </div>
+            <form id="digital-certificate-form" class="data-form">
+                <div class="settings-field-grid two-columns">
+                    <label>
+                        <span>Arquivo do certificado</span>
+                        <input name="certificate_file" type="file" accept=".pfx,.p12" ${canManage ? "" : "disabled"}>
+                    </label>
+                    <label>
+                        <span>Senha do certificado</span>
+                        <input name="certificate_password" type="password" autocomplete="new-password" ${canManage ? "" : "disabled"}>
+                    </label>
+                    <label class="checkbox-field full-width">
+                        <input name="apply_company_data" type="checkbox" ${canManage ? "" : "disabled"}>
+                        <span>Preencher cadastro da empresa com os dados encontrados no certificado</span>
+                    </label>
+                </div>
+                <div class="inline-actions">
+                    <button type="button" class="btn btn-default ghost-button" data-certificate-action="validate-upload" ${canManage ? "" : "disabled"}>Validar arquivo</button>
+                    <button type="button" class="btn btn-success" data-certificate-action="save" ${canManage ? "" : "disabled"}>${cert.configured ? "Substituir certificado" : "Salvar certificado"}</button>
+                    <button type="button" class="btn btn-primary" data-certificate-action="test-stored" ${cert.configured && canManage ? "" : "disabled"}>Testar Certificado</button>
+                    <button type="button" class="btn btn-default ghost-button" data-certificate-action="apply-company" ${cert.configured && canManage ? "" : "disabled"}>Atualizar cadastro da empresa</button>
+                    <button type="button" class="btn btn-danger" data-certificate-action="remove" ${cert.configured && canManage ? "" : "disabled"}>Remover certificado</button>
+                </div>
+                <p class="origin-note">A senha nunca e exibida e nao e enviada para logs. O arquivo e salvo criptografado no banco.</p>
+                <p class="form-error hidden"></p>
+            </form>
+        </section>
+    `;
+
+    details.innerHTML = `
+        <section class="settings-side-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Painel de informacoes</p>
+                <h4>Dados do certificado</h4>
+                <p>Metadados extraidos automaticamente do certificado A1.</p>
+            </div>
+            <div class="settings-side-list">
+                ${settingsInfoRow("Status", statusLabel)}
+                ${settingsInfoRow("Arquivo", cert.filename || "-")}
+                ${settingsInfoRow("Tipo", cert.certificate_type || "-")}
+                ${settingsInfoRow("Numero de serie", cert.serial_number || "-")}
+                ${settingsInfoRow("Autoridade certificadora", cert.authority || "-")}
+                ${settingsInfoRow("Emissor", cert.issuer || "-")}
+                ${settingsInfoRow("Data de emissao", cert.valid_from ? formatIsoDateTime(cert.valid_from) : "-")}
+                ${settingsInfoRow("Data de validade", cert.valid_to ? formatIsoDateTime(cert.valid_to) : "-")}
+                ${settingsInfoRow("Thumbprint", cert.thumbprint || "-")}
+                ${settingsInfoRow("Algoritmo", cert.signature_algorithm || "-")}
+                ${settingsInfoRow("Cadeia", cert.chain_status || "-")}
+                ${settingsInfoRow("Ultima utilizacao", cert.last_used_at ? formatIsoDateTime(cert.last_used_at) : "-")}
+                ${settingsInfoRow("Ultima validacao", cert.last_validated_at ? formatIsoDateTime(cert.last_validated_at) : "-")}
+            </div>
+        </section>
+        <section class="settings-side-section">
+            <div class="section-heading compact">
+                <p class="eyebrow">Empresa extraida</p>
+                <h4>${escapeHtml(cert.company?.legal_name || "Nao identificada")}</h4>
+                <p>Use o botao de atualizar cadastro para aplicar os dados disponiveis.</p>
+            </div>
+            <div class="settings-side-list">
+                ${settingsInfoRow("Razao social", cert.company?.legal_name || "-")}
+                ${settingsInfoRow("Nome fantasia", cert.company?.trade_name || "-")}
+                ${settingsInfoRow("CNPJ", cert.company?.cnpj || "-")}
+                ${settingsInfoRow("Inscricao estadual", cert.company?.state_registration || "-")}
+                ${settingsInfoRow("Inscricao municipal", cert.company?.municipal_registration || "-")}
+                ${settingsInfoRow("Logradouro", cert.address?.street || "-")}
+                ${settingsInfoRow("Cidade", cert.address?.city || "-")}
+                ${settingsInfoRow("UF", cert.address?.state || "-")}
+                ${settingsInfoRow("CEP", cert.address?.zip_code || "-")}
+                ${settingsInfoRow("Codigo IBGE", cert.address?.city_code || "-")}
+            </div>
+        </section>
+    `;
+    window.SysPragasUI?.enhanceAllForms(document.getElementById("digital-certificate-root"));
+}
+
 async function ensureOrchestratorPanelData(force = false) {
     if (!hasPermission("orchestrator.view")) {
         return;
@@ -3265,6 +3436,100 @@ function formatIsoDateTime(value) {
     return date.toLocaleString("pt-BR");
 }
 
+function formatDigitalCertificateStatus(status) {
+    const labels = {
+        valid: "Valido",
+        invalid: "Invalido",
+        warning: "Com alertas",
+        not_configured: "Nao configurado",
+    };
+    return labels[status] || status || "Nao configurado";
+}
+
+function getDigitalCertificateUploadFormData(form) {
+    if (!(form instanceof HTMLFormElement)) {
+        throw new Error("Formulario do certificado digital nao encontrado.");
+    }
+    const fileInput = form.querySelector('[name="certificate_file"]');
+    const passwordInput = form.querySelector('[name="certificate_password"]');
+    const applyInput = form.querySelector('[name="apply_company_data"]');
+    const file = fileInput?.files?.[0];
+    const password = passwordInput?.value || "";
+    if (!file) {
+        throw new Error("Selecione o arquivo .pfx ou .p12 do certificado.");
+    }
+    if (!password) {
+        throw new Error("Informe a senha do certificado.");
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("password", password);
+    formData.append("apply_company_data", applyInput?.checked ? "true" : "false");
+    return formData;
+}
+
+async function refreshSettingsState() {
+    state.settings = await apiFetch("/api/v1/settings");
+    renderSettings();
+    renderDigitalCertificateSettings();
+}
+
+async function validateDigitalCertificateUpload(form) {
+    const formData = getDigitalCertificateUploadFormData(form);
+    const result = await apiFetch("/api/v1/settings/digital-certificate/validate", {
+        method: "POST",
+        body: formData,
+    });
+    state.settings = {
+        ...(state.settings || {}),
+        digital_certificate: result.certificate,
+    };
+    renderDigitalCertificateSettings();
+    toast(result.message || "Certificado validado.");
+}
+
+async function saveDigitalCertificate(form) {
+    const formData = getDigitalCertificateUploadFormData(form);
+    const result = await apiFetch("/api/v1/settings/digital-certificate", {
+        method: "POST",
+        body: formData,
+    });
+    await refreshSettingsState();
+    switchView("certificado-digital");
+    toast(result.status === "valid" ? "Certificado digital salvo com sucesso." : "Certificado salvo com alertas.");
+}
+
+async function testStoredDigitalCertificate() {
+    const result = await apiFetch("/api/v1/settings/digital-certificate/test", {
+        method: "POST",
+    });
+    await refreshSettingsState();
+    switchView("certificado-digital");
+    toast(result.message || "Teste do certificado concluido.");
+}
+
+async function applyDigitalCertificateCompanyData() {
+    await apiFetch("/api/v1/settings/digital-certificate/apply-company", {
+        method: "POST",
+    });
+    await refreshSettingsState();
+    switchView("certificado-digital");
+    toast("Dados disponiveis no certificado aplicados ao cadastro da empresa.");
+}
+
+async function removeDigitalCertificate() {
+    const confirmed = window.confirm("Remover o certificado digital central desta empresa?");
+    if (!confirmed) {
+        return;
+    }
+    await apiFetch("/api/v1/settings/digital-certificate", {
+        method: "DELETE",
+    });
+    await refreshSettingsState();
+    switchView("certificado-digital");
+    toast("Certificado digital removido.");
+}
+
 async function uploadTechnicalAsset(kind, file) {
     if (!file) {
         return;
@@ -3474,6 +3739,7 @@ function renderAll() {
     renderAppointments();
     renderFinance();
     renderSettings();
+    renderDigitalCertificateSettings();
     renderProviderCompanies();
     renderUsers();
     renderLicenses();

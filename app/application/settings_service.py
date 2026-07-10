@@ -239,6 +239,9 @@ def update_system_settings(db: Session, payload: SystemSettingsUpdate, current_u
 
 
 def get_system_settings(db: Session, current_user: Optional[User] = None) -> SystemSettingsRead:
+    from app.application.digital_certificate_service import get_digital_certificate
+    from app.application.schemas import DigitalCertificateInfoRead
+
     settings = get_settings()
     ensure_system_settings_seed(db)
     company_settings = _read_company_technical_data(db, current_user)
@@ -309,6 +312,7 @@ def get_system_settings(db: Session, current_user: Optional[User] = None) -> Sys
             allow_remote_access=settings.allow_remote_access,
         ),
         company=company_settings,
+        digital_certificate=get_digital_certificate(db, current_user) if current_user else DigitalCertificateInfoRead(),
     )
 
 

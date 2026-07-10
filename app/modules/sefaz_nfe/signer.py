@@ -4,6 +4,7 @@ from pathlib import Path
 
 from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
+from app.infrastructure.db import get_session_local
 
 
 def _require_signxml():
@@ -17,6 +18,10 @@ def _require_signxml():
 
 
 def _load_certificate_material():
+    central_material = _load_central_certificate_material()
+    if central_material:
+        return central_material
+
     settings = get_settings()
     cert_path = Path(settings.sefaz_nfe_certificate_path or "")
     cert_password = settings.sefaz_nfe_certificate_password
@@ -51,6 +56,16 @@ def _load_certificate_material():
     )
     cert_pem = certificate.public_bytes(serialization.Encoding.PEM)
     return key_pem, cert_pem
+
+
+def _load_central_certificate_material():
+    session = get_session_local()()
+    try:
+        from app.application.digital_certificate_service import load_central_certificate_material
+
+        return load_central_certificate_material(session)
+    finally:
+        session.close()
 
 
 def load_certificate_transport_material() -> tuple[bytes, bytes]:

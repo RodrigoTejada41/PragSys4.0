@@ -1114,6 +1114,82 @@ def _migration_20260709_002_central_orchestrator(engine: Engine) -> None:
     _create_index_if_missing(engine, "service_command_audit", "ix_service_command_audit_service_id", ["service_id"])
 
 
+def _migration_20260710_001_digital_certificate(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS certificados_digitais (
+                    id INTEGER PRIMARY KEY,
+                    empresa_prestadora_id INTEGER NOT NULL,
+                    filename VARCHAR(255) NOT NULL,
+                    content_type VARCHAR(120) NOT NULL DEFAULT 'application/x-pkcs12',
+                    encrypted_file_data BLOB NOT NULL,
+                    encrypted_password TEXT NOT NULL,
+                    file_sha256 VARCHAR(64) NOT NULL,
+                    certificate_type VARCHAR(20) NOT NULL DEFAULT 'A1',
+                    serial_number VARCHAR(120),
+                    thumbprint VARCHAR(120),
+                    subject TEXT,
+                    issuer TEXT,
+                    authority VARCHAR(255),
+                    signature_algorithm VARCHAR(120),
+                    valid_from DATETIME,
+                    valid_to DATETIME,
+                    company_info_json TEXT,
+                    address_info_json TEXT,
+                    chain_status VARCHAR(40),
+                    status VARCHAR(30) NOT NULL DEFAULT 'valid',
+                    last_validation_status VARCHAR(30),
+                    last_validation_error TEXT,
+                    last_validated_at DATETIME,
+                    last_used_at DATETIME,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_by_user_id INTEGER,
+                    CONSTRAINT uq_certificados_digitais_empresa UNIQUE (empresa_prestadora_id),
+                    FOREIGN KEY(empresa_prestadora_id) REFERENCES empresas_prestadoras (id),
+                    FOREIGN KEY(updated_by_user_id) REFERENCES users (id)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS certificado_digital_auditoria (
+                    id INTEGER PRIMARY KEY,
+                    certificate_id INTEGER,
+                    empresa_prestadora_id INTEGER,
+                    user_id INTEGER,
+                    action VARCHAR(40) NOT NULL,
+                    status VARCHAR(30) NOT NULL,
+                    detail TEXT,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(certificate_id) REFERENCES certificados_digitais (id),
+                    FOREIGN KEY(empresa_prestadora_id) REFERENCES empresas_prestadoras (id),
+                    FOREIGN KEY(user_id) REFERENCES users (id)
+                )
+                """
+            )
+        )
+    _create_index_if_missing(engine, "certificados_digitais", "ix_certificados_digitais_empresa_prestadora_id", ["empresa_prestadora_id"])
+    _create_index_if_missing(engine, "certificados_digitais", "ix_certificados_digitais_valid_to", ["valid_to"])
+    _create_index_if_missing(engine, "certificados_digitais", "ix_certificados_digitais_thumbprint", ["thumbprint"])
+    _create_index_if_missing(
+        engine,
+        "certificado_digital_auditoria",
+        "ix_certificado_digital_auditoria_empresa_data",
+        ["empresa_prestadora_id", "created_at"],
+    )
+    _create_index_if_missing(
+        engine,
+        "certificado_digital_auditoria",
+        "ix_certificado_digital_auditoria_certificate_id",
+        ["certificate_id"],
+    )
+
+
 MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260321_001_legacy_backfill", _migration_20260321_001_legacy_backfill),
     ("20260325_001_multitenancy_foundation", _migration_20260325_001_multitenancy_foundation),
@@ -1132,6 +1208,7 @@ MIGRATIONS: list[tuple[str, MigrationFn]] = [
     ("20260327_007_stock_traceability", _migration_20260327_007_stock_traceability),
     ("20260709_001_nfe_danfe_metadata", _migration_20260709_001_nfe_danfe_metadata),
     ("20260709_002_central_orchestrator", _migration_20260709_002_central_orchestrator),
+    ("20260710_001_digital_certificate", _migration_20260710_001_digital_certificate),
 ]
 
 

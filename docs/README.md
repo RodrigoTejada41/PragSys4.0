@@ -14,6 +14,7 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - `organograma-corporativo-agentes.md`: governanca corporativa dos agentes Codex, departamentos, revisores e Quality Gate.
 - `decisions/2026-07-09-central-api-orchestrator.md`: decisao proposta para API Central Orchestrator / Service Manager.
 - `central-api-orchestrator.md`: endpoints, permissoes, tabelas e limites do MVP da API Central.
+- `certificado-digital.md`: modulo central de certificado A1, API, seguranca, auditoria e integracao fiscal.
 - `api-reference.md`: contratos principais da API REST, autenticacao e convencoes.
 - `code-standards.md`: padroes de clean code, organizacao de codigo, testes e refatoracao.
 - `delivery-process.md`: versionamento, fluxo de PR e operacao em Agile/Scrum.
@@ -47,6 +48,7 @@ Este diretorio concentra a documentacao estruturada do projeto para apoiar manut
 - consulte `organograma-corporativo-agentes.md` e `../AGENTS.md` para regras de atuacao dos agentes;
 - consulte `../specs/central-api-orchestrator/` antes de implementar API Central, service discovery, health check ou gerenciamento de servicos;
 - consulte `central-api-orchestrator.md` antes de operar ou evoluir o MVP da API Central;
+- consulte `certificado-digital.md` antes de alterar certificado A1, assinatura XML, SEFAZ ou emissao fiscal;
 - consulte `api-reference.md` antes de mudar contratos HTTP;
 - consulte `installation-local.md` e `installation-network.md` antes de subir ambientes;
 - consulte `multitenancy-architecture.md` antes de tocar em isolamento por empresa;

@@ -64,6 +64,11 @@ class ProviderCompany(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    certificado_digital: Mapped[Optional["DigitalCertificate"]] = relationship(
+        back_populates="empresa_prestadora",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 class User(Base):
@@ -998,6 +1003,67 @@ class CompanyTechnicalData(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
 
     empresa_prestadora: Mapped["ProviderCompany"] = relationship(back_populates="dados_tecnicos")
+
+
+class DigitalCertificate(Base):
+    __tablename__ = "certificados_digitais"
+    __table_args__ = (
+        UniqueConstraint("empresa_prestadora_id", name="uq_certificados_digitais_empresa"),
+        Index("ix_certificados_digitais_empresa_prestadora_id", "empresa_prestadora_id"),
+        Index("ix_certificados_digitais_valid_to", "valid_to"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    empresa_prestadora_id: Mapped[int] = mapped_column(ForeignKey("empresas_prestadoras.id"), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False, default="application/x-pkcs12")
+    encrypted_file_data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    encrypted_password: Mapped[str] = mapped_column(Text, nullable=False)
+    file_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    certificate_type: Mapped[str] = mapped_column(String(20), nullable=False, default="A1")
+    serial_number: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    thumbprint: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    subject: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    issuer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    authority: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    signature_algorithm: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    valid_from: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    valid_to: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    company_info_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    address_info_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    chain_status: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="valid", index=True)
+    last_validation_status: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    last_validation_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_validated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
+    updated_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+
+    empresa_prestadora: Mapped["ProviderCompany"] = relationship(back_populates="certificado_digital")
+    updated_by: Mapped[Optional["User"]] = relationship()
+
+
+class DigitalCertificateAudit(Base):
+    __tablename__ = "certificado_digital_auditoria"
+    __table_args__ = (
+        Index("ix_certificado_digital_auditoria_empresa_data", "empresa_prestadora_id", "created_at"),
+        Index("ix_certificado_digital_auditoria_certificate_id", "certificate_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    certificate_id: Mapped[Optional[int]] = mapped_column(ForeignKey("certificados_digitais.id"), nullable=True)
+    empresa_prestadora_id: Mapped[Optional[int]] = mapped_column(ForeignKey("empresas_prestadoras.id"), nullable=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now, index=True)
+
+    certificate: Mapped[Optional["DigitalCertificate"]] = relationship()
+    empresa_prestadora: Mapped[Optional["ProviderCompany"]] = relationship()
+    user: Mapped[Optional["User"]] = relationship()
 
 
 class BackgroundJobRun(Base):

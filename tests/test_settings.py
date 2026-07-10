@@ -1,6 +1,15 @@
 from io import BytesIO
+from datetime import datetime, timedelta, timezone
 
 from reportlab.pdfgen import canvas
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.serialization import pkcs12
+from cryptography.x509.oid import NameOID, ObjectIdentifier
+
+
+ICP_BRASIL_CNPJ_OID = ObjectIdentifier("2.16.76.1.3.3")
 
 
 def _create_company_user(client, auth_headers, username: str, company_suffix: str) -> dict:
@@ -54,6 +63,39 @@ def _build_regulatory_pdf(*lines: str) -> bytes:
     return buffer.getvalue()
 
 
+def _build_test_pfx(password: str = "senha-pfx") -> bytes:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name(
+        [
+            x509.NameAttribute(NameOID.COMMON_NAME, "EMPRESA CERTIFICADA LTDA:12345678000190"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "EMPRESA CERTIFICADA LTDA"),
+            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, "SysPragas Cert"),
+            x509.NameAttribute(ICP_BRASIL_CNPJ_OID, "12345678000190"),
+            x509.NameAttribute(NameOID.STREET_ADDRESS, "Rua do Certificado, 100"),
+            x509.NameAttribute(NameOID.LOCALITY_NAME, "Sao Paulo"),
+            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "SP"),
+            x509.NameAttribute(NameOID.POSTAL_CODE, "01001000"),
+        ]
+    )
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1))
+        .not_valid_after(datetime.now(timezone.utc) + timedelta(days=90))
+        .sign(private_key, hashes.SHA256())
+    )
+    return pkcs12.serialize_key_and_certificates(
+        name=b"syspragas-test",
+        key=private_key,
+        cert=certificate,
+        cas=None,
+        encryption_algorithm=serialization.BestAvailableEncryption(password.encode("utf-8")),
+    )
+
+
 def test_admin_can_read_and_update_system_settings(client, auth_headers):
     response = client.get("/api/v1/settings", headers=auth_headers)
 
@@ -65,6 +107,7 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert "email" in payload
     assert "database" in payload
     assert "company" in payload
+    assert payload["digital_certificate"]["configured"] is False
     assert payload["system"]["operation_mode"] in {"local", "rede"}
 
     update_response = client.put(
@@ -175,6 +218,79 @@ def test_admin_can_read_and_update_system_settings(client, auth_headers):
     assert updated["system"]["operation_mode"] == "rede"
     assert updated["system"]["notifications_enabled"] is False
     assert updated["system"]["appointment_default_google_sync"] is True
+
+
+def test_admin_can_manage_digital_certificate_securely(client, auth_headers):
+    pfx_bytes = _build_test_pfx()
+
+    validation_response = client.post(
+        "/api/v1/settings/digital-certificate/validate",
+        headers=auth_headers,
+        files={"file": ("empresa.pfx", pfx_bytes, "application/x-pkcs12")},
+        data={"password": "senha-pfx"},
+    )
+    assert validation_response.status_code == 200
+    validation_payload = validation_response.json()
+    assert validation_payload["valid"] is True
+    assert validation_payload["certificate"]["company"]["legal_name"] == "EMPRESA CERTIFICADA LTDA"
+    assert validation_payload["certificate"]["company"]["cnpj"] == "12345678000190"
+
+    save_response = client.post(
+        "/api/v1/settings/digital-certificate",
+        headers=auth_headers,
+        files={"file": ("empresa.pfx", pfx_bytes, "application/x-pkcs12")},
+        data={"password": "senha-pfx", "apply_company_data": "true"},
+    )
+    assert save_response.status_code == 200
+    saved = save_response.json()
+    assert saved["configured"] is True
+    assert saved["status"] == "valid"
+    assert saved["filename"] == "empresa.pfx"
+    assert saved["thumbprint"]
+    assert "senha-pfx" not in str(saved)
+
+    settings_response = client.get("/api/v1/settings", headers=auth_headers)
+    assert settings_response.status_code == 200
+    settings_payload = settings_response.json()
+    assert settings_payload["digital_certificate"]["configured"] is True
+    assert settings_payload["company"]["legal_name"] == "EMPRESA CERTIFICADA LTDA"
+    assert settings_payload["company"]["cnpj"] == "12345678000190"
+
+    test_response = client.post("/api/v1/settings/digital-certificate/test", headers=auth_headers)
+    assert test_response.status_code == 200
+    assert test_response.json()["valid"] is True
+
+    from app.infrastructure.db import get_session_local
+    from app.infrastructure.models import DigitalCertificate, DigitalCertificateAudit
+
+    session = get_session_local()()
+    try:
+        record = session.query(DigitalCertificate).first()
+        assert record is not None
+        assert record.encrypted_file_data != pfx_bytes
+        assert "senha-pfx" not in record.encrypted_password
+        audits = session.query(DigitalCertificateAudit).order_by(DigitalCertificateAudit.id).all()
+        assert [audit.action for audit in audits] == ["created", "company_applied", "tested"]
+    finally:
+        session.close()
+
+    delete_response = client.delete("/api/v1/settings/digital-certificate", headers=auth_headers)
+    assert delete_response.status_code == 200
+    assert delete_response.json()["configured"] is False
+
+
+def test_digital_certificate_rejects_invalid_password(client, auth_headers):
+    pfx_bytes = _build_test_pfx()
+
+    response = client.post(
+        "/api/v1/settings/digital-certificate/validate",
+        headers=auth_headers,
+        files={"file": ("empresa.p12", pfx_bytes, "application/x-pkcs12")},
+        data={"password": "senha-incorreta"},
+    )
+
+    assert response.status_code == 400
+    assert "arquivo e senha" in response.json()["detail"]
 
 
 def test_admin_can_upload_company_technical_assets(client, auth_headers):

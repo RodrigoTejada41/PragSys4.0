@@ -629,6 +629,34 @@
         </div>
     </section>
 
+    <section class="view" id="view-certificado-digital">
+        <div class="settings-module-shell admin-only hidden" id="digital-certificate-root">
+            <section class="panel panel-accent">
+                <div class="card-body">
+                    <div class="section-heading compact">
+                        <p class="eyebrow">Configuracoes</p>
+                        <h3>Certificado Digital</h3>
+                        <p>Cadastro central do certificado A1 usado por NF-e, NFC-e, assinatura XML e comunicacao com a SEFAZ.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="settings-layout">
+                <section class="panel settings-primary-panel">
+                    <div class="card-body">
+                        <div id="digital-certificate-panel"></div>
+                    </div>
+                </section>
+
+                <section class="panel settings-secondary-panel">
+                    <div class="card-body">
+                        <div id="digital-certificate-details"></div>
+                    </div>
+                </section>
+            </section>
+        </div>
+    </section>
+
     {{ crud_view("empresas", "Cadastrar empresa", "Cadastre a empresa prestadora e vincule os usuarios dela em uma unica tela.", "provider-company-form", "Empresas prestadoras", "Controle as prestadoras cadastradas e seus usuarios vinculados.", "provider-companies-table") }}
 
     {{ crud_view("usuarios", "Novo usuario", "Gestao exclusiva do perfil MASTER com controle de acesso.", "user-form", "Usuarios do sistema", "Controle de perfis, status e acesso administrativo.", "users-table") }}

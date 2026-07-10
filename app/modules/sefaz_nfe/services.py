@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.exceptions import BusinessRuleViolation
 from app.domain.enums import NfeProcessingStatus, NfeStatus
 from app.infrastructure.models import NfeInvoice, Product
+from app.infrastructure.db import get_session_local
 from app.modules.sefaz_nfe.sefaz_client import SefazResponse, SefazSoapClient
 from app.modules.sefaz_nfe.signer import sign_xml_document
 from app.modules.sefaz_nfe.xml_generator import build_nfe_xml, validate_xml_against_xsd
@@ -70,6 +71,7 @@ def _company_cuf() -> str:
 
 def get_direct_sefaz_readiness() -> SefazDirectReadinessRead:
     settings = get_settings()
+    central_certificate_configured = _has_central_certificate()
     current_environment = str(settings.focus_nfe_environment or "homologacao").strip().lower()
     xsd_required = current_environment != "homologacao"
     required_items = [
@@ -96,8 +98,8 @@ def get_direct_sefaz_readiness() -> SefazDirectReadinessRead:
 
     env_checks = {
         "SEFAZ_NFE_UF": settings.sefaz_nfe_uf or settings.company_state,
-        "SEFAZ_NFE_CERTIFICATE_PATH": settings.sefaz_nfe_certificate_path,
-        "SEFAZ_NFE_CERTIFICATE_PASSWORD": settings.sefaz_nfe_certificate_password,
+        "SEFAZ_NFE_CERTIFICATE_PATH": settings.sefaz_nfe_certificate_path or ("central" if central_certificate_configured else None),
+        "SEFAZ_NFE_CERTIFICATE_PASSWORD": settings.sefaz_nfe_certificate_password or ("central" if central_certificate_configured else None),
         "COMPANY_CNPJ": settings.company_cnpj,
         "COMPANY_IE": settings.company_ie,
         "COMPANY_CRT": settings.company_crt,
@@ -118,7 +120,7 @@ def get_direct_sefaz_readiness() -> SefazDirectReadinessRead:
 
     cert_path = settings.sefaz_nfe_certificate_path or None
     xsd_dir = settings.sefaz_nfe_xsd_dir or None
-    if cert_path and not Path(cert_path).exists():
+    if cert_path and cert_path != "central" and not Path(cert_path).exists():
         missing_items.append("Arquivo do certificado A1 nao encontrado")
     if xsd_required and xsd_dir and not Path(xsd_dir).exists():
         missing_items.append("Diretorio de XSD nao encontrado")
@@ -129,7 +131,9 @@ def get_direct_sefaz_readiness() -> SefazDirectReadinessRead:
     else:
         notes.append("O provider sefaz_direct esta ativo para a rota /api/v1/nfe.")
 
-    if cert_path:
+    if central_certificate_configured:
+        notes.append("Certificado digital central configurado em Configuracoes > Certificado Digital.")
+    elif cert_path:
         notes.append("A emissao real depende de um certificado A1 .pfx valido e compativel com o CNPJ transmissor.")
     if xsd_required and xsd_dir:
         notes.append("Os schemas oficiais precisam corresponder ao layout NF-e 4.00 em uso na UF.")
@@ -149,6 +153,16 @@ def get_direct_sefaz_readiness() -> SefazDirectReadinessRead:
         missing_items=missing_items,
         notes=notes,
     )
+
+
+def _has_central_certificate() -> bool:
+    session = get_session_local()()
+    try:
+        from app.application.digital_certificate_service import has_central_digital_certificate
+
+        return has_central_digital_certificate(session)
+    finally:
+        session.close()
 
 
 def _build_items_payload(db: Session, payload: NfeInvoiceCreate) -> list[dict[str, Any]]:
